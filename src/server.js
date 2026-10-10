@@ -10,6 +10,7 @@ import { normalizeUrl } from './normalize.js';
 import { runAudit, loadConfig, RULES, CATEGORIES } from './rules/index.js';
 import { isBroken } from './rules/helpers.js';
 import os from 'node:os';
+import { makeGuard } from './netguard.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PORT = +(process.env.PORT || 3300);
@@ -17,6 +18,19 @@ const HOST = process.env.HOST || '127.0.0.1';
 const MAX_JOBS = +(process.env.MAX_JOBS || 2);
 const APP_USER = process.env.APP_USER;
 const APP_PASS = process.env.APP_PASS;
+
+// PUBLIC_MODE=1: the server is open to the internet (Render). Password is required,
+// private addresses are blocked and limits from config/rules.json → yayin apply.
+const PUBLIC_MODE = process.env.PUBLIC_MODE === '1';
+const EPHEMERAL = process.env.EPHEMERAL_STORAGE === '1';
+const YAYIN = loadConfig().yayin;
+if (PUBLIC_MODE && (!APP_USER || !APP_PASS || APP_PASS.length < YAYIN.minPassLength)) {
+  console.error(`HATA: PUBLIC_MODE=1 iken APP_USER ve en az ${YAYIN.minPassLength} karakterli APP_PASS gerekli. Sunucu başlamadı.`);
+  process.exit(1);
+}
+const JOB_LIMIT = PUBLIC_MODE ? YAYIN.maxJobs : MAX_JOBS;
+const URL_LIMIT = PUBLIC_MODE ? YAYIN.maxUrls : 50000;
+const startGuard = PUBLIC_MODE ? makeGuard() : null;
 
 const store = new Store(process.env.CRAWL_DIR || path.join(ROOT, 'crawls'));
 await store.init();
@@ -70,8 +84,9 @@ async function getAudit(id, result) {
 async function startJob(body) {
   const url = normalizeUrl(String(body.url || '').trim());
   if (!url) throw Object.assign(new Error('Geçerli bir adres yazın. Örnek: https://www.ornek.com'), { code: 400 });
+  if (startGuard && await startGuard(url)) throw Object.assign(new Error('Bu adres bir iç ağ adresi. Yayındaki sunucu iç ağ adreslerini taramaz.'), { code: 400 });
   const running = [...jobs.values()].filter((j) => j.status === 'running').length;
-  if (running >= MAX_JOBS) throw Object.assign(new Error(`Aynı anda en fazla ${MAX_JOBS} tarama çalışır. Bir taramanın bitmesini bekleyin.`), { code: 429 });
+  if (running >= JOB_LIMIT) throw Object.assign(new Error(`Aynı anda en fazla ${JOB_LIMIT} tarama çalışır. Bir taramanın bitmesini bekleyin.`), { code: 429 });
 
   const label = String(body.label || '').replace(/[^\w-]/g, '').slice(0, 20);
   const host = new URL(url).hostname;
@@ -98,7 +113,8 @@ async function startJob(body) {
   }, 300);
 
   crawl(url, {
-    maxUrls: num(o.maxUrls, 5000, 1, 50000),
+    maxUrls: num(o.maxUrls, Math.min(5000, URL_LIMIT), 1, URL_LIMIT),
+    blockPrivate: PUBLIC_MODE,
     maxDepth: num(o.maxDepth, 50, 0, 100),
     concurrency: num(o.concurrency, 5, 1, 20),
     delayMs: num(o.delayMs, 0, 0, 10000),
@@ -147,6 +163,8 @@ function slimPages(pages) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Health check for the hosting service. No password, no data.
+    if (req.url === '/healthz') return send(res, 200, 'ok', 'text/plain; charset=utf-8');
     if (APP_USER && APP_PASS) {
       const expected = 'Basic ' + Buffer.from(`${APP_USER}:${APP_PASS}`).toString('base64');
       if (req.headers.authorization !== expected) {
@@ -163,6 +181,11 @@ const server = http.createServer(async (req, res) => {
       if (!MIME[ext]) return send(res, 404, 'Bulunamadı', 'text/plain');
       try { return send(res, 200, await readFile(path.join(ROOT, 'public', name)), MIME[ext]); }
       catch { return send(res, 404, 'Bulunamadı', 'text/plain'); }
+    }
+
+    // /api/info: server mode for the interface
+    if (parts[1] === 'info' && req.method === 'GET') {
+      return send(res, 200, { publicMode: PUBLIC_MODE, ephemeral: EPHEMERAL, maxUrls: URL_LIMIT, maxJobs: JOB_LIMIT });
     }
 
     // /api/rules: rule counts per category for the start page

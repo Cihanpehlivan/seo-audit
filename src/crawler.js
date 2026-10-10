@@ -4,6 +4,7 @@ import { normalizeUrl, isInternal, looksLikeAsset } from './normalize.js';
 import { parsePage } from './parser.js';
 import { readSitemaps } from './sitemap.js';
 import { runChecks } from './checks.js';
+import { makeGuard } from './netguard.js';
 import { loadConfig } from './rules/index.js';
 import { readFileSync } from 'node:fs';
 
@@ -25,6 +26,7 @@ const DEFAULTS = {
   signal: null,          // AbortSignal to stop the crawl
   checks: false,         // true or { site, external, images, variants }: extra checks after the crawl
   onChecks: null,        // progress of the extra checks: { done, total }
+  blockPrivate: false,   // public server: never request private or internal addresses (SSRF guard)
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -47,7 +49,13 @@ export async function crawl(startUrl, opts = {}) {
   const headers = { 'user-agent': o.userAgent, accept: 'text/html,application/xhtml+xml,*/*;q=0.8' };
   if (o.auth) headers.authorization = 'Basic ' + Buffer.from(o.auth).toString('base64');
 
+  const guard = o.blockPrivate ? makeGuard() : null;
+
   async function request(url) {
+    if (guard) {
+      const why = await guard(url);
+      if (why) throw Object.assign(new Error(why), { cause: { code: why } });
+    }
     const t0 = Date.now();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), o.timeoutMs);
@@ -228,7 +236,7 @@ export async function crawl(startUrl, opts = {}) {
     const want = o.checks === true ? {} : o.checks;
     const enabled = { site: want.site !== false, external: want.external !== false, images: want.images !== false };
     checks = await runChecks({
-      start, root, pages: list, fetchWithChain, headers, enabled, variants: want.variants,
+      start, root, pages: list, fetchWithChain, headers, enabled, variants: want.variants, guard,
       cfg: { ...loadConfig().checks, ...(want.limits || {}) }, signal: o.signal, onProgress: o.onChecks,
     });
   }

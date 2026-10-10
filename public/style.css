@@ -121,6 +121,7 @@ a { color: inherit; }
 .current { color: var(--graphite); font-size: 13px; margin: 0; max-width: 80ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta { color: var(--graphite); margin: 0; font-size: 14px; }
 .actions { display: flex; gap: 8px; }
+.envnote { margin: 0 0 28px; padding: 10px 14px; border: 1px solid #5C4A26; background: var(--amber-soft); color: #F2D29A; border-radius: 6px; font-size: 14px; max-width: 980px; }
 .warn { background: var(--amber-soft); border: 1px solid #5C4A26; color: #F2D29A; padding: 10px 14px; border-radius: 6px; font-size: 14px; }
 
 .tally { display: flex; flex-wrap: wrap; gap: 8px 40px; margin-bottom: 18px; }

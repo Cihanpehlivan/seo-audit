@@ -27,6 +27,12 @@
     "maxExternalLinks": 1000,
     "maxImages": 2000
   },
+  "yayin": {
+    "_aciklama": "PUBLIC_MODE=1 iken (internete açık sunucu) geçerli limitler.",
+    "maxUrls": 2000,
+    "maxJobs": 1,
+    "minPassLength": 10
+  },
   "brokenIgnoreStatuses": [401, 403, 429, 999],
   "genericAnchors": ["tıklayın", "buraya tıklayın", "tıkla", "buraya", "devamı", "devamını oku", "daha fazla", "detay", "detaylar", "incele", "link", "click here", "here", "read more", "more", "learn more"],
   "stagingHosts": ["staging", "stage", "stg", "dev", "test", "preprod", "uat", "demo", "beta"],

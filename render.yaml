@@ -1,0 +1,18 @@
+# Render Blueprint. Render → New → Blueprint → bu depoyu seçin.
+# Ücretsiz plan: 15 dakika boşta kalınca uyur, taramalar silinir. Excel'i hemen indirin.
+services:
+  - type: web
+    name: seo-audit
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /healthz
+    envVars:
+      - key: PUBLIC_MODE
+        value: "1"
+      - key: EPHEMERAL_STORAGE
+        value: "1"
+      - key: APP_USER
+        sync: false
+      - key: APP_PASS
+        sync: false

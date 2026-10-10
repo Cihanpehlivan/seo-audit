@@ -1,4 +1,4 @@
-# SEO Audit — v0.4.3
+# SEO Audit — v0.5.0
 
 Teknik SEO denetim aracı. Kişisel proje. Bir siteyi tarar. Sonuçları web arayüzünde, JSON'da ve Excel'de gösterir.
 
@@ -55,6 +55,26 @@ Ortam değişkenleri:
 | `CRAWL_DIR` | Kayıt klasörü | ./crawls |
 
 Not: Bu tool sunucu tarafında tarama yapar. Tarayıcı içinde tek başına çalışamaz, çünkü tarayıcılar başka sitelerin içeriğini okumayı engeller (CORS).
+
+## Yayın (Render, ücretsiz plan)
+
+Render kodu GitHub deposundan alır. Her commit sonrası yeni sürümü kendisi yayınlar. Ayarlar depodaki `render.yaml` dosyasındadır.
+
+1. render.com adresinde GitHub hesabınızla giriş yapın.
+2. New → Blueprint seçin. `seo-audit` deposunu seçin.
+3. Render iki değer ister: `APP_USER` ve `APP_PASS`. Şifre en az 10 karakter olmalı. Şifre yoksa veya kısaysa sunucu başlamaz.
+4. Apply düğmesine basın. Birkaç dakika sonra adres hazır olur: `https://seo-audit-xxxx.onrender.com`.
+
+Yayın modu (`PUBLIC_MODE=1`) şunları yapar:
+
+- İç ağ adreslerini taramaz: `localhost`, `10.x`, `172.16-31.x`, `192.168.x`, `169.254.x` (bulut ayar servisi) ve IPv6 iç adresleri. Buna SSRF koruması denir. Yönlendirmenin her adımı da kontrol edilir.
+- Giriş şifresi zorunludur. `/healthz` adresi şifresizdir ve sadece "ok" döner.
+- Limitler: bir taramada en fazla 2.000 URL, aynı anda 1 tarama. Değerler `config/rules.json` → `yayin` bölümündedir.
+
+Ücretsiz planın sınırları:
+
+- 15 dakika istek gelmezse sunucu uyur. İlk istek birkaç saniye bekler.
+- Sunucu uyuyunca veya yeniden başlayınca taramalar silinir. Tarama bitince Excel'i hemen indirin. Arayüz bunu bir uyarı ile gösterir.
 
 ## Komut satırı (CLI)
 
@@ -155,10 +175,12 @@ Skor = kritik sorunu olmayan URL oranı (robots ile engelli URL'ler hariç). Sit
 
 ## Testler
 
-`npm test` iki test çalıştırır:
+`npm test` üç test çalıştırır:
 
 1. Crawler testi (19 kontrol).
 2. Kural testi (99 kontrol): `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. SSL ve HSTS kuralları `test/fixture-https.js` (self-signed sertifika, 2046'ya kadar geçerli) ile test edilir. Testler internete çıkmaz: dış linkler `.invalid` alan adı kullanır. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü).
+
+3. Yayın modu testi (12 kontrol): iç ağ adresleri, tarayıcının iç adrese hiç istek göndermemesi, şifre zorunluluğu, `/healthz` ve limitler.
 
 Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 
@@ -166,13 +188,15 @@ Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 
 - JavaScript ile oluşan içerik görünmez. SPA siteler için render modu sonraki fazlarda gelir.
 - `srcset` ve CSS arka plan görselleri kontrol edilmez. Sadece `<img src>` kontrol edilir.
+- SSRF koruması adresi istekten önce DNS ile kontrol eder. DNS cevabı istek anında değişirse (DNS rebinding) koruma bunu yakalamaz. Şifre zorunluluğu bu riski azaltır.
 
 ## Yol haritası
 
 1. **Faz 1 — Crawl + web arayüzü** ✅
 2. **Sprint 1 — Kural motoru (77 kural), Sorunlar sekmesi, sağlık skoru, başlık ağacı** ✅
 3. **Sprint 2 — Ek kontroller: dış link, görsel, site sürümleri, HSTS, SSL, sıkıştırma, llms.txt (11 kural)** ✅
-4. Sprint 3 — Migration: eski/yeni karşılaştırma, 301 haritası, launch kontrolü
+4. **v0.5 — Yayın hazırlığı: Render, SSRF koruması, yayın modu** ✅
+5. Sprint 3 — Migration: eski/yeni karşılaştırma, 301 haritası, launch kontrolü
 5. Sprint 4 — AI: title/description, alt text, başlık önerisi, schema, yazım, 301 eşleştirme
 6. Sprint 5 — Entegrasyon: PageSpeed (CWV), Search Console, ClickUp
 7. Sprint 6 — JS render (Playwright)

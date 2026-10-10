@@ -20,6 +20,7 @@ Kullanıcı: proje sahibi (Cihan). Sorunlar iş alanına göre gruplanır (Front
 ```
 bin/crawl.js            CLI
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
+src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
 src/checks.js           Ek kontroller (tarama sonrası): site sürümleri, SSL, HSTS, llms.txt, dış link, görsel
 src/parser.js           HTML → SEO alanları (başlık ağacı, JSON-LD, görseller, linkler, parmak izi)
 src/fingerprint.js      exactHash + 64-bit simhash (BigInt yok)
@@ -30,7 +31,8 @@ src/rules/helpers.js    isIndexable, titlePx, staging host tespiti, isBroken, TL
 src/rules/index.js      Denetim motoru, sağlık skoru
 src/export.js           Excel çıktısı
 src/store.js            Dosya tabanlı kayıt
-src/server.js           Web sunucusu + API (/api/crawls, /api/rules) + SSE canlı ilerleme
+src/server.js           Web sunucusu + API (/api/crawls, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur
+render.yaml             Render Blueprint (ücretsiz plan, Docker)
 public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page
 config/rules.json       Bütün eşikler, kural ayarları ve ek kontrol limitleri (checks)
 test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi)
@@ -56,6 +58,7 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Altyapı | CLAUDE.md, .env.example, GitHub deposu `seo-audit` (Public), Claude depoyu klonlar | Tamam (v0.4.3) |
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
+| Yayın | Render (ücretsiz), SSRF koruması, zorunlu şifre, yayın limitleri | Tamam (v0.5.0) |
 | Sprint 3 | Migration | Sırada |
 | Sprint 4 | AI özellikleri | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
@@ -88,6 +91,13 @@ Açık noktalar (Sprint 2'den):
 - Benzer içerik eşiği simhash mesafesi 5 (3, 300 kelimelik sayfalarda gerçek benzerleri kaçırdı). 5.000 rastgele sayfada yanlış alarm 0.
 - Sağlık skoru = kritik sayfa sorunu olmayan URL oranı. Site geneli kritik sorun varsa skor en fazla 40.
 - v0.4.3: Proje kişisel projedir. RNG İstanbul ile ilgisi yoktur. Ad "SEO Audit", paket ve depo adı `seo-audit`. User-Agent `SEO-Audit/<sürüm>`. Renkler (grafit + kırmızı) sadece tasarım tercihidir, bir marka kimliği değildir.
+- v0.5.0: Araç Render ücretsiz planında yayınlanır (render.yaml, Docker). GitHub Pages kullanılmaz: sadece statik sayfa yayınlar, tarama sunucu ister.
+- v0.5.0: Yayın modu PUBLIC_MODE=1 ile açılır. Yerel kullanım değişmez: test sitesi 127.0.0.1 üzerinde çalışmaya devam eder.
+- v0.5.0: Yayın modunda APP_USER ve en az 10 karakterli APP_PASS zorunludur. Yoksa sunucu başlamaz.
+- v0.5.0: SSRF koruması (src/netguard.js) her isteği ve yönlendirmenin her adımını kontrol eder: özel IPv4/IPv6 aralıkları, localhost, .internal, .local, http dışı protokoller. Ek kontrollerde yönlendirmeler artık elle izlenir. Engellenen kaynak "kırık" sayılmaz.
+- v0.5.0: Bilinen sınır: DNS rebinding tam kapalı değil (adres istekten önce kontrol edilir). Kapatmak için undici dispatcher ile bağlantı anında kontrol gerekir; yeni bağımlılık ister.
+- v0.5.0: Yayın limitleri rules.json → yayin: 2.000 URL, aynı anda 1 tarama. Ücretsiz plan 512 MB bellek verir.
+- v0.5.0: Ücretsiz planda disk kalıcı değildir. EPHEMERAL_STORAGE=1 arayüzde uyarı gösterir. Docker imajı root olmayan kullanıcı ile çalışır.
 - v0.4.3: Depo Public kalır, çünkü bir arkadaş ile paylaşılır. Claude kodu her sohbette depodan klonlar; Project ↔ GitHub senkronu gerekmez.
 - v0.4.2: Proje GitHub'a taşındı (private depo). Önceki karar "GitHub kullanma" idi; dosya alışverişi çok adım aldığı için değişti. Kodun tek kaynağı GitHub deposudur. KAYNAK_KOD.md depoya girmez.
 - Denetim, `rules.json` değişince eski taramalar açılırken otomatik tekrar çalışır (configHash).

@@ -356,7 +356,7 @@ function detailHtml(p) {
   const add = (k, v) => { if (v !== undefined && v !== null && v !== '') rows.push(`<dt>${k}</dt><dd>${v}</dd>`); };
   if (iss.length) add('Sorunlar', iss.map(({ r, detail }) => `<span class="pi ${r.severity}">${SEV[r.severity]}</span> ${esc(r.title)}${detail ? ` <span class="small">${esc(detail).replace(/\n/g, '<br>')}</span>` : ''}`).join('<br>'));
   if (p.redirectChain?.length) add('Redirect zinciri', p.redirectChain.map((c) => `${c.status} ${esc(c.url)}`).join('<br>') + `<br>${esc(p.finalStatus)} ${esc(p.finalUrl)}`);
-  add('Hata', esc(p.error));
+  add('Hata', p.error === 'blocked-private' ? 'İç ağ adresi. Yayındaki sunucu bu adresi taramaz.' : esc(p.error));
   add('Title', p.title !== undefined ? `${esc(p.title) || '<span class="flag">boş</span>'} <span class="small">(${(p.title || '').length} karakter${p.titleCount > 1 ? `, ${p.titleCount} adet` : ''})</span>` : '');
   add('Meta description', p.metaDescription !== undefined ? `${esc(p.metaDescription) || '<span class="flag">boş</span>'} <span class="small">(${(p.metaDescription || '').length} karakter)</span>` : '');
   add('H1', p.h1?.length ? p.h1.map(esc).join('<br>') : (p.h1 ? '<span class="flag">yok</span>' : ''));
@@ -449,6 +449,22 @@ async function loadRules() {
     $('#catList').innerHTML = r.categories.filter((c) => c.count).map((c) => `<li>${esc(c.name)}<b>${c.count}</b></li>`).join('');
   } catch { $('#catList').closest('.cats').hidden = true; }
 }
+
+// ---------- Server mode ----------
+// On the free plan the server sleeps and loses its files. Tell the user once, on every screen.
+async function loadInfo() {
+  try {
+    const info = await api('/api/info');
+    if (info.ephemeral) {
+      $('#envNote').textContent = 'Bu sunucu ücretsiz planda çalışır. 15 dakika boşta kalınca uyur ve taramalar silinir. Tarama bitince Excel\'i hemen indirin.';
+      $('#envNote').hidden = false;
+    }
+    const max = $('#form [name=maxUrls]');
+    max.max = info.maxUrls;
+    if (+max.value > info.maxUrls) max.value = info.maxUrls;
+  } catch {}
+}
+loadInfo();
 
 // ---------- Router ----------
 function route() {

@@ -51,7 +51,7 @@ async function pool(items, n, signal, fn) {
   await Promise.all(Array.from({ length: Math.max(1, Math.min(n, items.length)) }, worker));
 }
 
-export async function runChecks({ start, root, pages, fetchWithChain, headers, cfg, enabled, variants, signal, onProgress }) {
+export async function runChecks({ start, root, pages, fetchWithChain, headers, cfg, enabled, variants, guard, signal, onProgress }) {
   const t0 = Date.now();
   const out = { ran: { site: !!enabled.site, external: !!enabled.external, images: !!enabled.images }, site: null, resources: [], limited: { external: 0, images: 0 }, ms: 0 };
 
@@ -74,7 +74,7 @@ export async function runChecks({ start, root, pages, fetchWithChain, headers, c
     }));
 
     let cert = null;
-    if (isHttps) { const u = new URL(home); cert = await readCert(u.hostname, +(u.port || 443), cfg.timeoutMs); }
+    if (isHttps && !(guard && await guard(home))) { const u = new URL(home); cert = await readCert(u.hostname, +(u.port || 443), cfg.timeoutMs); }
 
     const llmsUrl = origin + '/llms.txt';
     const lr = await fetchWithChain(llmsUrl);
@@ -111,24 +111,31 @@ export async function runChecks({ start, root, pages, fetchWithChain, headers, c
   const rootBare = bareHost(root.hostname);
   let done = 0;
 
+  // Redirects are followed by hand: every hop is checked by the guard and gets its own headers.
   async function req(url, method, range) {
-    const sameSite = bareHost(new URL(url).hostname) === rootBare;
-    // Staging password goes only to the crawled site, never to other hosts.
-    const h = sameSite ? { ...headers } : { 'user-agent': headers['user-agent'] };
-    h.accept = '*/*';
-    if (range) h.range = 'bytes=0-0';
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
     const onAbort = () => ctrl.abort();
     signal?.addEventListener('abort', onAbort);
     const t = Date.now();
     try {
-      const res = await fetch(url, { method, headers: h, redirect: 'follow', signal: ctrl.signal });
-      res.body?.cancel?.();
-      const total = /\/(\d+)\s*$/.exec(res.headers.get('content-range') || '')?.[1];
-      const len = res.headers.get('content-length');
-      const size = total ? +total : (res.status !== 206 && len != null ? +len : null);
-      return { status: res.status, finalUrl: res.url, size, contentType: res.headers.get('content-type') || '', ms: Date.now() - t };
+      let cur = url;
+      for (let hop = 0; hop <= 5; hop++) {
+        if (guard) { const why = await guard(cur); if (why) return { status: 0, error: why, ms: Date.now() - t }; }
+        // Staging password goes only to the crawled site, never to other hosts.
+        const h = bareHost(new URL(cur).hostname) === rootBare ? { ...headers } : { 'user-agent': headers['user-agent'] };
+        h.accept = '*/*';
+        if (range) h.range = 'bytes=0-0';
+        const res = await fetch(cur, { method, headers: h, redirect: 'manual', signal: ctrl.signal });
+        res.body?.cancel?.();
+        const loc = res.headers.get('location');
+        if (res.status >= 300 && res.status < 400 && loc) { cur = new URL(loc, cur).href; continue; }
+        const total = /\/(\d+)\s*$/.exec(res.headers.get('content-range') || '')?.[1];
+        const len = res.headers.get('content-length');
+        const size = total ? +total : (res.status !== 206 && len != null ? +len : null);
+        return { status: res.status, finalUrl: cur, size, contentType: res.headers.get('content-type') || '', ms: Date.now() - t };
+      }
+      return { status: 0, error: 'too-many-redirects', ms: Date.now() - t };
     } catch (e) {
       return { status: 0, error: e.name === 'AbortError' ? 'timeout' : e.cause?.code || e.message, ms: Date.now() - t };
     } finally {

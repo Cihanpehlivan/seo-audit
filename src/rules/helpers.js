@@ -44,7 +44,7 @@ export const short = (s, n = 90) => (s && s.length > n ? s.slice(0, n - 1) + 'â€
 // A checked resource is broken when it errors. Bot-protection codes (403, 429â€¦) and timeouts are not counted.
 export function isBroken(r, cfg) {
   if (!r) return false;
-  if (r.status === 0) return r.error !== 'timeout';
+  if (r.status === 0) return r.error !== 'timeout' && r.error !== 'blocked-private';
   return r.status >= 400 && !(cfg.brokenIgnoreStatuses || []).includes(r.status);
 }
 export const resLabel = (r) => r.status || r.error || 'hata';
