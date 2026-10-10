@@ -1,0 +1,6 @@
+node_modules/
+crawls/
+.env
+*.log
+.DS_Store
+KAYNAK_KOD.md
