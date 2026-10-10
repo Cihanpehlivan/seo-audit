@@ -67,12 +67,24 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 
 Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 38 kontrol (toplam yaklaşık 8 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
 
+Açık nokta (v0.6.1, v0.7.0'da düzelir): Kural ile başka yola veya başka siteye taşınan sayfa, hedef sayfa varsa "Aynı kaldı" olur. Bu yanlış güven verir. Asıl soru: eski adres hedefe 301 ile gidiyor mu? 301'ler eski alan adında çalışır. Canlıdan sonra eski alan adını "eski alan adına geçecek site" kullanır. Bu yüzden yönlendirme o sitenin staging'inde yoklanmalıdır.
+
 Açık noktalar (Sprint 2'den):
 - Ek kontroller gerçek bir sitede denenmedi. İlk denemede süreyi ve yanlış alarmları ölç. Eşikler: `checks` ve `brokenIgnoreStatuses`.
 - `srcset` ve CSS arka plan görselleri kontrol edilmez.
 - Kural kodu değişince eski denetimleri yenilemek için `AUDIT_VERSION` artır (`src/rules/index.js`). `configHash` sadece `rules.json` değişikliğini görür.
 
 ## Yol haritası (kalan sprintler)
+
+**v0.7.0 — Taşıma projesi (arayüz, Sprint 3 Parça 2'den önce):** Araç kullanıcıyı adım adım yönlendirir. Adım çubuğu: Proje → Tarama → Eşleştirme → Yapılacaklar → (sonra) 301 haritası → Canlıya çıkış → Canlı doğrulama. Her ekranda tek bir "Sıradaki iş" kartı. Boş veya engelli her sonuç nedeni ve sıradaki işi söyler.
+- Proje: ad + "Yeni yapı nasıl?" sorusu (aynı alan adı ve aynı yollar / aynı alan adı, değişen yollar / diller ayrı alan adlarına). Site rolleri: eski site, eski alan adına geçecek site, ek siteler. Etiket (eski/yeni) seçimi gerekmez.
+- Tarama: her site için "Tara" düğmesi ve durum (bekliyor, taranıyor, tamam, silinmiş).
+- Eşleştirme: eski bölüm tablosu (`/tr/ · 8 sayfa → [TR site] · 7 bulundu`), öneri satırda hazır. Serbest kural editörü "Gelişmiş" altında. v0.6.1 tarayıcı kuralları projeye aktarılır.
+- Model düzeltmesi: taşınan sayfa için iki kontrol: hedef sayfa var mı, eski yol "eski alan adına geçecek site" üzerinde hedefe 301 veriyor mu. Sonuç: "Hedef hazır, 301 kurulu" / "Hedef hazır, 301 eksik" / "Hedef yok".
+- Yapılacaklar: işin yapıldığı yere göre liste (eski alan adı sunucusu: yönlendirmeler; hedef site: eksik sayfalar; içerik: title/meta/H1). Mevcut gruplar ikinci görünüm.
+- Terimler: "ana hedef" yerine "eski alan adına geçecek site". "Yoklama" kullanıcıya gösterilmez. Her kavramın yanında kısa "?" açıklaması.
+- İş büyükse iki sürüme bölünür: v0.7.0 (model, proje, tarama, eşleştirme), v0.7.1 (yapılacaklar, açıklamalar).
+
 
 **Sprint 3 — Migration:** iki taramayı karşılaştırma ekranı (eski = `eski` etiketli, yeni = `yeni` etiketli). Kaybolan URL'ler, title/meta/H1 kaybı, 301 haritası önerisi (önce slug/title benzerliği, Sprint 4'te AI), 301 haritasını CSV/Excel olarak dışa aktarma, canlıya çıkış kontrolü (noindex/Disallow kaldı mı, staging linki kaldı mı), canlıda 301 haritası doğrulama, iki tarama arası ilerleme.
 
@@ -100,6 +112,7 @@ Açık noktalar (Sprint 2'den):
 - v0.6.0: İçerik kaybı: title, meta description veya H1 boşaldıysa, ya da indexlenebilir sayfaya noindex eklendiyse. Farklı metin "değişti" sayılır, kayıp sayılmaz.
 - v0.6.0: Karşılaştırma sonucu sunucu belleğinde tarama çifti başına saklanır (en fazla 20). Yoklama tekrar çalışmaz.
 - v0.6.0: Kaybolan listesi önem sırasındadır: önce indexlenebilir, sonra eski sitede çok iç link alan sayfa.
+- v0.7.0 planı: Proje kaydı sunucuda `crawls/` yanında JSON dosyası olur (veritabanı yok kuralı korunur). Projede taramaların sonucu değil, sadece tanım durur: siteler, roller, tarama kimlikleri, kurallar. Render diski kalıcı olmadığı için "Projeyi indir" ve "Proje yükle" (JSON) gelir. Taramalar silinirse proje ekranı "Tarama yok: Tara" der; tanım kalır, tekrar tarama tek tıktır. Sadece tarayıcıda saklamak seçilmedi: başka tarayıcıda ve arkadaş ile paylaşımda proje görünmez. Kalıcı çözüm sonra: Render kalıcı disk (ücretli) veya dış depolama.
 - v0.6.1: Yol kuralı = eski yol deseni → hedef site + yeni yol (`/tr/* → tr.ornek.com /*`). `*` sadece sonda olur. `/tr/` yazılırsa `/tr/*` okunur. En uzun eski yol önce uygulanır. Kurala girmeyen yol ana hedefte aynı yolda aranır.
 - v0.6.1: Çoklu hedef: bir eski tarama en fazla 4 yeni tarama ile karşılaştırılır (`rules.json` → `compare.maxTargets`). İlk yeni tarama ana hedeftir. Yoklama her eski adresi kuralın hedef sitesinde ister. Yeni sayfalar her hedef için ayrı bulunur.
 - v0.6.1: Kural hedefi tarama kimliği değil, alan adıdır (www yok sayılır). Staging tekrar tarandığında kural geçerli kalır. Kuralın alan adı seçili taramalarda yoksa sayfalar "Kontrol edilemedi" olur; yoklama başka hosta gitmez (SSRF yüzeyi büyümez).
