@@ -53,7 +53,7 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 |---|---|---|
 | Faz 1 | Crawler, CLI, Excel, web arayüzü, canlı durum şeridi | Tamam (v0.2) |
 | Sprint 1 | Kural motoru (77 kural), Sorunlar sekmesi, sağlık skoru, başlık ağacı | Tamam (v0.3) |
-| Altyapı | CLAUDE.md, .env.example, GitHub deposu `seo-audit` (private), Project ↔ GitHub senkronu | Tamam (v0.4.3) |
+| Altyapı | CLAUDE.md, .env.example, GitHub deposu `seo-audit` (Public), Claude depoyu klonlar | Tamam (v0.4.3) |
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Sprint 3 | Migration | Sırada |
@@ -88,6 +88,7 @@ Açık noktalar (Sprint 2'den):
 - Benzer içerik eşiği simhash mesafesi 5 (3, 300 kelimelik sayfalarda gerçek benzerleri kaçırdı). 5.000 rastgele sayfada yanlış alarm 0.
 - Sağlık skoru = kritik sayfa sorunu olmayan URL oranı. Site geneli kritik sorun varsa skor en fazla 40.
 - v0.4.3: Proje kişisel projedir. RNG İstanbul ile ilgisi yoktur. Ad "SEO Audit", paket ve depo adı `seo-audit`. User-Agent `SEO-Audit/<sürüm>`. Renkler (grafit + kırmızı) sadece tasarım tercihidir, bir marka kimliği değildir.
+- v0.4.3: Depo Public kalır, çünkü bir arkadaş ile paylaşılır. Claude kodu her sohbette depodan klonlar; Project ↔ GitHub senkronu gerekmez.
 - v0.4.2: Proje GitHub'a taşındı (private depo). Önceki karar "GitHub kullanma" idi; dosya alışverişi çok adım aldığı için değişti. Kodun tek kaynağı GitHub deposudur. KAYNAK_KOD.md depoya girmez.
 - Denetim, `rules.json` değişince eski taramalar açılırken otomatik tekrar çalışır (configHash).
 - Sprint 2: Ek kontroller taramadan sonra ayrı adım olarak çalışır. Arayüz ve CLI'da varsayılan açık, kütüphanede (`crawl()`) varsayılan kapalı.
@@ -109,22 +110,23 @@ Açık noktalar (Sprint 2'den):
 
 ## Proje dosyaları
 
-Kodun tek kaynağı GitHub deposudur (private). Claude Project bilgisi bu depoya GitHub entegrasyonu ile bağlıdır. Project bilgisine elle dosya yüklenmez.
+Kodun tek kaynağı GitHub deposudur: https://github.com/Cihanpehlivan/seo-audit (Public). Depo bir arkadaş ile paylaşılır.
 
 - `CLAUDE.md` — bu dosya: amaç, mimari, kurallar, durum, karar günlüğü. Depoda durur.
 - `KAYNAK_KOD.md` — artık gerekmez. Depoya girmez. `npm run bundle` komutu yedek olarak durur.
+- Depoya asla gizli bilgi koyma: `.env`, API anahtarı, staging şifresi, müşteri verisi, tarama sonucu (`crawls/`). Depo herkese açıktır.
 
 ## Çalışma döngüsü
 
 Sohbette (claude.ai):
 
-1. Kullanıcı Project bilgisinde GitHub deposu için "Sync now" düğmesine basar, sonra yeni sohbet açar.
-2. Claude depo dosyalarını `/mnt/project/` altından çalışma klasörüne kopyalar, `npm install` ve `npm test` çalıştırır. Dosyalar orada yoksa kullanıcıdan depoyu zip olarak ister (GitHub → Code → Download ZIP). Testler geçmeden geliştirmeye başlama.
-3. Sprint hedefini bu dosyadan al. Kodu yaz, test sitesine yeni sayfalar ekle, `npm test` çalıştır.
+1. Kullanıcı yeni sohbet açar ve görevi yazar. Dosya yüklemez.
+2. Claude depoyu klonlar: `git clone https://github.com/Cihanpehlivan/seo-audit.git`. Sonra `npm install` ve `npm test` çalıştırır. Testler geçmeden geliştirmeye başlama. Klonlama çalışmazsa kullanıcıdan depoyu zip olarak ister (GitHub → Code → Download ZIP).
+3. Görevi bu dosyadan ve kullanıcıdan al. Kodu yaz, test sitesine yeni sayfalar ekle, `npm test` çalıştır.
 4. Arayüz değiştiyse ekran görüntüsü ile kontrol et (masaüstü 1440 px ve mobil 390 px).
-5. Sprint sonunda: bu dosyadaki Durum ve Karar günlüğü bölümlerini güncelle, `package.json` sürümünü artır.
-6. Kullanıcıya bir dosya ver: sürüm numaralı zip. Zip `node_modules`, `crawls` ve `.env` içermez. Kullanıcıya kısa bir commit mesajı öner.
-7. Kullanıcı zip içeriğini yerel depo klasörünün üstüne kopyalar. GitHub Desktop ile commit ve push yapar. Sonra Project'te "Sync now" düğmesine basar.
+5. İş sonunda: bu dosyadaki Durum ve Karar günlüğü bölümlerini güncelle, `package.json` sürümünü artır.
+6. Kullanıcıya bir zip ver. Zip sadece değişen ve yeni dosyaları, depodaki klasör yapısı ile içerir. Silinmesi gereken dosya varsa adlarını ayrıca yaz. Kısa bir commit mesajı öner.
+7. Kullanıcı GitHub'da Add file → Upload files ile zip içeriğini sürükler ve commit yapar. Gizli dosyalar (nokta ile başlayan) değiştiyse Claude içeriklerini metin olarak da verir; kullanıcı bunları web'de düzenler.
 
 Claude Code ile (masaüstü): Claude yerel depo klasöründe doğrudan çalışır, commit yapar. Zip ve 6-7. adımlar gerekmez. Push kullanıcı onayı ile yapılır.
 
