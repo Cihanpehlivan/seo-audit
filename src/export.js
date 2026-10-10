@@ -1,5 +1,6 @@
 // Writes crawl results to an Excel file for the team.
 import ExcelJS from 'exceljs';
+import { FIX } from './compare.js';
 
 const HEAD = { font: { bold: true, color: { argb: 'FFFFFFFF' } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3C3489' } } };
 
@@ -172,42 +173,61 @@ function siteRows(ck) {
 export async function exportCompareExcel(cmp, file) {
   const wb = new ExcelJS.Workbook();
   const s = cmp.summary;
+  const targets = cmp.targets || [cmp.new];
   sheet(wb, 'Özet', [{ header: 'Metrik', key: 'k', width: 44 }, { header: 'Değer', key: 'v', width: 70 }], [
     { k: 'Eski site', v: `${cmp.old.startUrl} (${cmp.old.startedAt})` },
-    { k: 'Yeni site', v: `${cmp.new.startUrl} (${cmp.new.startedAt})` },
+    ...targets.map((t, i) => ({ k: i ? `Yeni site ${i + 1}` : 'Yeni site (ana hedef)', v: `${t.startUrl} (${t.startedAt})` })),
+    { k: 'Yol kuralı', v: cmp.rules?.length || 0 },
     { k: 'Eski sitede 200 veren sayfa', v: s.oldPages },
     { k: 'Aynı kaldı', v: s.same },
     { k: 'İçerik değişti', v: s.changed },
     { k: 'İçerik kaybı var (title, meta, H1, noindex)', v: s.contentLost },
     { k: 'Yönleniyor', v: s.redirected },
     { k: 'Yönleniyor ama hedef hatalı', v: s.redirectBroken },
+    { k: 'Yönlendirmede düzeltme gerekli (hata, zincir, 302)', v: s.redirectFix ?? s.redirectBroken },
     { k: 'Açılıyor ama yeni sitede link yok', v: s.unlinked },
     { k: 'KAYBOLDU', v: s.lost },
+    { k: 'Bölüm kaldırıldı (kural ile)', v: s.removed ?? 0 },
     { k: 'Kontrol edilemedi', v: s.unknown },
     { k: 'Yeni sitede yeni sayfa', v: s.added },
     { k: 'Korunan sayfa oranı', v: `%${s.kept}` },
     ...cmp.warnings.map((w) => ({ k: 'Uyarı', v: w })),
   ]);
   const yn = (b) => (b ? 'Evet' : 'Hayır');
+  const ctx = [
+    { header: 'Kural', key: 'rule', width: 34 }, { header: 'Kontrol edilen URL', key: 'checkUrl', width: 60 },
+  ];
+  const why = [{ header: 'Neden', key: 'reason', width: 40 }, { header: 'Yapılacak', key: 'todo', width: 70 }];
   sheet(wb, 'Kaybolan', [
     { header: 'Yol', key: 'path', width: 50 }, { header: 'Eski URL', key: 'oldUrl', width: 60 }, { header: 'Eski title', key: 'oldTitle', width: 50 },
-    { header: 'Neden', key: 'reason', width: 30 }, { header: 'İndekslenebilir', key: 'idx', width: 14 }, { header: 'İç link (eski)', key: 'inlinks', width: 13 },
+    ...ctx, ...why, { header: 'İndekslenebilir', key: 'idx', width: 14 }, { header: 'İç link (eski)', key: 'inlinks', width: 13 },
   ], cmp.rows.lost.map((r) => ({ ...r, idx: yn(r.indexable) })));
   sheet(wb, 'Yönlenen', [
-    { header: 'Yol', key: 'path', width: 50 }, { header: 'Yeni sitedeki URL', key: 'newUrl', width: 60 }, { header: 'Hedef', key: 'target', width: 60 },
+    { header: 'Yol', key: 'path', width: 50 }, ...ctx, { header: 'Hedef', key: 'target', width: 60 },
     { header: 'İlk status', key: 'status', width: 10 }, { header: 'Hedef status', key: 'finalStatus', width: 12 }, { header: 'Adım', key: 'hops', width: 8 },
-    { header: 'Hedef hatalı', key: 'broken', width: 12 },
+    { header: 'Hedef hatalı', key: 'broken', width: 12 }, { header: 'Yapılacak', key: 'todo', width: 60 },
   ], cmp.rows.redirected.map((r) => ({ ...r, broken: yn(r.targetBroken) })));
   sheet(wb, 'İçerik değişimi', [
-    { header: 'Yol', key: 'path', width: 50 }, { header: 'Alan', key: 'label', width: 16 }, { header: 'Tür', key: 'kind', width: 10 },
-    { header: 'Eski', key: 'old', width: 60 }, { header: 'Yeni', key: 'new', width: 60 },
-  ], cmp.rows.changed.flatMap((r) => r.changes.map((c) => ({ path: r.path, ...c, kind: c.kind === 'lost' ? 'Kayıp' : 'Değişti' }))));
-  if (cmp.rows.unlinked.length) {
-    sheet(wb, 'Linksiz', [{ header: 'Yol', key: 'path', width: 50 }, { header: 'Yeni sitedeki URL', key: 'newUrl', width: 60 }, { header: 'Durum', key: 'reason', width: 50 }], cmp.rows.unlinked);
+    { header: 'Yol', key: 'path', width: 50 }, { header: 'Yeni URL', key: 'newUrl', width: 60 }, { header: 'Alan', key: 'label', width: 16 }, { header: 'Tür', key: 'kind', width: 10 },
+    { header: 'Eski', key: 'old', width: 60 }, { header: 'Yeni', key: 'new', width: 60 }, { header: 'Yapılacak', key: 'todo', width: 50 },
+  ], cmp.rows.changed.flatMap((r) => r.changes.map((c) => ({ path: r.path, newUrl: r.newUrl, ...c, kind: c.kind === 'lost' ? 'Kayıp' : 'Değişti', todo: c.kind === 'lost' ? FIX[c.field] : '' }))));
+  const plain = [{ header: 'Yol', key: 'path', width: 50 }, ...ctx, ...why];
+  if (cmp.rows.unlinked.length) sheet(wb, 'Linksiz', plain, cmp.rows.unlinked);
+  if (cmp.rows.removed?.length) sheet(wb, 'Bölüm kaldırıldı', plain, cmp.rows.removed);
+  if (cmp.rows.unknown.length) sheet(wb, 'Kontrol edilemedi', plain, cmp.rows.unknown);
+  sheet(wb, 'Yeni sayfalar', [
+    ...(targets.length > 1 ? [{ header: 'Site', key: 'site', width: 30 }] : []),
+    { header: 'Yol', key: 'path', width: 50 }, { header: 'URL', key: 'newUrl', width: 60 }, { header: 'Title', key: 'newTitle', width: 60 },
+  ], cmp.rows.added);
+  if (cmp.rules?.length) {
+    sheet(wb, 'Kurallar', [
+      { header: 'Kural', key: 'text', width: 50 }, { header: 'Eski sitede sayfa', key: 'pages', width: 18 }, { header: 'Yeni sitede bulundu', key: 'found', width: 20 },
+    ], [...cmp.rules, { text: 'Kural yok (aynı yol, ana hedef)', ...cmp.noRule }]);
   }
-  if (cmp.rows.unknown.length) {
-    sheet(wb, 'Kontrol edilemedi', [{ header: 'Yol', key: 'path', width: 50 }, { header: 'Neden', key: 'reason', width: 60 }], cmp.rows.unknown);
+  if (cmp.suggestions?.length) {
+    sheet(wb, 'Öneriler', [
+      { header: 'Önerilen kural', key: 'text', width: 50 }, { header: 'Gerekçe', key: 'why', width: 90 },
+    ], cmp.suggestions);
   }
-  sheet(wb, 'Yeni sayfalar', [{ header: 'Yol', key: 'path', width: 50 }, { header: 'URL', key: 'newUrl', width: 60 }, { header: 'Title', key: 'newTitle', width: 60 }], cmp.rows.added);
   await wb.xlsx.writeFile(file);
 }

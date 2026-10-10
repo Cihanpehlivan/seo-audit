@@ -134,22 +134,52 @@
     </section>
     <section id="compareView" hidden>
       <h1 class="title">Eski ve yeni site</h1>
-      <p class="meta">Araç sayfaları URL yoluna göre eşleştirir. Eski site canlıda, yeni site staging'de olabilir.</p>
+      <p class="meta">Araç sayfaları URL yoluna göre eşleştirir. Eski site canlıda, yeni site staging'de olabilir. Yol değiştiyse veya bir dil başka alan adına taşındıysa yol kuralı yazın.</p>
       <form id="cmpForm" class="cmp-form" novalidate>
-        <label>Eski site taraması<select id="cmpOld"></select></label>
-        <span class="cmp-arrow" aria-hidden="true">→</span>
-        <label>Yeni site taraması<select id="cmpNew"></select></label>
-        <button class="primary" type="submit">Karşılaştır</button>
+        <div class="cmp-sites">
+          <label>Eski site taraması<select id="cmpOld"></select></label>
+          <span class="cmp-arrow" aria-hidden="true">→</span>
+          <div class="cmp-targets">
+            <label>Yeni site taraması (ana hedef)<select id="cmpNew"></select></label>
+            <div id="cmpExtra"></div>
+            <button type="button" class="ghost small" id="cmpAddTarget">+ Yeni site ekle</button>
+          </div>
+        </div>
+        <fieldset class="cmp-rules">
+          <legend>Yol kuralları</legend>
+          <p class="hint">Eski yolu yeni yere taşıyın. Örnek: <code>/tr/*</code> → Türkçe site, <code>/*</code>. Yıldız (<code>*</code>) yolun geri kalanıdır. En uzun eski yol önce uygulanır. Kurala girmeyen yol, ana hedefte aynı yolda aranır.</p>
+          <div id="cmpRules"></div>
+          <p class="small" id="cmpNoRule"></p>
+          <div class="cmp-actions">
+            <button type="button" class="ghost small" id="cmpAddRule">+ Kural ekle</button>
+            <button class="primary" type="submit">Karşılaştır</button>
+          </div>
+        </fieldset>
       </form>
       <p class="err" id="cmpErr" role="alert"></p>
+      <p class="muted" id="cmpBusy" hidden>Karşılaştırılıyor. Yeni taramada olmayan eski adresler tek tek isteniyor…</p>
       <div id="cmpResult" hidden>
         <div class="cmp-head">
           <p class="cmp-kept"><b id="cmpKept"></b><span id="cmpKeptText"></span></p>
           <a class="primary" id="cmpExcel" href="#">Excel indir</a>
         </div>
         <div id="cmpWarn"></div>
+        <div id="cmpSuggest"></div>
         <div class="cmp-bar" id="cmpBar" role="img"></div>
         <div class="cmp-tiles" id="cmpTiles"></div>
+        <details class="cmp-help">
+          <summary>Gruplar ne anlama gelir?</summary>
+          <dl>
+            <dt>Aynı kaldı</dt><dd>Sayfa beklenen adreste açılıyor. Title, meta description ve H1 aynı.</dd>
+            <dt>İçerik değişti</dt><dd>Sayfa açılıyor ama title, meta veya H1 farklı. Alan boşaldıysa veya noindex eklendiyse "kayıp" yazılır.</dd>
+            <dt>Yönleniyor</dt><dd>Eski adres başka bir adrese gidiyor. Hedef hatalıysa, zincir varsa veya 302 ise satırda yapılacak iş yazılır.</dd>
+            <dt>Kayboldu</dt><dd>Beklenen adres 404 veya başka bir hata veriyor. 301 gerekir.</dd>
+            <dt>Bölüm kaldırıldı</dt><dd>"Bölüm kaldırıldı" kuralına giren ve bulunmayan sayfa. Bilinçli bir karardır ama 301 veya 410 yine gerekir.</dd>
+            <dt>Açılıyor, link yok</dt><dd>Adres açılıyor ama yeni sitede bu sayfaya link yok.</dd>
+            <dt>Kontrol edilemedi</dt><dd>robots.txt engeli, şifreli staging, bağlantı hatası veya taranmayan hedef.</dd>
+          </dl>
+          <p class="small">Beklenen adres: kural varsa kuralın hedefi, yoksa ana hedefte aynı yol. Yeni taramada olmayan adresi araç tek tek ister. Her satır kontrol edilen adresi, kuralı ve yapılacak işi gösterir.</p>
+        </details>
         <div class="tools"><label class="sr" for="cmpQ">Ara</label><input id="cmpQ" type="search" placeholder="Yol veya title ara" autocomplete="off"><span class="muted" id="cmpCount"></span></div>
         <div class="table-wrap"><table id="cmpTable"></table></div>
       </div>

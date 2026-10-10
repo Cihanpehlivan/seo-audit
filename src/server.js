@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crawl } from './crawler.js';
 import { exportExcel, exportCompareExcel } from './export.js';
-import { compareCrawls, probeLost } from './compare.js';
+import { compareCrawls, probeLost, parseRules } from './compare.js';
 import { Store, ID_RE } from './store.js';
 import { normalizeUrl } from './normalize.js';
 import { runAudit, loadConfig, RULES, CATEGORIES } from './rules/index.js';
@@ -37,10 +37,13 @@ const startGuard = PUBLIC_MODE ? makeGuard() : null;
 
 // Comparison results are cached per crawl pair: probing old paths on the new host takes time.
 const cmpCache = new Map();
-async function compareWithProbe(a, b, oldRes, newRes) {
-  const key = `${a}|${b}`;
+// The cache key holds the crawl ids and the rules, so a new rule set runs a new comparison.
+async function compareWithProbe(a, ids, oldRes, newList, rules, cc) {
+  const key = `${a}|${ids.join(',')}|${JSON.stringify(rules.map((r) => r.text))}`;
   if (cmpCache.has(key)) return cmpCache.get(key);
-  const cmp = compareCrawls(oldRes, newRes);
+  const cmp = compareCrawls(oldRes, newList, {
+    rules, suggest: { minPages: cc.suggestMinPages, minRatio: cc.suggestMinRatio, max: cc.maxSuggestions },
+  });
   const guard = PUBLIC_MODE ? makeGuard() : null;
   const cfg = loadConfig().checks;
   const request = async (url) => {
@@ -54,7 +57,7 @@ async function compareWithProbe(a, b, oldRes, newRes) {
     } catch (e) { throw e.name === 'AbortError' ? Object.assign(new Error('timeout'), { cause: { code: 'timeout' } }) : e; }
     finally { clearTimeout(t); }
   };
-  await probeLost(cmp, new URL(newRes.meta.startUrl).origin, request, { concurrency: cfg.concurrency });
+  await probeLost(cmp, request, { concurrency: cfg.concurrency });
   cmpCache.set(key, cmp);
   if (cmpCache.size > 20) cmpCache.delete(cmpCache.keys().next().value);
   return cmp;
@@ -211,15 +214,22 @@ const server = http.createServer(async (req, res) => {
       catch { return send(res, 404, 'Bulunamadı', 'text/plain'); }
     }
 
-    // /api/compare?old=<id>&new=<id>: old site vs new site. /api/compare/excel: same data as Excel.
+    // /api/compare?old=<id>&new=<id>[,<id>…]&rules=<json>: old site vs one or more new sites.
+    // The first new crawl is the main target. /api/compare/excel: same data as Excel.
     if (parts[1] === 'compare' && req.method === 'GET') {
-      const a = u.searchParams.get('old'), b = u.searchParams.get('new');
-      if (!a || !b || !ID_RE.test(a) || !ID_RE.test(b)) return send(res, 400, { error: 'İki tarama seçin: eski ve yeni.' });
-      if (a === b) return send(res, 400, { error: 'Eski ve yeni tarama farklı olmalı.' });
-      let oldRes, newRes;
-      try { [oldRes, newRes] = await Promise.all([store.load(a), store.load(b)]); }
+      const cc = loadConfig().compare;
+      const a = u.searchParams.get('old');
+      const ids = [...new Set((u.searchParams.get('new') || '').split(',').filter(Boolean))];
+      if (!a || !ids.length || ![a, ...ids].every((x) => ID_RE.test(x))) return send(res, 400, { error: 'İki tarama seçin: eski ve yeni.' });
+      if (ids.includes(a)) return send(res, 400, { error: 'Eski ve yeni tarama farklı olmalı.' });
+      if (ids.length > cc.maxTargets) return send(res, 400, { error: `En fazla ${cc.maxTargets} yeni site seçin.` });
+      let rules;
+      try { rules = parseRules(JSON.parse(u.searchParams.get('rules') || '[]'), cc.maxRules); }
+      catch (e) { return send(res, 400, { error: e instanceof SyntaxError ? 'Kurallar okunamadı.' : e.message }); }
+      let oldRes, newList;
+      try { [oldRes, ...newList] = await Promise.all([a, ...ids].map((x) => store.load(x))); }
       catch { return send(res, 404, { error: 'Tarama bulunamadı. Sunucu yeniden başladıysa taramalar silinmiş olabilir.' }); }
-      const cmp = await compareWithProbe(a, b, oldRes, newRes);
+      const cmp = await compareWithProbe(a, ids, oldRes, newList, rules, cc);
       if (parts[2] !== 'excel') return send(res, 200, cmp);
       const tmp = path.join(os.tmpdir(), `cmp-${Date.now()}.xlsx`);
       await exportCompareExcel(cmp, tmp);
@@ -234,7 +244,7 @@ const server = http.createServer(async (req, res) => {
 
     // /api/info: server mode for the interface
     if (parts[1] === 'info' && req.method === 'GET') {
-      return send(res, 200, { publicMode: PUBLIC_MODE, ephemeral: EPHEMERAL, maxUrls: URL_LIMIT, maxJobs: JOB_LIMIT });
+      return send(res, 200, { publicMode: PUBLIC_MODE, ephemeral: EPHEMERAL, maxUrls: URL_LIMIT, maxJobs: JOB_LIMIT, maxTargets: loadConfig().compare.maxTargets });
     }
 
     // /api/rules: rule counts per category for the start page

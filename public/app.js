@@ -467,70 +467,220 @@ async function loadInfo() {
 }
 loadInfo();
 
-// ---------- Compare: old site vs new site (Sprint 3, part 1) ----------
+// ---------- Compare: old site vs new sites (Sprint 3, part 1) ----------
 // The bar shows what happened to every page of the old site. Tiles open the lists.
+// Path rules and extra targets live in the form. Rules are kept in the browser per old host.
 const CMP_KINDS = [
   { k: 'same', label: 'Aynı kaldı', cls: 'ok' },
   { k: 'changed', label: 'İçerik değişti', cls: 'warning' },
   { k: 'redirected', label: 'Yönleniyor', cls: 'redirect' },
   { k: 'lost', label: 'Kayboldu', cls: 'critical' },
+  { k: 'removed', label: 'Bölüm kaldırıldı', cls: 'removed' },
   { k: 'unlinked', label: 'Açılıyor, link yok', cls: 'notice' },
   { k: 'unknown', label: 'Kontrol edilemedi', cls: 'notice' },
   { k: 'added', label: 'Yeni sayfa', cls: 'new' },
 ];
-const cmpState = { data: null, tab: 'lost', q: '' };
+const OPTIONAL_KINDS = ['removed', 'unknown', 'unlinked'];
+const DROP = '__drop';
+const cmpState = { data: null, tab: 'lost', q: '', history: [], rules: [], rulesHost: null, extra: [] };
 const crawlLabel = (h) => `${h.host}${h.label ? ' · ' + h.label : ''} · ${fmtDate(h.startedAt)} · ${h.summary.total} URL`;
+const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
+const rulesKey = (host) => `seo-audit:kurallar:${bare(host)}`;
+const crawlById = (id) => cmpState.history.find((h) => h.id === id);
 
-async function openCompare(a, b) {
+function loadPathRules(host) {
+  try { const r = JSON.parse(localStorage.getItem(rulesKey(host)) || '[]'); return Array.isArray(r) ? r : []; } catch { return []; }
+}
+function savePathRules(host, rules) {
+  try { localStorage.setItem(rulesKey(host), JSON.stringify(rules)); } catch {}
+}
+
+// ---------- Targets ----------
+const crawlOptions = () => cmpState.history.map((h) => `<option value="${esc(h.id)}">${esc(crawlLabel(h))}</option>`).join('');
+function renderExtra() {
+  $('#cmpExtra').innerHTML = cmpState.extra.map((id, i) => `<div class="cmp-extra">
+    <label>Yeni site ${i + 2}<select data-extra="${i}">${crawlOptions()}</select></label>
+    <button type="button" class="ghost small" data-del-extra="${i}" aria-label="Yeni site ${i + 2} kaldır">Kaldır</button></div>`).join('');
+  cmpState.extra.forEach((id, i) => { $(`[data-extra="${i}"]`).value = id; });
+  $('#cmpAddTarget').hidden = cmpState.extra.length >= (cmpState.maxTargets || 4) - 1;
+}
+const targetIds = () => [$('#cmpNew').value, ...cmpState.extra].filter(Boolean);
+const targetHosts = () => [...new Set(targetIds().map((id) => crawlById(id)?.host).filter(Boolean))];
+
+// ---------- Rule editor ----------
+function readRules() {
+  return [...$('#cmpRules').querySelectorAll('.rule')].map((row) => {
+    const from = row.querySelector('[name=from]').value.trim();
+    const host = row.querySelector('[name=host]').value;
+    const to = row.querySelector('[name=to]').value.trim();
+    return host === DROP ? { from, drop: true } : { from, host, to: to || '/*' };
+  });
+}
+function renderRules(stats = null) {
+  const hosts = targetHosts();
+  const main = hosts[0] || '';
+  const opts = (r) => {
+    const h = r.drop ? DROP : (bare(r.host) === bare(main) ? '' : r.host || '');
+    const list = [['', `Ana hedef${main ? ' · ' + main : ''}`], ...hosts.slice(1).map((x) => [x, x])];
+    if (h && h !== DROP && !hosts.some((x) => bare(x) === bare(h))) list.push([h, `${h} (seçili değil)`]);
+    list.push([DROP, 'Bölüm kaldırıldı']);
+    return list.map(([v, t]) => `<option value="${esc(v)}"${v === h ? ' selected' : ''}>${esc(t)}</option>`).join('');
+  };
+  $('#cmpRules').innerHTML = cmpState.rules.map((r, i) => {
+    const st = stats?.[i];
+    return `<div class="rule${r.drop ? ' drop' : ''}">
+      <label><span class="sr">Kural ${i + 1}: eski yol</span><input name="from" value="${esc(r.from)}" placeholder="/tr/*" spellcheck="false" autocomplete="off"></label>
+      <span class="cmp-arrow" aria-hidden="true">→</span>
+      <label><span class="sr">Kural ${i + 1}: hedef site</span><select name="host">${opts(r)}</select></label>
+      <label><span class="sr">Kural ${i + 1}: yeni yol</span><input name="to" value="${esc(r.drop ? '' : r.to || '/*')}" placeholder="/*" spellcheck="false" autocomplete="off"${r.drop ? ' disabled' : ''}></label>
+      <button type="button" class="ghost small" data-del-rule="${i}" aria-label="Kural ${i + 1} sil">Sil</button>
+      ${st ? `<span class="small rule-st">${st.pages} sayfa · ${st.found} bulundu</span>` : ''}
+    </div>`;
+  }).join('') || '<p class="small">Kural yok. Sonuçta önerilen kurallar görünür.</p>';
+}
+$('#cmpRules').addEventListener('change', (e) => {
+  if (e.target.name !== 'host') return;
+  cmpState.rules = readRules();
+  renderRules();
+});
+$('#cmpRules').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-del-rule]');
+  if (!b) return;
+  cmpState.rules = readRules();
+  cmpState.rules.splice(+b.dataset.delRule, 1);
+  renderRules();
+});
+$('#cmpAddRule').addEventListener('click', () => {
+  cmpState.rules = [...readRules(), { from: '', host: '', to: '/*' }];
+  renderRules();
+  $('#cmpRules').querySelector('.rule:last-child [name=from]').focus();
+});
+$('#cmpAddTarget').addEventListener('click', () => {
+  const used = new Set([$('#cmpOld').value, ...targetIds()]);
+  cmpState.extra.push((cmpState.history.find((h) => !used.has(h.id)) || cmpState.history[0]).id);
+  cmpState.rules = readRules();
+  renderExtra(); renderRules();
+});
+$('#cmpExtra').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-del-extra]');
+  if (!b) return;
+  cmpState.extra.splice(+b.dataset.delExtra, 1);
+  cmpState.rules = readRules();
+  renderExtra(); renderRules();
+});
+$('#cmpExtra').addEventListener('change', (e) => {
+  const s = e.target.closest('[data-extra]');
+  if (!s) return;
+  cmpState.extra[+s.dataset.extra] = s.value;
+  cmpState.rules = readRules(); renderRules();
+});
+$('#cmpNew').addEventListener('change', () => { cmpState.rules = readRules(); renderRules(); });
+$('#cmpOld').addEventListener('change', () => {
+  // Rules belong to the old site: show the saved rules of the new old site.
+  cmpState.rulesHost = crawlById($('#cmpOld').value)?.host;
+  cmpState.rules = loadPathRules(cmpState.rulesHost);
+  renderRules();
+});
+
+// ---------- Open and run ----------
+async function openCompare(a, bList = []) {
   currentId = null; es?.close();
   show('compareView');
   loadHistory();
   $('#cmpErr').textContent = '';
   let history = [];
   try { ({ history } = await api('/api/crawls')); } catch (e) { $('#cmpErr').textContent = e.message; }
-  const opts = history.map((h) => `<option value="${esc(h.id)}">${esc(crawlLabel(h))}</option>`).join('');
-  $('#cmpOld').innerHTML = opts; $('#cmpNew').innerHTML = opts;
+  try { cmpState.maxTargets = (await api('/api/info')).maxTargets || 4; } catch {}
+  cmpState.history = history;
+  $('#cmpOld').innerHTML = crawlOptions(); $('#cmpNew').innerHTML = crawlOptions();
   if (history.length < 2) {
     $('#cmpResult').hidden = true;
     $('#cmpErr').textContent = 'Karşılaştırma için en az iki tarama gerekir. Eski siteyi "Eski site", yeni siteyi "Yeni site" etiketi ile tarayın.';
     return;
   }
+  const known = (id) => history.some((h) => h.id === id);
   const pick = (label, skip) => history.find((h) => h.label === label && h.id !== skip)?.id;
-  const oldId = a || pick('eski') || history[1].id;
-  const newId = b || pick('yeni', oldId) || history.find((h) => h.id !== oldId).id;
+  const oldId = (known(a) && a) || pick('eski') || history[1].id;
+  const ids = bList.filter(known);
+  const newId = ids[0] || pick('yeni', oldId) || history.find((h) => h.id !== oldId).id;
   $('#cmpOld').value = oldId; $('#cmpNew').value = newId;
-  if (!a || !b) { $('#cmpResult').hidden = true; return; }
+  cmpState.extra = ids.slice(1);
+  renderExtra();
+  cmpState.rulesHost = crawlById(oldId)?.host;
+  cmpState.rules = loadPathRules(cmpState.rulesHost);
+  renderRules();
+  $('#cmpNoRule').textContent = '';
+  if (!a || !ids.length) { $('#cmpResult').hidden = true; return; }
+  await runCompare(oldId, ids);
+}
+
+async function runCompare(a, ids) {
   $('#cmpResult').hidden = true;
+  $('#cmpBusy').hidden = false;
+  const rules = cmpState.rules.filter((r) => r.from);
+  const qs = `old=${encodeURIComponent(a)}&new=${ids.map(encodeURIComponent).join(',')}&rules=${encodeURIComponent(JSON.stringify(rules))}`;
   try {
-    cmpState.data = await api(`/api/compare?old=${encodeURIComponent(a)}&new=${encodeURIComponent(b)}`);
-    cmpState.tab = cmpState.data.summary.lost ? 'lost' : cmpState.data.summary.contentLost ? 'changed' : cmpState.data.summary.redirected ? 'redirected' : 'added';
+    const d = cmpState.data = await api(`/api/compare?${qs}`);
+    const s = d.summary;
+    cmpState.tab = s.lost ? 'lost' : s.contentLost ? 'changed' : s.redirectFix ? 'redirected' : s.unknown ? 'unknown' : s.redirected ? 'redirected' : 'added';
     cmpState.q = ''; $('#cmpQ').value = '';
-    $('#cmpExcel').href = `/api/compare/excel?old=${encodeURIComponent(a)}&new=${encodeURIComponent(b)}`;
+    $('#cmpExcel').href = `/api/compare/excel?${qs}`;
+    // The server returns the rules in the order it applies them, with counts.
+    cmpState.rules = d.rules.map(({ from, host, to, drop }) => (drop ? { from, drop } : { from, host, to }));
+    savePathRules(cmpState.rulesHost, cmpState.rules);
+    renderRules(d.rules);
+    $('#cmpNoRule').textContent = `Kural yok (aynı yol, ana hedef): ${d.noRule.pages} sayfa · ${d.noRule.found} bulundu`;
     renderCompare();
     $('#cmpResult').hidden = false;
   } catch (e) { $('#cmpErr').textContent = e.message; }
+  finally { $('#cmpBusy').hidden = true; }
 }
 
 function renderCompare() {
-  const { summary: s, warnings, old: o } = cmpState.data;
+  const { summary: s, warnings, suggestions } = cmpState.data;
   $('#cmpKept').textContent = `%${s.kept}`;
-  $('#cmpKeptText').textContent = `Eski sitenin ${s.oldPages} sayfasından ${s.same + s.changed} tanesi yeni sitede aynı adreste açılıyor.`;
+  $('#cmpKeptText').textContent = `Eski sitenin ${s.oldPages} sayfasından ${s.same + s.changed} tanesi beklenen adreste açılıyor.`;
   $('#cmpWarn').innerHTML = warnings.map((w) => `<p class="warn">${esc(w)}</p>`).join('');
+  $('#cmpSuggest').innerHTML = suggestions.length ? `<div class="suggest">
+    <div class="suggest-h"><b>Önerilen kurallar</b><span class="small">Araç eski yolları yeni taramalarda aradı. Öneriyi ekleyin, karşılaştırma tekrar çalışır.</span>
+    ${suggestions.length > 1 ? '<button type="button" class="ghost small" data-sug="all">Hepsini ekle</button>' : ''}</div>
+    <ul>${suggestions.map((x, i) => `<li><code>${esc(x.text)}</code><span>${esc(x.why)}</span><button type="button" class="ghost small" data-sug="${i}">Ekle</button></li>`).join('')}</ul></div>` : '';
   // Bar: only old pages, so the parts add up to 100%.
-  const parts = CMP_KINDS.filter((x) => x.k !== 'added').map((x) => ({ ...x, n: s[x.k] })).filter((x) => x.n);
+  const parts = CMP_KINDS.filter((x) => x.k !== 'added').map((x) => ({ ...x, n: s[x.k] || 0 })).filter((x) => x.n);
   $('#cmpBar').innerHTML = parts.map((x) => `<i class="${x.cls}" style="flex-grow:${x.n}" title="${x.label}: ${x.n}"></i>`).join('');
   $('#cmpBar').setAttribute('aria-label', parts.map((x) => `${x.label}: ${x.n}`).join(', '));
-  const sub = { changed: s.contentLost ? `${s.contentLost} sayfada kayıp` : 'kayıp yok', redirected: s.redirectBroken ? `${s.redirectBroken} hedef hatalı` : 'hedefler açılıyor', lost: s.lost ? '301 gerekli' : '' };
-  $('#cmpTiles').innerHTML = CMP_KINDS.filter((x) => !['unknown', 'unlinked'].includes(x.k) || s[x.k]).map((x) => `<button type="button" class="${x.cls}" data-tab="${x.k}" aria-pressed="${cmpState.tab === x.k}">
+  const sub = {
+    changed: s.contentLost ? `${s.contentLost} sayfada kayıp` : 'kayıp yok',
+    redirected: s.redirectFix ? `${s.redirectFix} düzeltme gerekli` : 'hedefler doğru',
+    lost: s.lost ? '301 gerekli' : '', removed: '301 veya 410 gerekli',
+  };
+  $('#cmpTiles').innerHTML = CMP_KINDS.filter((x) => !OPTIONAL_KINDS.includes(x.k) || s[x.k]).map((x) => `<button type="button" class="${x.cls}" data-tab="${x.k}" aria-pressed="${cmpState.tab === x.k}">
     <b>${s[x.k]}</b><span>${x.label}</span>${sub[x.k] ? `<em>${sub[x.k]}</em>` : ''}</button>`).join('');
   renderCompareTable();
 }
 
+$('#cmpSuggest').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sug]');
+  if (!b) return;
+  const all = cmpState.data.suggestions;
+  const add = b.dataset.sug === 'all' ? all : [all[+b.dataset.sug]];
+  cmpState.rules = [...readRules().filter((r) => r.from), ...add.map(({ from, host, to, drop }) => (drop ? { from, drop } : { from, host, to }))];
+  renderRules();
+  $('#cmpForm').requestSubmit();
+});
+
+const cmpLink = (u, txt) => (u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt ?? u)}</a>` : esc(txt));
+// Explanation under every row: the checked URL, the rule and what to do.
+function explain(r, { reason = true, cls = 'flag' } = {}) {
+  const ctx = [r.checkUrl && `Kontrol edilen: ${cmpLink(r.checkUrl)}`, r.rule && `Kural: <code>${esc(r.rule)}</code>`].filter(Boolean).join(' · ');
+  return `${reason && r.reason ? `<span class="${cls}">${esc(r.reason)}</span>` : ''}${ctx ? `<div class="why">${ctx}</div>` : ''}${r.todo ? `<div class="todo">${esc(r.todo)}</div>` : ''}`;
+}
+
 function renderCompareTable() {
-  const { rows, summary: s } = cmpState.data;
+  const { rows, summary: s, targets } = cmpState.data;
   const t = cmpState.tab, q = cmpState.q.toLowerCase();
   if (t === 'same') {
-    $('#cmpTable').innerHTML = `<tbody><tr><td class="empty">${s.same} sayfa aynı adreste açılıyor. Title, meta description ve H1 aynı. Liste gerekmez.</td></tr></tbody>`;
+    $('#cmpTable').innerHTML = `<tbody><tr><td class="empty">${s.same} sayfa beklenen adreste açılıyor. Title, meta description ve H1 aynı. Liste gerekmez.</td></tr></tbody>`;
     $('#cmpCount').textContent = ''; return;
   }
   let list = rows[t].filter((r) => !q || r.path.toLowerCase().includes(q) || (r.oldTitle || r.newTitle || '').toLowerCase().includes(q));
@@ -538,34 +688,40 @@ function renderCompareTable() {
   list = list.slice(0, 500);
   $('#cmpCount').textContent = `${total} sonuç${total > 500 ? ' · ilk 500 gösteriliyor, tamamı Excel\'de' : ''}`;
   const imp = (r) => `${r.indexable ? '' : '<span class="small">indexlenmez</span> '}<span class="small">${r.inlinks} iç link</span>`;
-  const link = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt ?? u)}</a>`;
+  const many = targets.length > 1;
   const H = {
-    lost: ['Yol', 'Neden', 'Eski title', 'Önem'],
-    redirected: ['Yol', 'Hedef', 'Status', 'Adım'],
+    lost: ['Yol', 'Sonuç ve yapılacak', 'Eski title', 'Önem'],
+    redirected: ['Yol', 'Hedef ve yapılacak', 'Status', 'Adım'],
     changed: ['Yol', 'Değişim'],
-    unknown: ['Yol', 'Neden'],
-    unlinked: ['Yol', 'Durum'],
-    added: ['Yol', 'Title'],
+    removed: ['Yol', 'Sonuç ve yapılacak', 'Önem'],
+    unknown: ['Yol', 'Neden ve yapılacak'],
+    unlinked: ['Yol', 'Durum ve yapılacak'],
+    added: [...(many ? ['Site'] : []), 'Yol', 'Title'],
   }[t];
   const row = {
-    lost: (r) => [link(r.oldUrl, r.path), `<span class="flag">${esc(r.reason)}</span>`, esc(r.oldTitle), imp(r)],
-    redirected: (r) => [link(r.oldUrl, r.path), link(r.target), `<span class="${r.targetBroken ? 'flag' : 'st redirect'}">${r.status} → ${r.finalStatus || 'hata'}</span>`, r.hops],
-    changed: (r) => [link(r.newUrl, r.path), r.changes.map((c) => `<div class="chg ${c.kind}"><div><b>${esc(c.label)}</b> · ${c.kind === 'lost' ? '<span class="flag">kayıp</span>' : '<span class="small">değişti</span>'}</div><span class="small">Eski: ${esc(c.old) || '—'}</span><span class="small">Yeni: ${esc(c.new) || '—'}</span></div>`).join('')],
-    unknown: (r) => [esc(r.path), esc(r.reason)],
-    unlinked: (r) => [link(r.newUrl, r.path), esc(r.reason)],
-    added: (r) => [link(r.newUrl, r.path), esc(r.newTitle)],
+    lost: (r) => [cmpLink(r.oldUrl, r.path), explain(r), esc(r.oldTitle), imp(r)],
+    redirected: (r) => [cmpLink(r.oldUrl, r.path), `${cmpLink(r.target)}${explain(r, { reason: false })}`, `<span class="${r.targetBroken ? 'flag' : r.todo ? 'st warnish' : 'st okish'}">${r.status} → ${r.finalStatus || 'hata'}</span>`, r.hops],
+    changed: (r) => [cmpLink(r.newUrl, r.path), r.changes.map((c) => `<div class="chg ${c.kind}"><div><b>${esc(c.label)}</b> · ${c.kind === 'lost' ? '<span class="flag">kayıp</span>' : '<span class="small">değişti</span>'}</div><span class="small">Eski: ${esc(c.old) || '—'}</span><span class="small">Yeni: ${esc(c.new) || '—'}</span></div>`).join('') + explain(r, { reason: false })],
+    removed: (r) => [cmpLink(r.oldUrl, r.path), explain(r, { cls: 'small' }), imp(r)],
+    unknown: (r) => [esc(r.path), explain(r, { cls: '' })],
+    unlinked: (r) => [cmpLink(r.newUrl, r.path), explain(r, { cls: '' })],
+    added: (r) => [...(many ? [esc(r.site)] : []), cmpLink(r.newUrl, r.path), esc(r.newTitle)],
   }[t];
   $('#cmpTable').innerHTML = `<thead><tr>${H.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${
-    list.length ? list.map((r) => `<tr>${row(r).map((c, i) => `<td class="${i === 0 ? 'u' : ''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${H.length}" class="empty">Bu listede sayfa yok.</td></tr>`
+    list.length ? list.map((r) => `<tr>${row(r).map((c, i) => `<td class="${i === (t === 'added' && many ? 1 : 0) ? 'u' : ''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${H.length}" class="empty">Bu listede sayfa yok.</td></tr>`
   }</tbody>`;
 }
 
 $('#cmpForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  const a = $('#cmpOld').value, b = $('#cmpNew').value;
-  if (a === b) { $('#cmpErr').textContent = 'Eski ve yeni tarama farklı olmalı.'; return; }
-  const h = `#/compare/${encodeURIComponent(a)}/${encodeURIComponent(b)}`;
-  if (location.hash === h) openCompare(a, b); else location.hash = h;
+  $('#cmpErr').textContent = '';
+  const a = $('#cmpOld').value, ids = [...new Set(targetIds())];
+  if (ids.includes(a)) { $('#cmpErr').textContent = 'Eski ve yeni tarama farklı olmalı.'; return; }
+  cmpState.rules = readRules().filter((r) => r.from);
+  cmpState.rulesHost = crawlById(a)?.host;
+  savePathRules(cmpState.rulesHost, cmpState.rules);
+  const h = `#/compare/${encodeURIComponent(a)}/${ids.map(encodeURIComponent).join(',')}`;
+  if (location.hash === h) runCompare(a, ids); else location.hash = h;
 });
 $('#cmpTiles').addEventListener('click', (e) => {
   const b = e.target.closest('[data-tab]');
@@ -581,7 +737,7 @@ function route() {
   const [, kind, id] = location.hash.split('/');
   if (kind === 'live' && id) return openLive(decodeURIComponent(id));
   if (kind === 'crawl' && id) return openResult(decodeURIComponent(id));
-  if (kind === 'compare') { const [, , a, b] = location.hash.split('/'); return openCompare(a && decodeURIComponent(a), b && decodeURIComponent(b)); }
+  if (kind === 'compare') { const [, , a, b] = location.hash.split('/'); return openCompare(a && decodeURIComponent(a), (b || '').split(',').filter(Boolean).map(decodeURIComponent)); }
   currentId = null; es?.close();
   show('startView');
   heroStrip();

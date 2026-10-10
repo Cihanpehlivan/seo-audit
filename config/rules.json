@@ -27,6 +27,14 @@
     "maxExternalLinks": 1000,
     "maxImages": 2000
   },
+  "compare": {
+    "_aciklama": "Eski ve yeni site karşılaştırması. suggest*: desen önerisi eşikleri. Bir grup en az suggestMinPages sayfa içermeli. Öneri, gruptaki sayfaların en az suggestMinRatio oranını bulmalı.",
+    "maxTargets": 4,
+    "maxRules": 50,
+    "suggestMinPages": 3,
+    "suggestMinRatio": 0.5,
+    "maxSuggestions": 8
+  },
   "yayin": {
     "_aciklama": "PUBLIC_MODE=1 iken (internete açık sunucu) geçerli limitler.",
     "maxUrls": 2000,

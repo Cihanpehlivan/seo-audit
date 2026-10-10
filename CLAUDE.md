@@ -20,7 +20,7 @@ Kullanıcı: proje sahibi (Cihan). Sorunlar iş alanına göre gruplanır (Front
 ```
 bin/crawl.js            CLI
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
-src/compare.js          İki taramayı URL yoluna göre karşılaştırır, bulunamayan eski yolları yeni hostta yoklar (Sprint 3)
+src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması. Bulunamayan eski yolları beklenen adreste yoklar (Sprint 3)
 src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
 src/checks.js           Ek kontroller (tarama sonrası): site sürümleri, SSL, HSTS, llms.txt, dış link, görsel
 src/parser.js           HTML → SEO alanları (başlık ağacı, JSON-LD, görseller, linkler, parmak izi)
@@ -60,12 +60,12 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, zorunlu şifre, yayın limitleri | Tamam (v0.5.0) |
-| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0). Sırada Parça 2: 301 haritası önerisi | Devam ediyor |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1). Sırada Parça 2: 301 haritası önerisi | Devam ediyor |
 | Sprint 4 | AI özellikleri | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 25 kontrol (toplam yaklaşık 8 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 38 kontrol (toplam yaklaşık 8 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Açık noktalar (Sprint 2'den):
 - Ek kontroller gerçek bir sitede denenmedi. İlk denemede süreyi ve yanlış alarmları ölç. Eşikler: `checks` ve `brokenIgnoreStatuses`.
@@ -100,6 +100,14 @@ Açık noktalar (Sprint 2'den):
 - v0.6.0: İçerik kaybı: title, meta description veya H1 boşaldıysa, ya da indexlenebilir sayfaya noindex eklendiyse. Farklı metin "değişti" sayılır, kayıp sayılmaz.
 - v0.6.0: Karşılaştırma sonucu sunucu belleğinde tarama çifti başına saklanır (en fazla 20). Yoklama tekrar çalışmaz.
 - v0.6.0: Kaybolan listesi önem sırasındadır: önce indexlenebilir, sonra eski sitede çok iç link alan sayfa.
+- v0.6.1: Yol kuralı = eski yol deseni → hedef site + yeni yol (`/tr/* → tr.ornek.com /*`). `*` sadece sonda olur. `/tr/` yazılırsa `/tr/*` okunur. En uzun eski yol önce uygulanır. Kurala girmeyen yol ana hedefte aynı yolda aranır.
+- v0.6.1: Çoklu hedef: bir eski tarama en fazla 4 yeni tarama ile karşılaştırılır (`rules.json` → `compare.maxTargets`). İlk yeni tarama ana hedeftir. Yoklama her eski adresi kuralın hedef sitesinde ister. Yeni sayfalar her hedef için ayrı bulunur.
+- v0.6.1: Kural hedefi tarama kimliği değil, alan adıdır (www yok sayılır). Staging tekrar tarandığında kural geçerli kalır. Kuralın alan adı seçili taramalarda yoksa sayfalar "Kontrol edilemedi" olur; yoklama başka hosta gitmez (SSRF yüzeyi büyümez).
+- v0.6.1: "Bölüm kaldırıldı" kuralı (`drop`): sayfa ana hedefte aynı yolda aranır. Yönleniyorsa "Yönleniyor", bulunmazsa "Kayboldu" yerine "Bölüm kaldırıldı" grubuna girer. Korunan oranı artırmaz. 301 veya 410 yine gerekir.
+- v0.6.1: Kurallar sunucuda saklanmaz. Arayüz kuralları tarayıcıda (localStorage) eski sitenin alan adına göre saklar ve API'ye `rules` sorgu parametresi ile gönderir. Sebep: Render diski kalıcı değil, Excel linki de aynı parametreleri taşır. Karşılaştırma önbelleği kuralları da anahtara katar.
+- v0.6.1: Desen önerisi: eski sayfalar ilk yol parçasına göre gruplanır (en az `suggestMinPages` sayfa). Her grup için her hedefte üç taşıma denenir: aynı yol, öneki kaldır, hedefin bir öneki ile değiştir. Öneri, taramadaki sayfalara bakar (yoklama yapmaz). Grubun en az `suggestMinRatio` oranını bulmalı ve mevcut durumdan en az `suggestMinPages` fazla sayfa bulmalı. Hiçbir taşıma bulamazsa "bölüm kaldırıldı" önerilir. Kuralı olan grup tekrar önerilmez.
+- v0.6.1: Açıklama: her satırda kontrol edilen URL, uygulanan kural ve yapılacak iş (`todo`) yazılır. Yönlendirmede hatalı hedef, zincir (1'den fazla adım) ve 301/308 dışı status düzeltme ister. Her kuralın yanında sayfa ve bulunan sayısı gösterilir.
+- v0.6.1: Testler müşteri alan adı kullanmaz (`eski.com`, `tr.ornek.com`). Depo herkese açıktır.
 - v0.5.0: Araç Render ücretsiz planında yayınlanır (render.yaml, Docker). GitHub Pages kullanılmaz: sadece statik sayfa yayınlar, tarama sunucu ister.
 - v0.5.0: Yayın modu PUBLIC_MODE=1 ile açılır. Yerel kullanım değişmez: test sitesi 127.0.0.1 üzerinde çalışmaya devam eder.
 - v0.5.0: Yayın modunda APP_USER ve en az 10 karakterli APP_PASS zorunludur. Yoksa sunucu başlamaz.

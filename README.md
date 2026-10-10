@@ -1,4 +1,4 @@
-# SEO Audit — v0.6.0
+# SEO Audit — v0.6.1
 
 Teknik SEO denetim aracı. Kişisel proje. Bir siteyi tarar. Sonuçları web arayüzünde, JSON'da ve Excel'de gösterir.
 
@@ -73,7 +73,22 @@ Araç sayfaları URL yoluna göre eşleştirir: `www.ornek.com/hakkimizda` = `st
 
 Yeni tarama eski adresleri bulamaz, çünkü yeni sitede onlara link yoktur. Bu yüzden araç bulunamayan her eski yolu yeni sitede tek tek ister. İlk karşılaştırma bu yüzden birkaç saniye sürebilir.
 
-"Excel indir" bütün listeleri ayrı sayfalar halinde verir: Özet, Kaybolan, Yönlenen, İçerik değişimi, Linksiz, Kontrol edilemedi, Yeni sayfalar.
+"Excel indir" bütün listeleri ayrı sayfalar halinde verir: Özet, Kaybolan, Yönlenen, İçerik değişimi, Linksiz, Bölüm kaldırıldı, Kontrol edilemedi, Yeni sayfalar, Kurallar, Öneriler. Her satırda kural, kontrol edilen URL ve yapılacak iş yazılır.
+
+### Yol kuralları ve çoklu hedef (v0.6.1)
+
+Yol değiştiyse veya bir dil başka alan adına taşındıysa yol kuralı yazın. Örnek: eski sitede İngilizce kökte, Türkçe `/tr/` altında, Fransızca `/fr/` altında. Yeni İngilizce site öneksiz, Türkçe site ayrı alan adında, Fransızca yok.
+
+| Eski yol | Hedef site | Yeni yol | Anlamı |
+|---|---|---|---|
+| (kural yok) | Ana hedef | aynı yol | `/about` → ana hedefte `/about` |
+| `/tr/*` | Türkçe site | `/*` | `/tr/hakkimizda` → Türkçe sitede `/hakkimizda` |
+| `/fr/*` | Bölüm kaldırıldı | — | Bulunmayan sayfa "Kayboldu" yerine "Bölüm kaldırıldı" grubuna girer. 301 veya 410 yine gerekir. |
+
+- "+ Yeni site ekle" ile en fazla 4 yeni tarama seçin. İlk seçilen ana hedeftir.
+- `*` yolun geri kalanıdır. `/tr/` yazarsanız araç `/tr/*` olarak okur. En uzun eski yol önce uygulanır.
+- Araç kural önerir: eski sayfaları ilk yol parçasına göre gruplar (`/tr`, `/fr`) ve yeni taramalarda arar. "Ekle" ile öneriyi kabul edin. Eşikler: `config/rules.json` → `compare`.
+- Kurallar tarayıcıda, eski sitenin alan adına göre saklanır. Sayfa yenilense de kalır.
 
 ## Yayın (Render, ücretsiz plan)
 
@@ -200,7 +215,7 @@ Skor = kritik sorunu olmayan URL oranı (robots ile engelli URL'ler hariç). Sit
 2. Kural testi (99 kontrol): `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. SSL ve HSTS kuralları `test/fixture-https.js` (self-signed sertifika, 2046'ya kadar geçerli) ile test edilir. Testler internete çıkmaz: dış linkler `.invalid` alan adı kullanır. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü).
 
 3. Yayın modu testi (12 kontrol): iç ağ adresleri, tarayıcının iç adrese hiç istek göndermemesi, şifre zorunluluğu, `/healthz` ve limitler.
-4. Karşılaştırma testi (25 kontrol): yol eşleşmesi, kaybolan, yönlenen, içerik kaybı, yeni hostta yoklama, Excel.
+4. Karşılaştırma testi (38 kontrol): yol eşleşmesi, kaybolan, yönlenen, içerik kaybı, yeni hostta yoklama, yol kuralları, çoklu hedef, bölüm kaldırıldı, desen önerisi, satır açıklaması, Excel.
 
 Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 
@@ -216,7 +231,7 @@ Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 2. **Sprint 1 — Kural motoru (77 kural), Sorunlar sekmesi, sağlık skoru, başlık ağacı** ✅
 3. **Sprint 2 — Ek kontroller: dış link, görsel, site sürümleri, HSTS, SSL, sıkıştırma, llms.txt (11 kural)** ✅
 4. **v0.5 — Yayın hazırlığı: Render, SSRF koruması, yayın modu** ✅
-5. Sprint 3 — Migration: **Parça 1 karşılaştırma ekranı ✅**, Parça 2 301 haritası, Parça 3 canlıya çıkış kontrolü, Parça 4 canlıda 301 doğrulama.
+5. Sprint 3 — Migration: **Parça 1 karşılaştırma ekranı ✅ (v0.6.1: yol kuralları, çoklu hedef, desen önerisi)**, Parça 2 301 haritası, Parça 3 canlıya çıkış kontrolü, Parça 4 canlıda 301 doğrulama.
 5. Sprint 4 — AI: title/description, alt text, başlık önerisi, schema, yazım, 301 eşleştirme
 6. Sprint 5 — Entegrasyon: PageSpeed (CWV), Search Console, ClickUp
 7. Sprint 6 — JS render (Playwright)
