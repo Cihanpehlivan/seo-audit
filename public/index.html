@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>SEO Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..900&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="mark" aria-hidden="true"></span>SEO Audit</div>
+    <button class="new" id="newBtn" type="button">Yeni tarama</button>
+    <h2 class="side-h">Taramalar</h2>
+    <ul class="history" id="history"><li class="muted">Henüz tarama yok.</li></ul>
+  </aside>
+
+  <main class="main">
+    <section id="startView" class="landing">
+      <h1 class="display">Bir siteyi tarayın</h1>
+      <p class="lede">Araç iç linkleri, sitemap'i ve robots.txt'yi okur. Sayfaları <span id="ruleTotal">88</span> kuralla denetler. Sorunları ekiplere göre listeler.</p>
+      <form id="form" class="form" novalidate>
+        <div class="url-row">
+          <label class="sr" for="url">Site adresi</label>
+          <input id="url" name="url" type="url" placeholder="https://www.ornek.com" autocomplete="off" spellcheck="false" required>
+          <button class="primary big" type="submit" id="startBtn">Taramayı başlat</button>
+        </div>
+        <div class="hero-strip" id="heroStrip" aria-hidden="true"></div>
+        <p class="err" id="formErr" role="alert"></p>
+        <fieldset class="labels">
+          <legend>Bu tarama hangi site için?</legend>
+          <div class="seg">
+            <label><input type="radio" name="label" value="" checked><span>Tek site</span></label>
+            <label><input type="radio" name="label" value="eski"><span>Eski site</span></label>
+            <label><input type="radio" name="label" value="yeni"><span>Yeni site (staging)</span></label>
+          </div>
+        </fieldset>
+        <details class="adv" id="adv">
+          <summary>Gelişmiş ayarlar</summary>
+          <div class="grid">
+            <label>En fazla URL<input name="maxUrls" type="number" min="1" max="50000" value="5000"></label>
+            <label>Paralel istek<input name="concurrency" type="number" min="1" max="20" value="5"></label>
+            <label>Bekleme (ms)<input name="delayMs" type="number" min="0" max="10000" value="0"></label>
+            <label>Zaman aşımı (ms)<input name="timeoutMs" type="number" min="1000" max="60000" value="15000"></label>
+            <label class="wide">Staging şifresi (kullanıcı:şifre)<input name="auth" type="text" placeholder="demo:1234" autocomplete="off"></label>
+            <label class="check"><input name="ignoreRobots" type="checkbox"> robots.txt kurallarını yok say</label>
+            <label class="check"><input name="noSitemap" type="checkbox"> Sitemap okuma</label>
+            <p class="grid-h">Ek kontroller. Tarama bittikten sonra çalışır. Site ayarları: sürümler, SSL, HSTS, llms.txt. Görseller: kırık ve büyük dosya.</p>
+            <label class="check"><input name="checkSite" type="checkbox" checked> Site ayarları</label>
+            <label class="check"><input name="checkExternal" type="checkbox" checked> Dış linkler</label>
+            <label class="check"><input name="checkImages" type="checkbox" checked> Görseller</label>
+          </div>
+          <p class="hint">Yavaş sunucularda paralel isteği 2'ye, beklemeyi 500 ms'ye çekin.</p>
+        </details>
+      </form>
+
+      <div class="below">
+        <section class="flow" aria-labelledby="flowH">
+          <h2 id="flowH">Site yenilemede kullanım</h2>
+          <ol>
+            <li><div><b>Eski siteyi tarayın.</b> Yayına çıkmadan önce canlı siteyi "Eski site" etiketi ile tarayın.</div></li>
+            <li><div><b>Yeni siteyi tarayın.</b> Staging'i "Yeni site" etiketi ile tarayın. Şifreyi ve robots ayarını gelişmiş ayarlara yazın.</div></li>
+            <li class="soon"><div><b>İki taramayı karşılaştırın.</b> Kaybolan sayfaları ve 301 haritasını görün. Sprint 3'te gelir.</div></li>
+          </ol>
+        </section>
+        <section class="cats" aria-labelledby="catH">
+          <h2 id="catH">Denetlenen alanlar</h2>
+          <ul id="catList"></ul>
+        </section>
+      </div>
+    </section>
+
+    <section id="liveView" hidden>
+      <div class="live-head">
+        <div>
+          <h1 class="title" id="liveHost"></h1>
+          <p class="current" id="liveCurrent"></p>
+        </div>
+        <button class="ghost" id="cancelBtn" type="button">Taramayı durdur</button>
+      </div>
+      <div class="tally" id="liveTally"></div>
+      <div class="strip" id="liveStrip" aria-label="Taranan URL'lerin durumu"></div>
+      <p class="hint" id="liveNote"></p>
+    </section>
+
+    <section id="resultView" hidden>
+      <div class="res-head">
+        <div>
+          <h1 class="title" id="resHost"></h1>
+          <p class="meta" id="resMeta"></p>
+        </div>
+        <div class="actions">
+          <a class="primary" id="excelBtn" href="#">Excel indir</a>
+          <button class="ghost danger" id="deleteBtn" type="button">Sil</button>
+        </div>
+      </div>
+      <p class="warn" id="resWarn" hidden></p>
+      <div class="strip" id="resStrip" aria-label="Taranan URL'lerin durumu"></div>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="issues" aria-selected="true">Sorunlar</button>
+        <button type="button" role="tab" data-tab="pages" aria-selected="false">Sayfalar</button>
+      </div>
+      <div id="issuesPane">
+        <div class="score-row">
+          <div class="score" id="score"></div>
+          <div class="sev-filter" id="sevFilter"></div>
+        </div>
+        <div class="sitecheck" id="siteChecks"></div>
+        <div class="team-filter" id="teamFilter"></div>
+        <div class="issues" id="issues"></div>
+      </div>
+      <div id="pagesPane" hidden>
+        <div class="filters" id="filters" role="tablist"></div>
+        <div class="tools">
+          <label class="sr" for="q">URL veya title ara</label>
+          <input id="q" type="search" placeholder="URL veya title ara">
+          <span class="muted" id="countInfo"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="table">
+            <thead><tr>
+              <th>URL</th><th class="n">Status</th><th class="n">Sorun</th><th>Title</th><th class="n">H1</th><th class="n">Inlink</th><th class="n">Derinlik</th><th class="n">ms</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="pager" id="pager"></div>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

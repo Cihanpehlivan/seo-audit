@@ -1,0 +1,52 @@
+{
+  "_aciklama": "Eşikleri buradan değiştirin. Bir kuralı kapatmak için rules altında \"kural-id\": { \"enabled\": false } yazın. Önemi değiştirmek için \"severity\": \"critical\" | \"warning\" | \"notice\" yazın.",
+  "thresholds": {
+    "titleMaxPx": 580,
+    "titleMaxChars": 60,
+    "titleMinChars": 30,
+    "descMaxChars": 160,
+    "descMinChars": 70,
+    "thinContentWords": 250,
+    "maxDepth": 3,
+    "nearDuplicateDistance": 5,
+    "maxLinksPerPage": 300,
+    "slowResponseMs": 1000,
+    "largeHtmlKb": 500,
+    "blockingResources": 5,
+    "maxUrlLength": 115,
+    "maxUrlParams": 3,
+    "largeImageKb": 200,
+    "compressionMinKb": 1,
+    "hstsMinMaxAgeSec": 31536000,
+    "sslExpiryDays": 30
+  },
+  "checks": {
+    "_aciklama": "Tarama bittikten sonra çalışan ek kontrollerin limitleri.",
+    "concurrency": 8,
+    "timeoutMs": 8000,
+    "maxExternalLinks": 1000,
+    "maxImages": 2000
+  },
+  "brokenIgnoreStatuses": [401, 403, 429, 999],
+  "genericAnchors": ["tıklayın", "buraya tıklayın", "tıkla", "buraya", "devamı", "devamını oku", "daha fazla", "detay", "detaylar", "incele", "link", "click here", "here", "read more", "more", "learn more"],
+  "stagingHosts": ["staging", "stage", "stg", "dev", "test", "preprod", "uat", "demo", "beta"],
+  "stagingSuffixes": [".vercel.app", ".netlify.app", ".herokuapp.com", ".pages.dev", ".local", ".test", ".localhost", ".ngrok.io", ".ngrok-free.app"],
+  "aiBots": ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-SearchBot", "Claude-User", "PerplexityBot", "Perplexity-User", "Google-Extended", "Applebot-Extended", "CCBot"],
+  "schemaRequired": {
+    "Product": ["name"],
+    "Offer": ["price", "priceCurrency"],
+    "Article": ["headline"],
+    "NewsArticle": ["headline", "datePublished"],
+    "BlogPosting": ["headline"],
+    "Organization": ["name", "url"],
+    "LocalBusiness": ["name", "address"],
+    "BreadcrumbList": ["itemListElement"],
+    "FAQPage": ["mainEntity"],
+    "Event": ["name", "startDate", "location"],
+    "JobPosting": ["title", "datePosted", "description", "hiringOrganization"],
+    "VideoObject": ["name", "thumbnailUrl", "uploadDate"],
+    "Recipe": ["name", "image"],
+    "Review": ["itemReviewed", "author"]
+  },
+  "rules": {}
+}
