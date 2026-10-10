@@ -85,6 +85,18 @@ Açık noktalar (Sprint 2'den):
 - Terimler: "ana hedef" yerine "eski alan adına geçecek site". "Yoklama" kullanıcıya gösterilmez. Her kavramın yanında kısa "?" açıklaması.
 - İş büyükse iki sürüme bölünür: v0.7.0 (model, proje, tarama, eşleştirme), v0.7.1 (yapılacaklar, açıklamalar).
 
+**v0.7.0 onaylı ekran tasarımı** (sohbette tıklanabilir taslak ile onaylandı, örnek: Şamil Şahin taşıması):
+- Proje başlığı: proje adı, altında özet ("3 site · 2 kural · son tarama bugün").
+- Adım çubuğu: Proje, Tarama, Eşleştirme, Yapılacaklar tıklanır. 301 haritası, Canlıya çıkış, Canlı doğrulama kesik çizgili ve pasif ("Sonraki sürüm"). Mobilde çubuk yatay kayar.
+- "Sıradaki iş" kartı: adım çubuğunun altında, mavi sol çizgi. Tek cümle durum + tek düğme. Örnekler: "Türkçe site taranmadı. Eşleştirme için gerekli." [Türkçe siteyi tara]; "/fr/ bölümü için karar gerekli." [Kararı seç]; "15 iş var. En çok iş eski alan adı sunucusunda." [Excel indir].
+- Proje ekranı: "Yeni yapı nasıl?" üç seçim kartı (aynı alan adı ve aynı yollar / aynı alan adı, yollar değişiyor / diller ayrı alan adlarına). Siteler listesi: Eski site, Eski alan adına geçecek site (? açıklaması: "Canlıdan sonra eski alan adını bu site kullanır. Bütün 301'ler bu sitede kurulur."), Ek site (ad verilir, örnek "Türkçe"). Düğmeler: + Site ekle, Projeyi indir, Proje yükle.
+- Tarama ekranı: her site bir satır: alan adı + rol, durum etiketi (Tamam · N sayfa / Taranıyor / Taranmadı / Silinmiş), düğme (Tara / Tekrar tara). Not: "Staging şifreli ise şifreyi tarama sırasında girin. Araç şifreyi saklamaz."
+- Eşleştirme ekranı: sütunlar Eski bölüm · ok · Nereye gidiyor? · Sonuç. Satır: "/tr/ · 8 sayfa → [Türkçe site · /tr/ kalkar ▾] → 7 / 8 bulundu". Seçenekler: her site + yol biçimi (aynı yol / önek kalkar / önek değişir), Bölüm kaldırıldı, Karar verin. Öneri seçili gelir; bulunamayan bölüm "Karar verin" ve amber "Öneri: …" etiketi alır. Altta: "Gelişmiş: serbest kural yaz" (v0.6.1 kural editörü).
+- Yapılacaklar ekranı: işin yapıldığı yere göre satırlar: "<eski alan adı> sunucusu" (yönlendirme sayısı), her ek site (eksik sayfa), İçerik (title/meta/H1), Karar bekleyen. Her satırda sayı etiketi ve "Listeyi aç". Eski grup görünümü (Aynı kaldı, Yönleniyor, Kayboldu…) "Bütün sayfalar" altında kalır.
+- Durum etiketleri: yeşil = tamam/sorun yok, amber = iş veya karar gerekli, gri = taranmadı/bekliyor. Kırmızı sadece hata ve ana düğme için (v0.4.1 renk kuralı).
+- Giriş ekranı: iki seçenek, "Site denetimi" (tek site, mevcut Sorunlar ekranı) ve "Taşıma projesi". Kenar çubuğu: önce projeler, sonra projeye bağlı olmayan taramalar.
+- Mobil (390 px): bölüm tablosunun her satırı karta dönüşür; site satırlarında düğme alta iner.
+
 
 **Sprint 3 — Migration:** iki taramayı karşılaştırma ekranı (eski = `eski` etiketli, yeni = `yeni` etiketli). Kaybolan URL'ler, title/meta/H1 kaybı, 301 haritası önerisi (önce slug/title benzerliği, Sprint 4'te AI), 301 haritasını CSV/Excel olarak dışa aktarma, canlıya çıkış kontrolü (noindex/Disallow kaldı mı, staging linki kaldı mı), canlıda 301 haritası doğrulama, iki tarama arası ilerleme.
 
