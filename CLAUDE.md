@@ -20,6 +20,7 @@ Kullanıcı: proje sahibi (Cihan). Sorunlar iş alanına göre gruplanır (Front
 ```
 bin/crawl.js            CLI
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
+src/compare.js          İki taramayı URL yoluna göre karşılaştırır, bulunamayan eski yolları yeni hostta yoklar (Sprint 3)
 src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
 src/checks.js           Ek kontroller (tarama sonrası): site sürümleri, SSL, HSTS, llms.txt, dış link, görsel
 src/parser.js           HTML → SEO alanları (başlık ağacı, JSON-LD, görseller, linkler, parmak izi)
@@ -31,7 +32,7 @@ src/rules/helpers.js    isIndexable, titlePx, staging host tespiti, isBroken, TL
 src/rules/index.js      Denetim motoru, sağlık skoru
 src/export.js           Excel çıktısı
 src/store.js            Dosya tabanlı kayıt
-src/server.js           Web sunucusu + API (/api/crawls, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur
+src/server.js           Web sunucusu + API (/api/crawls, /api/compare, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur
 render.yaml             Render Blueprint (ücretsiz plan, Docker)
 public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page
 config/rules.json       Bütün eşikler, kural ayarları ve ek kontrol limitleri (checks)
@@ -59,12 +60,12 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, zorunlu şifre, yayın limitleri | Tamam (v0.5.0) |
-| Sprint 3 | Migration | Sırada |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0). Sırada Parça 2: 301 haritası önerisi | Devam ediyor |
 | Sprint 4 | AI özellikleri | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler testi 19 kontrol, kural testi 99 kontrol (yaklaşık 5 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 25 kontrol (toplam yaklaşık 8 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Açık noktalar (Sprint 2'den):
 - Ek kontroller gerçek bir sitede denenmedi. İlk denemede süreyi ve yanlış alarmları ölç. Eşikler: `checks` ve `brokenIgnoreStatuses`.
@@ -91,6 +92,14 @@ Açık noktalar (Sprint 2'den):
 - Benzer içerik eşiği simhash mesafesi 5 (3, 300 kelimelik sayfalarda gerçek benzerleri kaçırdı). 5.000 rastgele sayfada yanlış alarm 0.
 - Sağlık skoru = kritik sayfa sorunu olmayan URL oranı. Site geneli kritik sorun varsa skor en fazla 40.
 - v0.4.3: Proje kişisel projedir. RNG İstanbul ile ilgisi yoktur. Ad "SEO Audit", paket ve depo adı `seo-audit`. User-Agent `SEO-Audit/<sürüm>`. Renkler (grafit + kırmızı) sadece tasarım tercihidir, bir marka kimliği değildir.
+- v0.6.0 (Sprint 3, Parça 1): Sprint 3 dört parçaya bölündü: 1 karşılaştırma ekranı, 2 301 haritası önerisi, 3 canlıya çıkış kontrolü, 4 canlıda 301 doğrulama. Her parça ayrı sürüm.
+- v0.6.0: Eski ve yeni tarama URL yoluna göre eşleşir (host farklı olabilir: canlı ve staging). Sondaki / yok sayılır, yüzde kodlu yol çözülür. Büyük/küçük harf farkı ayrı yol sayılır (Parça 2 benzerlik ile yakalar).
+- v0.6.0: Sadece eski sitede 200 veren HTML sayfalar karşılaştırılır. Eski sitedeki yönlendirmeler eski sayfa sayılmaz.
+- v0.6.0: Yeni tarama sadece yeni sitenin linklerini izler; eski URL'ler genelde sadece 301 olarak yaşar. Bu yüzden yeni taramada bulunmayan her eski yol yeni hostta tek tek istenir (yoklama). Sonuç: yönleniyor, hatalı hedefe yönleniyor, açılıyor ama linksiz, kayboldu veya kontrol edilemedi.
+- v0.6.0: Yoklama staging şifresini göndermez (tarama şifresi kayıtta saklanmaz). Şifreli staging'de 401 "kontrol edilemedi" olur. Yayın modunda yoklama da SSRF korumasından geçer.
+- v0.6.0: İçerik kaybı: title, meta description veya H1 boşaldıysa, ya da indexlenebilir sayfaya noindex eklendiyse. Farklı metin "değişti" sayılır, kayıp sayılmaz.
+- v0.6.0: Karşılaştırma sonucu sunucu belleğinde tarama çifti başına saklanır (en fazla 20). Yoklama tekrar çalışmaz.
+- v0.6.0: Kaybolan listesi önem sırasındadır: önce indexlenebilir, sonra eski sitede çok iç link alan sayfa.
 - v0.5.0: Araç Render ücretsiz planında yayınlanır (render.yaml, Docker). GitHub Pages kullanılmaz: sadece statik sayfa yayınlar, tarama sunucu ister.
 - v0.5.0: Yayın modu PUBLIC_MODE=1 ile açılır. Yerel kullanım değişmez: test sitesi 127.0.0.1 üzerinde çalışmaya devam eder.
 - v0.5.0: Yayın modunda APP_USER ve en az 10 karakterli APP_PASS zorunludur. Yoksa sunucu başlamaz.

@@ -14,6 +14,7 @@
   <aside class="side">
     <div class="brand"><span class="mark" aria-hidden="true"></span>SEO Audit</div>
     <button class="new" id="newBtn" type="button">Yeni tarama</button>
+    <button class="new" id="cmpBtn" type="button">Karşılaştır</button>
     <h2 class="side-h">Taramalar</h2>
     <ul class="history" id="history"><li class="muted">Henüz tarama yok.</li></ul>
   </aside>
@@ -64,7 +65,7 @@
           <ol>
             <li><div><b>Eski siteyi tarayın.</b> Yayına çıkmadan önce canlı siteyi "Eski site" etiketi ile tarayın.</div></li>
             <li><div><b>Yeni siteyi tarayın.</b> Staging'i "Yeni site" etiketi ile tarayın. Şifreyi ve robots ayarını gelişmiş ayarlara yazın.</div></li>
-            <li class="soon"><div><b>İki taramayı karşılaştırın.</b> Kaybolan sayfaları ve 301 haritasını görün. Sprint 3'te gelir.</div></li>
+            <li><div><b>İki taramayı karşılaştırın.</b> Kaybolan sayfaları ve içerik kayıplarını görün. <a href="#/compare">Karşılaştırmayı açın.</a> 301 haritası sonraki sürümde gelir.</div></li>
           </ol>
         </section>
         <section class="cats" aria-labelledby="catH">
@@ -129,6 +130,28 @@
           </table>
         </div>
         <div class="pager" id="pager"></div>
+      </div>
+    </section>
+    <section id="compareView" hidden>
+      <h1 class="title">Eski ve yeni site</h1>
+      <p class="meta">Araç sayfaları URL yoluna göre eşleştirir. Eski site canlıda, yeni site staging'de olabilir.</p>
+      <form id="cmpForm" class="cmp-form" novalidate>
+        <label>Eski site taraması<select id="cmpOld"></select></label>
+        <span class="cmp-arrow" aria-hidden="true">→</span>
+        <label>Yeni site taraması<select id="cmpNew"></select></label>
+        <button class="primary" type="submit">Karşılaştır</button>
+      </form>
+      <p class="err" id="cmpErr" role="alert"></p>
+      <div id="cmpResult" hidden>
+        <div class="cmp-head">
+          <p class="cmp-kept"><b id="cmpKept"></b><span id="cmpKeptText"></span></p>
+          <a class="primary" id="cmpExcel" href="#">Excel indir</a>
+        </div>
+        <div id="cmpWarn"></div>
+        <div class="cmp-bar" id="cmpBar" role="img"></div>
+        <div class="cmp-tiles" id="cmpTiles"></div>
+        <div class="tools"><label class="sr" for="cmpQ">Ara</label><input id="cmpQ" type="search" placeholder="Yol veya title ara" autocomplete="off"><span class="muted" id="cmpCount"></span></div>
+        <div class="table-wrap"><table id="cmpTable"></table></div>
       </div>
     </section>
   </main>

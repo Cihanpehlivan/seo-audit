@@ -167,3 +167,47 @@ function siteRows(ck) {
   }
   return rows;
 }
+
+// Comparison of two crawls (old site vs new site) as an Excel file.
+export async function exportCompareExcel(cmp, file) {
+  const wb = new ExcelJS.Workbook();
+  const s = cmp.summary;
+  sheet(wb, 'Özet', [{ header: 'Metrik', key: 'k', width: 44 }, { header: 'Değer', key: 'v', width: 70 }], [
+    { k: 'Eski site', v: `${cmp.old.startUrl} (${cmp.old.startedAt})` },
+    { k: 'Yeni site', v: `${cmp.new.startUrl} (${cmp.new.startedAt})` },
+    { k: 'Eski sitede 200 veren sayfa', v: s.oldPages },
+    { k: 'Aynı kaldı', v: s.same },
+    { k: 'İçerik değişti', v: s.changed },
+    { k: 'İçerik kaybı var (title, meta, H1, noindex)', v: s.contentLost },
+    { k: 'Yönleniyor', v: s.redirected },
+    { k: 'Yönleniyor ama hedef hatalı', v: s.redirectBroken },
+    { k: 'Açılıyor ama yeni sitede link yok', v: s.unlinked },
+    { k: 'KAYBOLDU', v: s.lost },
+    { k: 'Kontrol edilemedi', v: s.unknown },
+    { k: 'Yeni sitede yeni sayfa', v: s.added },
+    { k: 'Korunan sayfa oranı', v: `%${s.kept}` },
+    ...cmp.warnings.map((w) => ({ k: 'Uyarı', v: w })),
+  ]);
+  const yn = (b) => (b ? 'Evet' : 'Hayır');
+  sheet(wb, 'Kaybolan', [
+    { header: 'Yol', key: 'path', width: 50 }, { header: 'Eski URL', key: 'oldUrl', width: 60 }, { header: 'Eski title', key: 'oldTitle', width: 50 },
+    { header: 'Neden', key: 'reason', width: 30 }, { header: 'İndekslenebilir', key: 'idx', width: 14 }, { header: 'İç link (eski)', key: 'inlinks', width: 13 },
+  ], cmp.rows.lost.map((r) => ({ ...r, idx: yn(r.indexable) })));
+  sheet(wb, 'Yönlenen', [
+    { header: 'Yol', key: 'path', width: 50 }, { header: 'Yeni sitedeki URL', key: 'newUrl', width: 60 }, { header: 'Hedef', key: 'target', width: 60 },
+    { header: 'İlk status', key: 'status', width: 10 }, { header: 'Hedef status', key: 'finalStatus', width: 12 }, { header: 'Adım', key: 'hops', width: 8 },
+    { header: 'Hedef hatalı', key: 'broken', width: 12 },
+  ], cmp.rows.redirected.map((r) => ({ ...r, broken: yn(r.targetBroken) })));
+  sheet(wb, 'İçerik değişimi', [
+    { header: 'Yol', key: 'path', width: 50 }, { header: 'Alan', key: 'label', width: 16 }, { header: 'Tür', key: 'kind', width: 10 },
+    { header: 'Eski', key: 'old', width: 60 }, { header: 'Yeni', key: 'new', width: 60 },
+  ], cmp.rows.changed.flatMap((r) => r.changes.map((c) => ({ path: r.path, ...c, kind: c.kind === 'lost' ? 'Kayıp' : 'Değişti' }))));
+  if (cmp.rows.unlinked.length) {
+    sheet(wb, 'Linksiz', [{ header: 'Yol', key: 'path', width: 50 }, { header: 'Yeni sitedeki URL', key: 'newUrl', width: 60 }, { header: 'Durum', key: 'reason', width: 50 }], cmp.rows.unlinked);
+  }
+  if (cmp.rows.unknown.length) {
+    sheet(wb, 'Kontrol edilemedi', [{ header: 'Yol', key: 'path', width: 50 }, { header: 'Neden', key: 'reason', width: 60 }], cmp.rows.unknown);
+  }
+  sheet(wb, 'Yeni sayfalar', [{ header: 'Yol', key: 'path', width: 50 }, { header: 'URL', key: 'newUrl', width: 60 }, { header: 'Title', key: 'newTitle', width: 60 }], cmp.rows.added);
+  await wb.xlsx.writeFile(file);
+}

@@ -1,4 +1,4 @@
-# SEO Audit — v0.5.0
+# SEO Audit — v0.6.0
 
 Teknik SEO denetim aracı. Kişisel proje. Bir siteyi tarar. Sonuçları web arayüzünde, JSON'da ve Excel'de gösterir.
 
@@ -55,6 +55,25 @@ Ortam değişkenleri:
 | `CRAWL_DIR` | Kayıt klasörü | ./crawls |
 
 Not: Bu tool sunucu tarafında tarama yapar. Tarayıcı içinde tek başına çalışamaz, çünkü tarayıcılar başka sitelerin içeriğini okumayı engeller (CORS).
+
+## Eski ve yeni site karşılaştırması (Sprint 3, Parça 1)
+
+Site yenilemede eski siteyi "Eski site", yeni siteyi (staging) "Yeni site" etiketi ile tarayın. Sonra kenar çubuğunda "Karşılaştır" düğmesine basın. Araç iki taramayı otomatik seçer.
+
+Araç sayfaları URL yoluna göre eşleştirir: `www.ornek.com/hakkimizda` = `staging.ornek.com/hakkimizda`. Eski sitenin her 200 sayfası şu gruplardan birine girer:
+
+| Grup | Anlamı |
+|---|---|
+| Aynı kaldı | Aynı yolda açılıyor. Title, meta description ve H1 aynı. |
+| İçerik değişti | Aynı yolda açılıyor ama title, meta veya H1 farklı. Boşaldıysa veya noindex eklendiyse "kayıp" olarak işaretlenir. |
+| Yönleniyor | Yeni sitede başka bir adrese yönleniyor. Hedef 4xx/5xx ise "hedef hatalı". |
+| Açılıyor, link yok | Adres açılıyor ama yeni sitede bu sayfaya hiç link yok. |
+| Kayboldu | Yeni sitede 404 veya başka bir hata. 301 gerekir. |
+| Kontrol edilemedi | robots.txt engeli, şifreli staging (401) veya bağlantı hatası. |
+
+Yeni tarama eski adresleri bulamaz, çünkü yeni sitede onlara link yoktur. Bu yüzden araç bulunamayan her eski yolu yeni sitede tek tek ister. İlk karşılaştırma bu yüzden birkaç saniye sürebilir.
+
+"Excel indir" bütün listeleri ayrı sayfalar halinde verir: Özet, Kaybolan, Yönlenen, İçerik değişimi, Linksiz, Kontrol edilemedi, Yeni sayfalar.
 
 ## Yayın (Render, ücretsiz plan)
 
@@ -175,12 +194,13 @@ Skor = kritik sorunu olmayan URL oranı (robots ile engelli URL'ler hariç). Sit
 
 ## Testler
 
-`npm test` üç test çalıştırır:
+`npm test` dört test çalıştırır:
 
 1. Crawler testi (19 kontrol).
 2. Kural testi (99 kontrol): `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. SSL ve HSTS kuralları `test/fixture-https.js` (self-signed sertifika, 2046'ya kadar geçerli) ile test edilir. Testler internete çıkmaz: dış linkler `.invalid` alan adı kullanır. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü).
 
 3. Yayın modu testi (12 kontrol): iç ağ adresleri, tarayıcının iç adrese hiç istek göndermemesi, şifre zorunluluğu, `/healthz` ve limitler.
+4. Karşılaştırma testi (25 kontrol): yol eşleşmesi, kaybolan, yönlenen, içerik kaybı, yeni hostta yoklama, Excel.
 
 Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 
@@ -196,7 +216,7 @@ Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 2. **Sprint 1 — Kural motoru (77 kural), Sorunlar sekmesi, sağlık skoru, başlık ağacı** ✅
 3. **Sprint 2 — Ek kontroller: dış link, görsel, site sürümleri, HSTS, SSL, sıkıştırma, llms.txt (11 kural)** ✅
 4. **v0.5 — Yayın hazırlığı: Render, SSRF koruması, yayın modu** ✅
-5. Sprint 3 — Migration: eski/yeni karşılaştırma, 301 haritası, launch kontrolü
+5. Sprint 3 — Migration: **Parça 1 karşılaştırma ekranı ✅**, Parça 2 301 haritası, Parça 3 canlıya çıkış kontrolü, Parça 4 canlıda 301 doğrulama.
 5. Sprint 4 — AI: title/description, alt text, başlık önerisi, schema, yazım, 301 eşleştirme
 6. Sprint 5 — Entegrasyon: PageSpeed (CWV), Search Console, ClickUp
 7. Sprint 6 — JS render (Playwright)

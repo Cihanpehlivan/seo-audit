@@ -32,7 +32,7 @@ async function api(path, opts = {}) {
 }
 
 function show(view) {
-  for (const v of ['startView', 'liveView', 'resultView']) $('#' + v).hidden = v !== view;
+  for (const v of ['startView', 'liveView', 'resultView', 'compareView']) $('#' + v).hidden = v !== view;
 }
 
 // ---------- History ----------
@@ -59,6 +59,7 @@ $('#history').addEventListener('click', (e) => {
   if (b) location.hash = (b.dataset.run ? '#/live/' : '#/crawl/') + b.dataset.id;
 });
 $('#newBtn').addEventListener('click', () => { location.hash = '#/'; });
+$('#cmpBtn').addEventListener('click', () => { location.hash = '#/compare'; });
 
 // ---------- Start ----------
 $('#form').addEventListener('submit', async (e) => {
@@ -466,11 +467,121 @@ async function loadInfo() {
 }
 loadInfo();
 
+// ---------- Compare: old site vs new site (Sprint 3, part 1) ----------
+// The bar shows what happened to every page of the old site. Tiles open the lists.
+const CMP_KINDS = [
+  { k: 'same', label: 'Aynı kaldı', cls: 'ok' },
+  { k: 'changed', label: 'İçerik değişti', cls: 'warning' },
+  { k: 'redirected', label: 'Yönleniyor', cls: 'redirect' },
+  { k: 'lost', label: 'Kayboldu', cls: 'critical' },
+  { k: 'unlinked', label: 'Açılıyor, link yok', cls: 'notice' },
+  { k: 'unknown', label: 'Kontrol edilemedi', cls: 'notice' },
+  { k: 'added', label: 'Yeni sayfa', cls: 'new' },
+];
+const cmpState = { data: null, tab: 'lost', q: '' };
+const crawlLabel = (h) => `${h.host}${h.label ? ' · ' + h.label : ''} · ${fmtDate(h.startedAt)} · ${h.summary.total} URL`;
+
+async function openCompare(a, b) {
+  currentId = null; es?.close();
+  show('compareView');
+  loadHistory();
+  $('#cmpErr').textContent = '';
+  let history = [];
+  try { ({ history } = await api('/api/crawls')); } catch (e) { $('#cmpErr').textContent = e.message; }
+  const opts = history.map((h) => `<option value="${esc(h.id)}">${esc(crawlLabel(h))}</option>`).join('');
+  $('#cmpOld').innerHTML = opts; $('#cmpNew').innerHTML = opts;
+  if (history.length < 2) {
+    $('#cmpResult').hidden = true;
+    $('#cmpErr').textContent = 'Karşılaştırma için en az iki tarama gerekir. Eski siteyi "Eski site", yeni siteyi "Yeni site" etiketi ile tarayın.';
+    return;
+  }
+  const pick = (label, skip) => history.find((h) => h.label === label && h.id !== skip)?.id;
+  const oldId = a || pick('eski') || history[1].id;
+  const newId = b || pick('yeni', oldId) || history.find((h) => h.id !== oldId).id;
+  $('#cmpOld').value = oldId; $('#cmpNew').value = newId;
+  if (!a || !b) { $('#cmpResult').hidden = true; return; }
+  $('#cmpResult').hidden = true;
+  try {
+    cmpState.data = await api(`/api/compare?old=${encodeURIComponent(a)}&new=${encodeURIComponent(b)}`);
+    cmpState.tab = cmpState.data.summary.lost ? 'lost' : cmpState.data.summary.contentLost ? 'changed' : cmpState.data.summary.redirected ? 'redirected' : 'added';
+    cmpState.q = ''; $('#cmpQ').value = '';
+    $('#cmpExcel').href = `/api/compare/excel?old=${encodeURIComponent(a)}&new=${encodeURIComponent(b)}`;
+    renderCompare();
+    $('#cmpResult').hidden = false;
+  } catch (e) { $('#cmpErr').textContent = e.message; }
+}
+
+function renderCompare() {
+  const { summary: s, warnings, old: o } = cmpState.data;
+  $('#cmpKept').textContent = `%${s.kept}`;
+  $('#cmpKeptText').textContent = `Eski sitenin ${s.oldPages} sayfasından ${s.same + s.changed} tanesi yeni sitede aynı adreste açılıyor.`;
+  $('#cmpWarn').innerHTML = warnings.map((w) => `<p class="warn">${esc(w)}</p>`).join('');
+  // Bar: only old pages, so the parts add up to 100%.
+  const parts = CMP_KINDS.filter((x) => x.k !== 'added').map((x) => ({ ...x, n: s[x.k] })).filter((x) => x.n);
+  $('#cmpBar').innerHTML = parts.map((x) => `<i class="${x.cls}" style="flex-grow:${x.n}" title="${x.label}: ${x.n}"></i>`).join('');
+  $('#cmpBar').setAttribute('aria-label', parts.map((x) => `${x.label}: ${x.n}`).join(', '));
+  const sub = { changed: s.contentLost ? `${s.contentLost} sayfada kayıp` : 'kayıp yok', redirected: s.redirectBroken ? `${s.redirectBroken} hedef hatalı` : 'hedefler açılıyor', lost: s.lost ? '301 gerekli' : '' };
+  $('#cmpTiles').innerHTML = CMP_KINDS.filter((x) => !['unknown', 'unlinked'].includes(x.k) || s[x.k]).map((x) => `<button type="button" class="${x.cls}" data-tab="${x.k}" aria-pressed="${cmpState.tab === x.k}">
+    <b>${s[x.k]}</b><span>${x.label}</span>${sub[x.k] ? `<em>${sub[x.k]}</em>` : ''}</button>`).join('');
+  renderCompareTable();
+}
+
+function renderCompareTable() {
+  const { rows, summary: s } = cmpState.data;
+  const t = cmpState.tab, q = cmpState.q.toLowerCase();
+  if (t === 'same') {
+    $('#cmpTable').innerHTML = `<tbody><tr><td class="empty">${s.same} sayfa aynı adreste açılıyor. Title, meta description ve H1 aynı. Liste gerekmez.</td></tr></tbody>`;
+    $('#cmpCount').textContent = ''; return;
+  }
+  let list = rows[t].filter((r) => !q || r.path.toLowerCase().includes(q) || (r.oldTitle || r.newTitle || '').toLowerCase().includes(q));
+  const total = list.length;
+  list = list.slice(0, 500);
+  $('#cmpCount').textContent = `${total} sonuç${total > 500 ? ' · ilk 500 gösteriliyor, tamamı Excel\'de' : ''}`;
+  const imp = (r) => `${r.indexable ? '' : '<span class="small">indexlenmez</span> '}<span class="small">${r.inlinks} iç link</span>`;
+  const link = (u, txt) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt ?? u)}</a>`;
+  const H = {
+    lost: ['Yol', 'Neden', 'Eski title', 'Önem'],
+    redirected: ['Yol', 'Hedef', 'Status', 'Adım'],
+    changed: ['Yol', 'Değişim'],
+    unknown: ['Yol', 'Neden'],
+    unlinked: ['Yol', 'Durum'],
+    added: ['Yol', 'Title'],
+  }[t];
+  const row = {
+    lost: (r) => [link(r.oldUrl, r.path), `<span class="flag">${esc(r.reason)}</span>`, esc(r.oldTitle), imp(r)],
+    redirected: (r) => [link(r.oldUrl, r.path), link(r.target), `<span class="${r.targetBroken ? 'flag' : 'st redirect'}">${r.status} → ${r.finalStatus || 'hata'}</span>`, r.hops],
+    changed: (r) => [link(r.newUrl, r.path), r.changes.map((c) => `<div class="chg ${c.kind}"><div><b>${esc(c.label)}</b> · ${c.kind === 'lost' ? '<span class="flag">kayıp</span>' : '<span class="small">değişti</span>'}</div><span class="small">Eski: ${esc(c.old) || '—'}</span><span class="small">Yeni: ${esc(c.new) || '—'}</span></div>`).join('')],
+    unknown: (r) => [esc(r.path), esc(r.reason)],
+    unlinked: (r) => [link(r.newUrl, r.path), esc(r.reason)],
+    added: (r) => [link(r.newUrl, r.path), esc(r.newTitle)],
+  }[t];
+  $('#cmpTable').innerHTML = `<thead><tr>${H.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${
+    list.length ? list.map((r) => `<tr>${row(r).map((c, i) => `<td class="${i === 0 ? 'u' : ''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${H.length}" class="empty">Bu listede sayfa yok.</td></tr>`
+  }</tbody>`;
+}
+
+$('#cmpForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const a = $('#cmpOld').value, b = $('#cmpNew').value;
+  if (a === b) { $('#cmpErr').textContent = 'Eski ve yeni tarama farklı olmalı.'; return; }
+  const h = `#/compare/${encodeURIComponent(a)}/${encodeURIComponent(b)}`;
+  if (location.hash === h) openCompare(a, b); else location.hash = h;
+});
+$('#cmpTiles').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tab]');
+  if (!b) return;
+  cmpState.tab = b.dataset.tab;
+  for (const x of $('#cmpTiles').querySelectorAll('[data-tab]')) x.setAttribute('aria-pressed', x === b);
+  renderCompareTable();
+});
+$('#cmpQ').addEventListener('input', (e) => { cmpState.q = e.target.value; renderCompareTable(); });
+
 // ---------- Router ----------
 function route() {
   const [, kind, id] = location.hash.split('/');
   if (kind === 'live' && id) return openLive(decodeURIComponent(id));
   if (kind === 'crawl' && id) return openResult(decodeURIComponent(id));
+  if (kind === 'compare') { const [, , a, b] = location.hash.split('/'); return openCompare(a && decodeURIComponent(a), b && decodeURIComponent(b)); }
   currentId = null; es?.close();
   show('startView');
   heroStrip();

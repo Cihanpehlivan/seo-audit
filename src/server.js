@@ -4,13 +4,16 @@ import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crawl } from './crawler.js';
-import { exportExcel } from './export.js';
+import { exportExcel, exportCompareExcel } from './export.js';
+import { compareCrawls, probeLost } from './compare.js';
 import { Store, ID_RE } from './store.js';
 import { normalizeUrl } from './normalize.js';
 import { runAudit, loadConfig, RULES, CATEGORIES } from './rules/index.js';
 import { isBroken } from './rules/helpers.js';
 import os from 'node:os';
 import { makeGuard } from './netguard.js';
+import { readFileSync } from 'node:fs';
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PORT = +(process.env.PORT || 3300);
@@ -31,6 +34,31 @@ if (PUBLIC_MODE && (!APP_USER || !APP_PASS || APP_PASS.length < YAYIN.minPassLen
 const JOB_LIMIT = PUBLIC_MODE ? YAYIN.maxJobs : MAX_JOBS;
 const URL_LIMIT = PUBLIC_MODE ? YAYIN.maxUrls : 50000;
 const startGuard = PUBLIC_MODE ? makeGuard() : null;
+
+// Comparison results are cached per crawl pair: probing old paths on the new host takes time.
+const cmpCache = new Map();
+async function compareWithProbe(a, b, oldRes, newRes) {
+  const key = `${a}|${b}`;
+  if (cmpCache.has(key)) return cmpCache.get(key);
+  const cmp = compareCrawls(oldRes, newRes);
+  const guard = PUBLIC_MODE ? makeGuard() : null;
+  const cfg = loadConfig().checks;
+  const request = async (url) => {
+    if (guard && await guard(url)) throw Object.assign(new Error('blocked-private'), { cause: { code: 'blocked-private' } });
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
+    try {
+      const res = await fetch(url, { redirect: 'manual', signal: ctrl.signal, headers: { 'user-agent': `SEO-Audit/${VERSION}` } });
+      res.body?.cancel?.();
+      return { status: res.status, location: res.headers.get('location'), contentType: res.headers.get('content-type') || '' };
+    } catch (e) { throw e.name === 'AbortError' ? Object.assign(new Error('timeout'), { cause: { code: 'timeout' } }) : e; }
+    finally { clearTimeout(t); }
+  };
+  await probeLost(cmp, new URL(newRes.meta.startUrl).origin, request, { concurrency: cfg.concurrency });
+  cmpCache.set(key, cmp);
+  if (cmpCache.size > 20) cmpCache.delete(cmpCache.keys().next().value);
+  return cmp;
+}
 
 const store = new Store(process.env.CRAWL_DIR || path.join(ROOT, 'crawls'));
 await store.init();
@@ -181,6 +209,27 @@ const server = http.createServer(async (req, res) => {
       if (!MIME[ext]) return send(res, 404, 'Bulunamadı', 'text/plain');
       try { return send(res, 200, await readFile(path.join(ROOT, 'public', name)), MIME[ext]); }
       catch { return send(res, 404, 'Bulunamadı', 'text/plain'); }
+    }
+
+    // /api/compare?old=<id>&new=<id>: old site vs new site. /api/compare/excel: same data as Excel.
+    if (parts[1] === 'compare' && req.method === 'GET') {
+      const a = u.searchParams.get('old'), b = u.searchParams.get('new');
+      if (!a || !b || !ID_RE.test(a) || !ID_RE.test(b)) return send(res, 400, { error: 'İki tarama seçin: eski ve yeni.' });
+      if (a === b) return send(res, 400, { error: 'Eski ve yeni tarama farklı olmalı.' });
+      let oldRes, newRes;
+      try { [oldRes, newRes] = await Promise.all([store.load(a), store.load(b)]); }
+      catch { return send(res, 404, { error: 'Tarama bulunamadı. Sunucu yeniden başladıysa taramalar silinmiş olabilir.' }); }
+      const cmp = await compareWithProbe(a, b, oldRes, newRes);
+      if (parts[2] !== 'excel') return send(res, 200, cmp);
+      const tmp = path.join(os.tmpdir(), `cmp-${Date.now()}.xlsx`);
+      await exportCompareExcel(cmp, tmp);
+      res.writeHead(200, {
+        'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'content-disposition': `attachment; filename="karsilastirma-${cmp.old.host}-${cmp.new.host}.xlsx"`,
+      });
+      const buf = await readFile(tmp);
+      unlink(tmp).catch(() => {});
+      return res.end(buf);
     }
 
     // /api/info: server mode for the interface
