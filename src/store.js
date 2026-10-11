@@ -56,6 +56,7 @@ export class Store {
     return items.filter(Boolean).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
 
+  async meta(id) { try { return JSON.parse(await readFile(this.file(id, 'meta.json'), 'utf8')); } catch { return null; } }
   async load(id) { return JSON.parse(await readFile(this.file(id, 'json'), 'utf8')); }
 
   async remove(id) {

@@ -151,7 +151,7 @@ const ML_RULES = [{ from: '/tr/*', host: 'tr.ornek.com', to: '/*' }, { from: '/f
 await check('kural: "/tr/" "/tr/*" olur, yanlış yazım açık hata verir', () => {
   assert.equal(parseRule({ from: '/tr/', to: '/' }).from, '/tr/*');
   assert.equal(parseRule({ from: '/fr/*', drop: true }).text, '/fr/* → bölüm kaldırıldı');
-  assert.equal(parseRule({ from: '/en/*', to: '/*' }).text, '/en/* → ana hedef/*');
+  assert.equal(parseRule({ from: '/en/*', to: '/*' }).text, '/en/* → geçecek site /*');
   assert.equal(parseRule({ from: '/tr/*', host: 'https://www.TR.ornek.com/x', to: '/*' }).host, 'tr.ornek.com');
   assert.throws(() => parseRule({ from: 'tr/*' }), /"\/" ile başlamalı/);
   assert.throws(() => parseRule({ from: '/tr/*/a' }), /sadece sonda/);
@@ -168,16 +168,20 @@ await check('kural: yol taşıma, sorgu ve benzer önek', () => {
     crawl('staging.ornek.com', [EN('/'), EN('/a/b'), EN('/trabzon'), EN('/?x=1')]),
     { rules: [{ from: '/tr/*', to: '/*' }, { from: '/fr/*', to: '/yok' }] },
   );
-  assert.equal(c.summary.same, 4); // /tr → /, /tr/a/b → /a/b, /trabzon (no rule), /tr?x=1 → /?x=1
-  assert.deepEqual(c.rows.lost.map((r) => r.newPath), ['/yok', '/yok']); // many old pages → one path (no "*" in target)
+  // Moved paths are not "same": the old URL must 301. Only /trabzon (no rule) stays on its path.
+  assert.equal(c.summary.same, 1);
+  const np = (p) => c.rows.moving.find((r) => r.path === p).newPath;
+  assert.deepEqual([np('/tr'), np('/tr/a/b'), np('/tr?x=1')], ['/', '/a/b', '/?x=1']);
+  assert.equal(c.rows.moving.find((r) => r.path === '/tr').rule, '/tr/* → staging.ornek.com/*');
+  assert.deepEqual(c.rows.moving.filter((r) => r.newPath === '/yok').length, 2); // many old pages → one path (no "*" in target)
+  assert.equal(c.summary.pending, 5);
 });
 await check('çoklu hedef: kuralsız yol ana hedefe, kurallı yol kendi sitesine gider', () => {
   const c = compareCrawls(ML_OLD, [ML_EN, ML_TR], { rules: ML_RULES });
   assert.deepEqual(c.targets.map((t) => t.host), ['staging.ornek.com', 'tr.ornek.com']);
-  assert.equal(c.summary.same, 9); // 5 English + 4 Turkish
-  const lost = c.rows.lost.find((r) => r.path === '/tr/iletisim');
-  assert.deepEqual([lost.site, lost.newPath, lost.checkUrl, lost.rule], ['tr.ornek.com', '/iletisim', 'https://tr.ornek.com/iletisim', '/tr/* → tr.ornek.com/*']);
-  assert.match(lost.todo, /301/);
+  assert.equal(c.summary.same, 5); // 5 English. Turkish pages moved: they wait for the 301 check.
+  const mv = c.rows.moving.find((r) => r.path === '/tr/iletisim');
+  assert.deepEqual([mv.site, mv.newPath, mv.checkUrl, mv.heirUrl, mv.rule], ['tr.ornek.com', '/iletisim', 'https://tr.ornek.com/iletisim', 'https://staging.ornek.com/tr/iletisim', '/tr/* → tr.ornek.com/*']);
   assert.deepEqual(c.rows.added.map((r) => [r.site, r.path]), [['tr.ornek.com', '/blog']]);
 });
 const mlSeen = [];
@@ -187,13 +191,16 @@ const mlRequest = async (url) => {
 };
 const ml = await probeLost(compareCrawls(ML_OLD, [ML_EN, ML_TR], { rules: ML_RULES }), mlRequest);
 await check('yoklama: her sayfa kuralın hedefinde istenir', () => {
-  assert.ok(mlSeen.includes('https://tr.ornek.com/iletisim'));
+  assert.ok(mlSeen.includes('https://tr.ornek.com/iletisim')); // target page
+  assert.ok(mlSeen.includes('https://staging.ornek.com/tr/iletisim')); // 301 check on the heir
   assert.ok(mlSeen.includes('https://staging.ornek.com/fr/prestations'));
-  assert.ok(!mlSeen.some((u) => u.includes('staging.ornek.com/tr')));
+  assert.ok(!mlSeen.includes('https://tr.ornek.com/hakkimizda')); // target is in the crawl: no request
 });
 await check('bölüm kaldırıldı: bulunmayan sayfa "Kayboldu" grubuna girmez', () => {
   assert.deepEqual(ml.rows.removed.map((r) => r.path).sort(), ['/fr', '/fr/nous-contacter', '/fr/prestations']);
-  assert.deepEqual(ml.rows.lost.map((r) => r.path), ['/tr/iletisim']);
+  assert.deepEqual(ml.rows.lost, []);
+  assert.deepEqual(ml.rows.notarget.map((r) => r.path), ['/tr/iletisim']);
+  assert.equal(ml.rows.no301.length, 4); // the heir answers 404 for the old Turkish paths
   assert.equal(ml.rows.redirected.find((r) => r.path === '/fr/a-propos').target, 'https://staging.ornek.com/about');
   assert.match(ml.rows.removed[0].todo, /410/);
   assert.equal(ml.summary.removed, 3);
@@ -224,9 +231,91 @@ await check('kural hedefi seçilmediyse sayfa "Kontrol edilemedi" olur ve çöz�
   const c = compareCrawls(ML_OLD, [ML_EN], { rules: ML_RULES });
   const r = c.rows.unknown.find((x) => x.path === '/tr/hakkimizda');
   assert.match(r.reason, /tr\.ornek\.com/);
-  assert.match(r.todo, /hedef olarak ekleyin/);
-  assert.ok(c.warnings.some((w) => w.includes('tr.ornek.com için tarama seçilmedi')));
+  assert.match(r.todo, /tr\.ornek\.com sitesini tarayın/);
+  assert.ok(c.warnings.some((w) => w.includes('tr.ornek.com taranmadı')));
 });
+// ---------- v0.7.0: moved pages need a target page and a 301 on the heir ----------
+// Heir = the site that takes the old domain (staging.ornek.com). Turkish moves to tr.ornek.com (live: tr.eski.com).
+const MV_OLD = crawl('www.eski.com', ['/', '/about', '/en/team', '/tr/a', '/tr/b', '/tr/c', '/tr/d', '/tr/e', '/tr/f', '/tr/g'].map((p) => E(p)));
+const MV_EN = crawl('staging.ornek.com', [EN('/'), EN('/about'), EN('/team', { title: '' }),
+  EN('/tr/a', { status: 301, finalStatus: 200, finalUrl: 'https://tr.ornek.com/a', redirectChain: [{ url: 'https://staging.ornek.com/tr/a', status: 301, to: 'https://tr.ornek.com/a' }] })]);
+const MV_TR = crawl('tr.ornek.com', ['/a', '/b', '/c', '/d', '/e', '/g'].map((p) => TR(p)));
+const MV_RULES = [{ from: '/tr/*', host: 'tr.ornek.com', to: '/*' }, { from: '/en/*', to: '/*' }];
+const MV_OPTS = { rules: MV_RULES, live: { 'tr.ornek.com': 'tr.eski.com' } };
+const H = 'https://staging.ornek.com';
+const mvFake = {
+  [H + '/en/team']: { status: 301, location: 'https://www.eski.com/team' }, // heir live host = old domain
+  [H + '/tr/b']: { status: 301, location: 'https://tr.eski.com/b' }, // live host of the target
+  [H + '/tr/c']: { status: 200 },
+  [H + '/tr/d']: { status: 301, location: '/tr/d2' }, [H + '/tr/d2']: { status: 301, location: 'https://tr.ornek.com/d' },
+  [H + '/tr/e']: { status: 301, location: 'https://baska.com/e' },
+  [H + '/tr/g']: { status: 302, location: 'https://tr.ornek.com/x' },
+  'https://tr.ornek.com/f': { status: 404 },
+};
+const mvSeen = [];
+const mvRequest = async (url) => { mvSeen.push(url); return mvFake[url] || { status: 404 }; };
+const mvPre = compareCrawls(MV_OLD, [MV_EN, MV_TR], MV_OPTS);
+const mv = await probeLost(compareCrawls(MV_OLD, [MV_EN, MV_TR], MV_OPTS), mvRequest);
+const mvRow = (p) => ['moved', 'no301', 'notarget', 'unknown'].map((k) => [k, mv.rows[k].find((r) => r.path === p)]).find(([, r]) => r);
+
+await check('taşıma: hedef sayfa var diye "Aynı kaldı" sayılmaz', () => {
+  assert.equal(mvPre.summary.same, 2);
+  assert.equal(mvPre.summary.pending, 7); // /tr/a is decided from the heir crawl
+  assert.equal(mvPre.rows.moved.find((r) => r.path === '/tr/a').reason, 'Hedef hazır, 301 kurulu');
+});
+await check('taşıma: istekler sadece taranan sitelere gider', () => {
+  assert.ok(mvSeen.every((u) => u.startsWith(H) || u.startsWith('https://tr.ornek.com/')));
+  assert.ok(!mvSeen.includes(H + '/tr/a') && !mvSeen.includes('https://tr.ornek.com/b'));
+});
+await check('taşıma: 301 kurulu (staging, canlı alan adı ve eski alan adı)', () => {
+  for (const p of ['/tr/a', '/tr/b', '/en/team']) assert.equal(mvRow(p)[0], 'moved', p);
+  assert.equal(mvRow('/tr/b')[1].target, 'https://tr.eski.com/b');
+});
+await check('taşıma: zincir 301 kurulu sayılır, yapılacak yazılır', () => {
+  const [k, r] = mvRow('/tr/d');
+  assert.equal(k, 'moved'); assert.equal(r.hops, 2); assert.match(r.todo, /Zincir 2 adım/);
+});
+await check('taşıma: hedef sayfada içerik kaybı yazılır', () => {
+  const [k, r] = mvRow('/en/team');
+  assert.equal(k, 'moved'); assert.equal(r.lostCount, 1); assert.match(r.todo, /Title/);
+  assert.equal(mv.summary.contentLost, 1);
+});
+await check('taşıma: 301 eksik (açılıyor, başka sayfa, bilinmeyen alan adı, 302)', () => {
+  const c = mvRow('/tr/c'), e = mvRow('/tr/e'), g = mvRow('/tr/g');
+  assert.deepEqual([c[0], e[0], g[0]], ['no301', 'no301', 'no301']);
+  assert.match(c[1].reason, /yönlenmiyor \(200\)/);
+  assert.equal(c[1].todo, 'Eski alan adına geçecek sitede 301 kurun: /tr/c → https://tr.eski.com/c');
+  assert.match(e[1].reason, /baska\.com alan adına gidiyor/);
+  assert.match(e[1].todo, /canlı alan adını projeye yazın/);
+  assert.match(g[1].todo, /https:\/\/tr\.eski\.com\/g adresine değiştirin/);
+});
+await check('taşıma: hedef yok', () => {
+  const [k, r] = mvRow('/tr/f');
+  assert.equal(k, 'notarget'); assert.equal(r.newStatus, 404); assert.match(r.todo, /oluşturun/);
+});
+await check('taşıma: özet, korunan oran ve kural istatistiği', () => {
+  const s = mv.summary;
+  assert.deepEqual([s.moved, s.moveFix, s.no301, s.notarget, s.pending, s.same], [4, 2, 3, 1, 0, 2]);
+  assert.equal(s.kept, Math.round(6 / 10 * 100));
+  const st = Object.fromEntries(mv.rules.map((r) => [r.from, [r.pages, r.found]]));
+  assert.deepEqual(st['/tr/*'], [7, 6]); // 301 eksik olan sayfanın hedefi bulundu sayılır
+});
+await check('taşıma: 401 veren geçecek site "Kontrol edilemedi" olur', async () => {
+  const c = await probeLost(compareCrawls(MV_OLD, [MV_EN, MV_TR], MV_OPTS), async (u) => (u.startsWith(H) ? { status: 401 } : { status: 200 }));
+  const r = c.rows.unknown.find((x) => x.path === '/tr/c');
+  assert.match(r.reason, /Hedef hazır/); assert.match(r.todo, /şifre/);
+});
+await check('Excel: taşınan sayfalar', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cmp-'));
+  const f = path.join(dir, 'c.xlsx');
+  await exportCompareExcel(mv, f);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(f);
+  const ws = wb.getWorksheet('Taşınan');
+  assert.ok(ws); assert.equal(ws.rowCount, 9); // header + 8 moved pages
+  await rm(dir, { recursive: true, force: true });
+});
+
 await check('Excel: kurallar, bölüm kaldırıldı ve yapılacak sütunu', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cmp-'));
   const f = path.join(dir, 'c.xlsx');

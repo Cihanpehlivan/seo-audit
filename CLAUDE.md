@@ -20,7 +20,8 @@ Kullanıcı: proje sahibi (Cihan). Sorunlar iş alanına göre gruplanır (Front
 ```
 bin/crawl.js            CLI
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
-src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması. Bulunamayan eski yolları beklenen adreste yoklar (Sprint 3)
+src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu. Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0)
+src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma)
 src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
 src/checks.js           Ek kontroller (tarama sonrası): site sürümleri, SSL, HSTS, llms.txt, dış link, görsel
 src/parser.js           HTML → SEO alanları (başlık ağacı, JSON-LD, görseller, linkler, parmak izi)
@@ -32,11 +33,12 @@ src/rules/helpers.js    isIndexable, titlePx, staging host tespiti, isBroken, TL
 src/rules/index.js      Denetim motoru, sağlık skoru
 src/export.js           Excel çıktısı
 src/store.js            Dosya tabanlı kayıt
-src/server.js           Web sunucusu + API (/api/crawls, /api/compare, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur
+src/server.js           Web sunucusu + API (/api/crawls, /api/projects, /api/compare, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur
+                        /api/projects/:id → crawl (POST), match, excel, export. GET/PUT/DELETE tanım
 render.yaml             Render Blueprint (ücretsiz plan, Docker)
-public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page
+public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page (Site denetimi / Taşıma projesi). Proje ekranı: adım çubuğu + Sıradaki iş kartı
 config/rules.json       Bütün eşikler, kural ayarları ve ek kontrol limitleri (checks)
-test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi)
+test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi, fixture-migration.js: eski site + geçecek site)
 ```
 
 ## Kurallar ve konvansiyonlar
@@ -60,14 +62,18 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, zorunlu şifre, yayın limitleri | Tamam (v0.5.0) |
-| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1). Sırada Parça 2: 301 haritası önerisi | Devam ediyor |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0). Sırada v0.7.1: yapılacaklar listesi (işin yapıldığı yere göre) ve kavram açıklamaları. Sonra Parça 2: 301 haritası önerisi | Devam ediyor |
 | Sprint 4 | AI özellikleri | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 38 kontrol (toplam yaklaşık 8 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 48, proje 13 kontrol (toplam yaklaşık 10 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
 
-Açık nokta (v0.6.1, v0.7.0'da düzelir): Kural ile başka yola veya başka siteye taşınan sayfa, hedef sayfa varsa "Aynı kaldı" olur. Bu yanlış güven verir. Asıl soru: eski adres hedefe 301 ile gidiyor mu? 301'ler eski alan adında çalışır. Canlıdan sonra eski alan adını "eski alan adına geçecek site" kullanır. Bu yüzden yönlendirme o sitenin staging'inde yoklanmalıdır.
+Açık noktalar (v0.7.0):
+- Taşıma projesi gerçek bir sitede denenmedi (örnek: Şamil Şahin taşıması). İlk denemede bölüm önerilerini, 301 sonuçlarını ve süreyi kontrol et.
+- Yapılacaklar adımı şimdilik grup görünümünü ("Bütün sayfalar") gösterir. İşin yapıldığı yere göre liste v0.7.1'de gelir.
+- İstekler staging şifresini göndermez. Şifreli geçecek sitede 301 kontrolü "Kontrol edilemedi" olur.
+- Otomatik öneri kaydedilmez. Tarama değişirse öneri de değişebilir. Kullanıcı seçerse kural olur.
 
 Açık noktalar (Sprint 2'den):
 - Ek kontroller gerçek bir sitede denenmedi. İlk denemede süreyi ve yanlış alarmları ölç. Eşikler: `checks` ve `brokenIgnoreStatuses`.
@@ -107,6 +113,20 @@ Açık noktalar (Sprint 2'den):
 **Sprint 6 — JS render:** Playwright modu. Ham HTML ile render edilmiş HTML farkı, sadece JS ile gelen linkler.
 
 ## Karar günlüğü
+
+- v0.7.0: Model düzeltmesi. Başka yola veya başka siteye taşınan sayfa artık "Aynı kaldı" sayılmaz. İki kontrol: hedef sayfa var mı, eski yol "eski alan adına geçecek site" üzerinde hedefe 301 veriyor mu. Sonuç: "Hedef hazır, 301 kurulu" (`moved`), "Hedef hazır, 301 eksik" (`no301`), "Hedef yok" (`notarget`). Korunan oran `moved` sayfaları da sayar. Kural istatistiğinde `no301` "bulundu" sayılır (hedef var).
+- v0.7.0: 301 kontrolü Location başlığına göre yapılır. Geçecek sitede sadece aynı hosttaki adımlar izlenir. Başka hosta giden ilk adımda durulur, çünkü hedef site canlıda olmayabilir. Kabul edilen 301 hedefi: hedef sitenin tarama alan adı, projede yazılan "canlı alan adı" veya (hedef geçecek site ise) eski alan adı. Yol eşleşir ama alan adı bilinmiyorsa "301 eksik" olur ve "canlı alan adını projeye yazın" der. İstekler sadece taranan sitelere gider (SSRF yüzeyi büyümez).
+- v0.7.0: Geçecek site taramasında eski yol yönlendirme olarak varsa (link ile bulunduysa) istek atılmaz, tarama sonucu kullanılır.
+- v0.7.0: Proje `crawls/projects/<id>.json` dosyasında durur (crawls/ zaten .gitignore ve .dockerignore içinde). Yazma atomiktir: önce geçici dosya, sonra rename. Aynı projeye yazmalar sıraya girer.
+- v0.7.0: Projede kural hedefi site anahtarıdır (`heir`, `s1`…), alan adı değildir. Motor için sitenin tarama alan adına çevrilir. Staging adresi değişse de kural geçerli kalır.
+- v0.7.0: Tarama düğmesi taramayı başlatır, proje `pendingCrawlId` tutar. Tarama bitince `crawlId` yazılır. Hata olursa `lastError` yazılır ve eski tarama korunur. Site durumu: taranmadı, taranıyor, tamam, silinmiş, adres değişti. Proje ekranı taranırken 2 saniyede bir sunucuya sorar (SSE yerine basit).
+- v0.7.0: Eşleştirme iki geçişte çalışır. Önce istek atmadan öneriler bulunur. Taşıma önerisi (bölüm başka yerde bulunur) kararsız bölüme uygulanır ve "Öneri" etiketi alır, kaydedilmez. "Bölüm kaldırıldı" önerisi uygulanmaz: bölüm "Karar verin" der ve amber "Öneri: …" etiketi alır. Kullanıcı seçince bölüm kuralı kaydedilir.
+- v0.7.0: Bölüm tablosu ilk yol parçasına göre gruplar (en az `suggestMinPages` sayfa). Küçük gruplar "Diğer sayfalar" (`/*`) satırına girer. Her seçenek taramalarda bulduğu sayfa sayısını gösterir (istek atmaz).
+- v0.7.0: "Karşılaştır" ekranı kaldırıldı. Yerine taşıma projesi geldi. Serbest kural editörü Eşleştirme adımında "Gelişmiş" altında. `#/compare` linki giriş ekranını "Taşıma projesi" seçili açar. `/api/compare` API olarak kaldı.
+- v0.7.0: Giriş ekranından eski/yeni etiket seçimi kaldırıldı. Proje taramaları etiketi kendisi alır (eski site `eski`, diğerleri `yeni`). Kenar çubuğu: önce projeler, sonra projeye bağlı olmayan taramalar.
+- v0.7.0: v0.6.1 tarayıcı kuralları (localStorage) proje kuralsız iken "Projeye aktar" ile aktarılır. Hedef alan adı projede yoksa kural atlanır ve kullanıcıya yazılır.
+- v0.7.0: "Projeyi indir" sadece tanımı verir (sonuç ve sunucu alanları yok). "Proje yükle" yeni proje kimliği verir. Tarama kimlikleri dosyada kalır; taramalar sunucuda yoksa proje "Silinmiş: Tekrar tara" der.
+- v0.7.0: Kural metninde "ana hedef" kalktı. Motor, geçecek sitenin alan adını yazar (`/en/* → staging.ornek.com/*`).
 
 - Crawler'ı Crawlee yerine kendimiz yazdık: her redirect hop'unu kaydetmek (Faz 3 için şart) ve bağımlılığı az tutmak için.
 - Sitemap'teki URL'ler link taraması bittikten sonra taranır. Böylece yetim sayfa ve doğru derinlik bulunur.

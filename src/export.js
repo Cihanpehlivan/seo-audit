@@ -176,12 +176,16 @@ export async function exportCompareExcel(cmp, file) {
   const targets = cmp.targets || [cmp.new];
   sheet(wb, 'Özet', [{ header: 'Metrik', key: 'k', width: 44 }, { header: 'Değer', key: 'v', width: 70 }], [
     { k: 'Eski site', v: `${cmp.old.startUrl} (${cmp.old.startedAt})` },
-    ...targets.map((t, i) => ({ k: i ? `Yeni site ${i + 1}` : 'Yeni site (ana hedef)', v: `${t.startUrl} (${t.startedAt})` })),
+    ...targets.map((t, i) => ({ k: i ? `Hedef site ${i + 1}` : 'Eski alan adına geçecek site', v: `${t.startUrl} (${t.startedAt})` })),
     { k: 'Yol kuralı', v: cmp.rules?.length || 0 },
     { k: 'Eski sitede 200 veren sayfa', v: s.oldPages },
     { k: 'Aynı kaldı', v: s.same },
     { k: 'İçerik değişti', v: s.changed },
     { k: 'İçerik kaybı var (title, meta, H1, noindex)', v: s.contentLost },
+    { k: 'Taşındı: hedef hazır, 301 kurulu', v: s.moved ?? 0 },
+    { k: 'Taşındı: 301 kurulu, düzeltme gerekli (zincir, 302, içerik)', v: s.moveFix ?? 0 },
+    { k: 'Taşındı: hedef hazır, 301 EKSİK', v: s.no301 ?? 0 },
+    { k: 'Taşındı: HEDEF YOK', v: s.notarget ?? 0 },
     { k: 'Yönleniyor', v: s.redirected },
     { k: 'Yönleniyor ama hedef hatalı', v: s.redirectBroken },
     { k: 'Yönlendirmede düzeltme gerekli (hata, zincir, 302)', v: s.redirectFix ?? s.redirectBroken },
@@ -211,6 +215,16 @@ export async function exportCompareExcel(cmp, file) {
     { header: 'Yol', key: 'path', width: 50 }, { header: 'Yeni URL', key: 'newUrl', width: 60 }, { header: 'Alan', key: 'label', width: 16 }, { header: 'Tür', key: 'kind', width: 10 },
     { header: 'Eski', key: 'old', width: 60 }, { header: 'Yeni', key: 'new', width: 60 }, { header: 'Yapılacak', key: 'todo', width: 50 },
   ], cmp.rows.changed.flatMap((r) => r.changes.map((c) => ({ path: r.path, newUrl: r.newUrl, ...c, kind: c.kind === 'lost' ? 'Kayıp' : 'Değişti', todo: c.kind === 'lost' ? FIX[c.field] : '' }))));
+  const moves = [['moved', 'Hedef hazır, 301 kurulu'], ['no301', 'Hedef hazır, 301 eksik'], ['notarget', 'Hedef yok']]
+    .flatMap(([k, label]) => (cmp.rows[k] || []).map((r) => ({ ...r, result: label })));
+  if (moves.length) {
+    sheet(wb, 'Taşınan', [
+      { header: 'Yol', key: 'path', width: 44 }, { header: 'Sonuç', key: 'result', width: 24 }, { header: 'Kural', key: 'rule', width: 34 },
+      { header: 'Hedef URL (taranan)', key: 'checkUrl', width: 55 }, { header: 'Beklenen 301 hedefi', key: 'expectUrl', width: 55 },
+      { header: 'Eski adres (geçecek sitede)', key: 'heirUrl', width: 55 }, { header: 'Yönlendirme', key: 'redirect', width: 55 },
+      ...why,
+    ], moves.map((r) => ({ ...r, redirect: r.target ? `${r.status} → ${r.target}${r.hops > 1 ? ` (${r.hops} adım)` : ''}` : r.heirStatus ? `Yönlenmiyor (${r.heirStatus})` : '' })));
+  }
   const plain = [{ header: 'Yol', key: 'path', width: 50 }, ...ctx, ...why];
   if (cmp.rows.unlinked.length) sheet(wb, 'Linksiz', plain, cmp.rows.unlinked);
   if (cmp.rows.removed?.length) sheet(wb, 'Bölüm kaldırıldı', plain, cmp.rows.removed);
@@ -222,7 +236,7 @@ export async function exportCompareExcel(cmp, file) {
   if (cmp.rules?.length) {
     sheet(wb, 'Kurallar', [
       { header: 'Kural', key: 'text', width: 50 }, { header: 'Eski sitede sayfa', key: 'pages', width: 18 }, { header: 'Yeni sitede bulundu', key: 'found', width: 20 },
-    ], [...cmp.rules, { text: 'Kural yok (aynı yol, ana hedef)', ...cmp.noRule }]);
+    ], [...cmp.rules, { text: 'Kural yok (aynı yol, eski alan adına geçecek site)', ...cmp.noRule }]);
   }
   if (cmp.suggestions?.length) {
     sheet(wb, 'Öneriler', [

@@ -32,13 +32,14 @@ async function api(path, opts = {}) {
 }
 
 function show(view) {
-  for (const v of ['startView', 'liveView', 'resultView', 'compareView']) $('#' + v).hidden = v !== view;
+  for (const v of ['startView', 'liveView', 'resultView', 'projectView']) $('#' + v).hidden = v !== view;
 }
 
 // ---------- History ----------
 let currentId = null;
 async function loadHistory() {
-  const { running, history } = await api('/api/crawls');
+  const [{ running, history }, plist] = await Promise.all([api('/api/crawls'), loadProjects()]);
+  const inProject = new Set(plist.flatMap((p) => p.crawlIds));
   const ul = $('#history');
   const items = [
     ...running.map((j) => ({ id: j.id, host: new URL(j.url).hostname, label: j.label, sub: 'Taranıyor…', run: true })),
@@ -47,8 +48,9 @@ async function loadHistory() {
       bad: h.summary.client + h.summary.server + h.summary.failed, total: h.summary.total,
     })),
   ];
-  if (!items.length) { ul.innerHTML = '<li class="muted">Henüz tarama yok.</li>'; return; }
-  ul.innerHTML = items.map((i) => `<li><button type="button" data-id="${esc(i.id)}" data-run="${i.run ? 1 : ''}" aria-current="${i.id === currentId}">
+  const own = items.filter((i) => !inProject.has(i.id));
+  if (!own.length) { ul.innerHTML = `<li class="muted">${items.length ? 'Bütün taramalar bir projede.' : 'Henüz tarama yok.'}</li>`; return; }
+  ul.innerHTML = own.map((i) => `<li><button type="button" data-id="${esc(i.id)}" data-run="${i.run ? 1 : ''}" aria-current="${i.id === currentId}">
     <span class="h-host">${esc(i.host)}</span>
     <span class="h-sub">${i.run ? '<span class="tag run">canlı</span>' : ''}${i.label ? `<span class="tag ${esc(i.label)}">${esc(i.label)}</span>` : ''}
       ${i.score != null ? `<span class="h-score ${i.score < 50 ? 'lo' : i.score < 80 ? 'mid' : ''}">${i.score}</span> ` : ''}${esc(i.sub)}${i.total != null ? ` · ${i.total} URL${i.bad ? ` · <span class="h-bad">${i.bad} hata</span>` : ''}` : ''}</span>
@@ -59,7 +61,6 @@ $('#history').addEventListener('click', (e) => {
   if (b) location.hash = (b.dataset.run ? '#/live/' : '#/crawl/') + b.dataset.id;
 });
 $('#newBtn').addEventListener('click', () => { location.hash = '#/'; });
-$('#cmpBtn').addEventListener('click', () => { location.hash = '#/compare'; });
 
 // ---------- Start ----------
 $('#form').addEventListener('submit', async (e) => {
@@ -75,7 +76,7 @@ $('#form').addEventListener('submit', async (e) => {
     const job = await api('/api/crawls', {
       method: 'POST',
       body: JSON.stringify({
-        url, label: f.get('label'),
+        url, label: '',
         options: {
           maxUrls: f.get('maxUrls'), concurrency: f.get('concurrency'), delayMs: f.get('delayMs'), timeoutMs: f.get('timeoutMs'),
           auth: f.get('auth') || null, ignoreRobots: f.get('ignoreRobots') === 'on', useSitemap: f.get('noSitemap') !== 'on',
@@ -130,7 +131,13 @@ function openLive(id) {
     } else $('#liveNote').textContent = d.progress.queued ? `Kuyrukta ${d.progress.queued} URL bekliyor.` : '';
     addCells($('#liveStrip'), d.cells);
   });
-  es.addEventListener('done', () => { es.close(); loadHistory(); location.hash = '#/crawl/' + id; });
+  es.addEventListener('done', async () => {
+    es.close();
+    const plist = await loadProjects();
+    const owner = plist.find((p) => p.crawlIds.includes(id));
+    loadHistory();
+    location.hash = owner ? `#/project/${owner.id}/tarama` : '#/crawl/' + id;
+  });
   es.addEventListener('failed', (e) => {
     es.close();
     $('#liveNote').textContent = 'Tarama durdu: ' + JSON.parse(e.data).error;
@@ -200,6 +207,9 @@ async function openResult(id) {
   $('#resWarn').hidden = !warns.length;
   $('#resWarn').textContent = warns.join(' ');
   $('#excelBtn').href = `/api/crawls/${encodeURIComponent(id)}/excel`;
+  const owner = projectList.find((p) => p.crawlIds.includes(id));
+  $('#resProject').hidden = !owner;
+  if (owner) { $('#resProject').href = `#/project/${owner.id}/tarama`; $('#resProject').textContent = `← ${owner.name}`; }
 
   const strip = $('#resStrip');
   strip.innerHTML = data.pages.map((p, i) => `<i class="c ${bucketOf(p)}" data-i="${i}" title="${esc(p.status ?? '—')} ${esc(p.url)}"></i>`).join('');
@@ -460,6 +470,10 @@ async function loadInfo() {
       $('#envNote').textContent = 'Bu sunucu ücretsiz planda çalışır. 15 dakika boşta kalınca uyur ve taramalar silinir. Tarama bitince Excel\'i hemen indirin.';
       $('#envNote').hidden = false;
     }
+    window.__maxTargets = info.maxTargets;
+    $('#crawlMax').max = info.maxUrls;
+    if (+$('#crawlMax').value > info.maxUrls) $('#crawlMax').value = info.maxUrls;
+    if (info.ephemeral) $('#prjDiskNote').textContent = 'Bu sunucu ücretsiz planda çalışır. Uyuyunca projeler ve taramalar silinir. Projeyi indirin. Sonra "Proje yükle" ile geri yükleyin ve siteleri tekrar tarayın.';
     const max = $('#form [name=maxUrls]');
     max.max = info.maxUrls;
     if (+max.value > info.maxUrls) max.value = info.maxUrls;
@@ -467,12 +481,474 @@ async function loadInfo() {
 }
 loadInfo();
 
-// ---------- Compare: old site vs new sites (Sprint 3, part 1) ----------
-// The bar shows what happened to every page of the old site. Tiles open the lists.
-// Path rules and extra targets live in the form. Rules are kept in the browser per old host.
+// ---------- Migration project (v0.7.0) ----------
+// Steps: Proje → Tarama → Eşleştirme → Yapılacaklar. One "next task" card on every step.
+const STEPS = [
+  ['proje', 'Proje'], ['tarama', 'Tarama'], ['eslestirme', 'Eşleştirme'], ['yapilacaklar', 'Yapılacaklar'],
+  ['harita', '301 haritası', true], ['canliya', 'Canlıya çıkış', true], ['dogrulama', 'Canlı doğrulama', true],
+];
+const PANES = { proje: 'stepProje', tarama: 'stepTarama', eslestirme: 'stepEslestirme', yapilacaklar: 'stepYapilacaklar' };
+const ROLE = { old: 'Eski site', heir: 'Eski alan adına geçecek site', extra: 'Ek site' };
+const HELP = {
+  old: 'Bugün canlıda olan site. Araç bütün sayfalarını listeler.',
+  heir: 'Canlıdan sonra eski alan adını bu site kullanır. Bütün 301\'ler bu sitede kurulur. Staging adresini yazın.',
+  extra: 'Eski sitenin bir bölümü bu siteye taşınır. Örnek: Türkçe sayfalar ayrı alan adına gider.',
+  live: 'Bu site canlıda hangi alan adını kullanacak? 301\'ler bu alan adına gider. Bilmiyorsanız boş bırakın.',
+};
+const prj = { id: null, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, loading: false, step: 'proje', poll: null, saveTimer: null };
+let projectList = [];
+const help = (text) => `<details class="q"><summary aria-label="Açıklama">?</summary><p>${esc(text)}</p></details>`;
+const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
+const hostOfUrl = (u) => { try { return new URL(u).hostname; } catch { return ''; } };
+const siteByKey = (k) => prj.project?.sites.find((s) => s.key === k);
+const siteName = (s, short = false) => (!s ? '?' : s.role === 'extra' ? (s.name || 'Ek site') : short && s.role === 'heir' ? 'Geçecek site' : ROLE[s.role]);
+const siteHost = (s) => prj.status?.[s.key]?.host || hostOfUrl(s.url);
+const isReady = (k) => ['done', 'stale'].includes(prj.status?.[k]?.state);
+
+// ---------- Sidebar: projects first, then crawls that belong to no project ----------
+async function loadProjects() {
+  try { projectList = await api('/api/projects'); } catch { projectList = []; }
+  const ul = $('#projects');
+  ul.innerHTML = projectList.length ? projectList.map((p) => `<li><button type="button" data-pid="${esc(p.id)}" aria-current="${p.id === prj.id}">
+    <span class="h-host">${esc(p.name)}</span><span class="h-sub">${p.sites} site · ${p.rules} kural · ${esc(fmtDate(p.updatedAt))}</span></button></li>`).join('')
+    : '<li class="muted">Henüz proje yok.</li>';
+  return projectList;
+}
+$('#projects').addEventListener('click', (e) => { const b = e.target.closest('[data-pid]'); if (b) location.hash = `#/project/${b.dataset.pid}`; });
+
+// ---------- Landing: two modes ----------
+function setMode(mode) {
+  for (const b of document.querySelectorAll('.modes [data-mode]')) b.setAttribute('aria-checked', b.dataset.mode === mode);
+  $('#auditStart').hidden = mode !== 'audit';
+  $('#projectStart').hidden = mode !== 'project';
+  (mode === 'audit' ? $('#url') : $('#prjNewName')).focus();
+}
+document.querySelector('.modes').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) setMode(b.dataset.mode); });
+$('#prjForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('#prjNewName').value.trim();
+  $('#prjFormErr').textContent = '';
+  if (!name) { $('#prjFormErr').textContent = 'Proje adını yazın. Örnek: Şirket sitesi yenileme'; $('#prjNewName').focus(); return; }
+  try {
+    const p = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, structure: 'same', rules: [], sites: [{ role: 'old', url: '' }, { role: 'heir', url: '' }] }) });
+    $('#prjNewName').value = '';
+    location.hash = `#/project/${p.id}/proje`;
+  } catch (err) { $('#prjFormErr').textContent = err.message; }
+});
+async function uploadProject(file, errEl) {
+  errEl.textContent = '';
+  try {
+    const def = JSON.parse(await file.text());
+    const p = await api('/api/projects', { method: 'POST', body: JSON.stringify(def) });
+    location.hash = `#/project/${p.id}`;
+  } catch (err) { errEl.textContent = err instanceof SyntaxError ? 'Dosya okunamadı. "Projeyi indir" ile alınan JSON dosyasını seçin.' : err.message; }
+}
+$('#prjUpload').addEventListener('change', (e) => { if (e.target.files[0]) uploadProject(e.target.files[0], $('#prjFormErr')); e.target.value = ''; });
+$('#prjUpload2').addEventListener('change', (e) => { if (e.target.files[0]) uploadProject(e.target.files[0], $('#prjSaved')); e.target.value = ''; });
+
+// ---------- Open ----------
+async function openProject(id, step) {
+  currentId = null; es?.close();
+  show('projectView');
+  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null });
+  prj.step = PANES[step] ? step : prj.step && prj.id === id ? prj.step : null;
+  loadHistory();
+  try { Object.assign(prj, await api(`/api/projects/${encodeURIComponent(id)}`)); }
+  catch (e) {
+    $('#prjName').textContent = 'Proje bulunamadı';
+    $('#prjSummary').textContent = 'Sunucu yeniden başladıysa projeler silinmiş olabilir. "Proje yükle" ile proje dosyasını tekrar yükleyin.';
+    $('#prjSteps').innerHTML = ''; $('#prjNext').innerHTML = '';
+    for (const pane of Object.values(PANES)) $('#' + pane).hidden = true;
+    return;
+  }
+  if (!prj.step) prj.step = firstStep();
+  renderProject();
+  watchCrawls();
+  if (['eslestirme', 'yapilacaklar'].includes(prj.step)) loadMatch();
+}
+// A new project opens on "Proje". A project with crawls opens where the work is.
+function firstStep() {
+  const p = prj.project;
+  if (!p.sites.find((s) => s.role === 'old').url || !p.sites.find((s) => s.role === 'heir').url) return 'proje';
+  return isReady('old') && isReady('heir') ? 'eslestirme' : 'tarama';
+}
+function goStep(step) { location.hash = `#/project/${prj.id}/${step}`; }
+
+function renderProject() {
+  const p = prj.project;
+  $('#prjName').textContent = p.name;
+  const last = Object.values(prj.status).map((x) => x.startedAt).filter(Boolean).sort().pop();
+  const dayDiff = last ? Math.floor((Date.now() - new Date(last)) / 864e5) : null;
+  $('#prjSummary').textContent = `${p.sites.length} site · ${p.rules.length} kural · ${last ? `son tarama ${dayDiff === 0 ? 'bugün' : dayDiff === 1 ? 'dün' : fmtDate(last)}` : 'tarama yok'}`;
+  const state = stepStates();
+  $('#prjSteps').innerHTML = STEPS.map(([k, name, later], i) => later
+    ? `${STEPS[i - 1][2] ? '' : '<li class="later-h" aria-hidden="true">Sonraki sürüm</li>'}<li><span class="step later" title="Sonraki sürüm"><i>${i + 1}</i>${name}<span class="sr"> (sonraki sürüm)</span></span></li>`
+    : `<li><button type="button" class="step ${state[k] || ''}" data-step="${k}" aria-current="${prj.step === k ? 'step' : 'false'}"><i>${state[k] === 'done' ? '✓' : i + 1}</i>${name}</button></li>`).join('');
+  for (const [k, pane] of Object.entries(PANES)) $('#' + pane).hidden = k !== prj.step;
+  renderNext();
+  if (prj.step === 'proje') renderSites();
+  if (prj.step === 'tarama') renderCrawls();
+  if (prj.step === 'eslestirme') renderSections();
+  if (prj.step === 'yapilacaklar') renderTodo();
+  $('#prjSteps').querySelector('[aria-current="step"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+$('#prjSteps').addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b) goStep(b.dataset.step); });
+
+// done = step finished, todo = needs work. Used for the step bar marks.
+function stepStates() {
+  const p = prj.project, out = {};
+  const sitesOk = p.sites.filter((s) => s.role !== 'extra').every((s) => s.url) && (p.structure !== 'domains' || p.sites.some((s) => s.role === 'extra' && s.url));
+  out.proje = sitesOk ? 'done' : 'todo';
+  out.tarama = p.sites.every((s) => !s.url || isReady(s.key)) && isReady('old') && isReady('heir') ? 'done' : sitesOk ? 'todo' : '';
+  if (prj.match) {
+    out.eslestirme = prj.match.sections.some((x) => x.needsDecision) ? 'todo' : 'done';
+    out.yapilacaklar = workCount() ? 'todo' : 'done';
+  }
+  return out;
+}
+
+// ---------- Next task: one sentence, one button ----------
+function nextTask() {
+  const p = prj.project, st = prj.status;
+  const old = p.sites.find((s) => s.role === 'old'), heir = p.sites.find((s) => s.role === 'heir');
+  const extras = p.sites.filter((s) => s.role === 'extra');
+  if (!old.url) return { text: 'Eski sitenin adresini yazın. Araç önce bu siteyi tarar.', btn: 'Siteleri yazın', act: { step: 'proje', focus: 'old' } };
+  if (!heir.url) return { text: 'Eski alan adına geçecek sitenin adresini yazın. Staging adresi olabilir.', btn: 'Adresi yazın', act: { step: 'proje', focus: 'heir' } };
+  if (p.structure === 'domains' && !extras.some((s) => s.url)) return { text: 'Diller ayrı alan adlarına taşınıyor. Ek siteyi ve adresini yazın.', btn: 'Ek siteyi yazın', act: { step: 'proje', addSite: !extras.length, focus: extras[0]?.key } };
+  const running = p.sites.find((s) => st[s.key]?.state === 'running');
+  if (running) return { text: `${siteName(running)} taranıyor. ${st[running.key].done} URL tarandı.`, btn: 'Taramayı izle', act: { live: st[running.key].jobId } };
+  for (const s of [old, heir, ...extras].filter((x) => x.url)) {
+    const x = st[s.key];
+    if (x.state === 'none') return { text: `${siteName(s)} taranmadı.${s.role === 'extra' ? '' : ' Eşleştirme için gerekli.'}${x.error ? ` Son deneme hata verdi: ${x.error}` : ''}`, btn: `${siteName(s, true)} tara`, act: { crawl: s.key } };
+    if (x.state === 'deleted') return { text: `${siteName(s)} taraması silinmiş. Proje tanımı duruyor. Tekrar tarayın.`, btn: 'Tekrar tara', act: { crawl: s.key } };
+    if (x.state === 'stale') return { text: `${siteName(s)} adresi değişti. Tarama eski adrese ait. Tekrar tarayın.`, btn: 'Tekrar tara', act: { crawl: s.key } };
+    if (x.pages && !x.ok) return { text: `${siteName(s)} taramasında açılan sayfa yok.${x.blocked ? ' robots.txt sayfaları engelledi.' : ''} Ayarları değiştirip tekrar tarayın.`, btn: 'Tarama ayarlarını aç', act: { step: 'tarama', settings: true } };
+  }
+  if (prj.loading) return { text: 'Eşleştiriliyor. Araç eski adresleri yeni sitelerde istiyor.', btn: null };
+  if (prj.matchErr) return { text: prj.matchErr, btn: 'Tekrar dene', act: { reload: true } };
+  if (!prj.match) return { text: 'Siteler tarandı. Eski bölümleri yeni sitelerle eşleştirin.', btn: 'Eşleştirmeyi aç', act: { step: 'eslestirme' } };
+  const dec = prj.match.sections.filter((x) => x.needsDecision);
+  if (dec.length) return { text: `${dec.map((x) => sectionName(x)).join(', ')} bölümü için karar gerekli.`, btn: 'Kararı seçin', act: { step: 'eslestirme', focusSection: dec[0].from } };
+  const n = workCount();
+  if (!n) return { text: 'Bütün sayfalar yerinde. Yapılacak iş yok.', btn: 'Excel indir', act: { excel: true } };
+  if (prj.step !== 'yapilacaklar') return { text: `Eşleştirme tamam. ${n} sayfada iş var.`, btn: 'Yapılacakları açın', act: { step: 'yapilacaklar' } };
+  const s = prj.match.summary;
+  const heirWork = (s.no301 || 0) + s.lost + (s.redirectFix || 0) + (s.removed || 0);
+  return { text: `${n} sayfada iş var.${heirWork >= n / 2 ? ' En çok iş eski alan adına geçecek sitede: 301 yönlendirmeleri.' : ''}`, btn: 'Excel indir', act: { excel: true } };
+}
+// Pages that need work: missing pages, missing or wrong 301s, content loss, decisions.
+function workCount() {
+  const s = prj.match?.summary;
+  if (!s) return 0;
+  return s.lost + (s.no301 || 0) + (s.notarget || 0) + (s.redirectFix || 0) + (s.moveFix || 0) + s.contentLost - (prj.match.rows.moved || []).filter((r) => r.lostCount).length + (s.removed || 0) + s.unknown + s.unlinked;
+}
+function renderNext() {
+  const t = nextTask();
+  prj.nextAct = t.act;
+  $('#prjNext').innerHTML = `<p>${esc(t.text)}</p>${t.btn ? `<button type="button" class="primary" id="nextBtn">${esc(t.btn)}</button>` : ''}`;
+}
+$('#prjNext').addEventListener('click', async (e) => {
+  if (!e.target.closest('#nextBtn')) return;
+  const a = prj.nextAct || {};
+  if (a.live) { location.hash = `#/live/${a.live}`; return; }
+  if (a.crawl) { goStep('tarama'); await startSiteCrawl(a.crawl); return; }
+  if (a.excel) { location.href = `/api/projects/${prj.id}/excel`; return; }
+  if (a.reload) { prj.matchKey = ''; loadMatch(); return; }
+  if (a.addSite) addSite();
+  if (a.settings) setTimeout(() => { document.querySelector('#stepTarama details').open = true; $('#crawlAuth').focus(); });
+  if (a.step && a.step !== prj.step) goStep(a.step);
+  setTimeout(() => {
+    if (a.focus) document.querySelector(`[data-site="${a.focus}"] [name=url]`)?.focus();
+    if (a.focusSection) document.querySelector(`[data-sec="${CSS.escape(a.focusSection)}"] select`)?.focus();
+  }, 50);
+});
+
+// ---------- Step 1: Proje ----------
+function renderSites() {
+  const p = prj.project;
+  for (const r of document.querySelectorAll('#prjStructure input')) r.checked = r.value === p.structure;
+  $('#prjSites').innerHTML = p.sites.map((s) => `<div class="site" data-site="${esc(s.key)}">
+    <div class="site-role">${esc(ROLE[s.role])}${help(HELP[s.role])}</div>
+    ${s.role === 'extra' ? `<label>Ad<input name="name" value="${esc(s.name)}" placeholder="Türkçe" maxlength="40" autocomplete="off"></label>` : ''}
+    <label class="${s.role === 'extra' ? '' : 'span2'}">${s.role === 'old' ? 'Canlı adres' : 'Adres (staging olabilir)'}<input name="url" value="${esc(s.url)}" placeholder="${s.role === 'old' ? 'https://www.ornek.com' : 'https://staging.ornek.com'}" spellcheck="false" autocomplete="off"></label>
+    ${s.role === 'extra' ? `<label><span class="lbl">Canlı alan adı ${help(HELP.live)}</span><input name="live" value="${esc(s.live)}" placeholder="tr.ornek.com" spellcheck="false" autocomplete="off"></label>
+      <button type="button" class="ghost small" data-remove="${esc(s.key)}">Kaldır</button>` : ''}
+  </div>`).join('');
+  $('#prjAddSite').hidden = p.sites.filter((s) => s.role === 'extra').length >= (cmpMax() - 1);
+  $('#prjExport').href = `/api/projects/${prj.id}/export`;
+}
+const cmpMax = () => window.__maxTargets || 4;
+function readSites() {
+  for (const row of document.querySelectorAll('#prjSites .site')) {
+    const s = siteByKey(row.dataset.site);
+    if (!s) continue;
+    for (const f of ['name', 'url', 'live']) { const i = row.querySelector(`[name=${f}]`); if (i) s[f] = i.value.trim(); }
+  }
+  const r = document.querySelector('#prjStructure input:checked');
+  if (r) prj.project.structure = r.value;
+}
+async function saveProject(msg = 'Kaydedildi.') {
+  clearTimeout(prj.saveTimer);
+  $('#prjSaved').textContent = 'Kaydediliyor…';
+  try {
+    Object.assign(prj, await api(`/api/projects/${prj.id}`, { method: 'PUT', body: JSON.stringify(prj.project) }));
+    $('#prjSaved').textContent = msg;
+    prj.matchKey = '';
+    loadHistory();
+    renderProject();
+    return true;
+  } catch (e) { $('#prjSaved').textContent = e.message; $('#prjSaved').classList.add('flag'); setTimeout(() => $('#prjSaved').classList.remove('flag'), 4000); return false; }
+}
+function addSite() {
+  readSites();
+  const used = new Set(prj.project.sites.map((s) => s.key));
+  let i = 1; while (used.has(`s${i}`)) i++;
+  prj.project.sites.push({ key: `s${i}`, role: 'extra', name: '', url: '', live: '', crawlId: null });
+  renderSites();
+  document.querySelector(`[data-site="s${i}"] [name=name]`)?.focus();
+}
+$('#prjAddSite').addEventListener('click', addSite);
+$('#prjSites').addEventListener('change', () => { readSites(); saveProject(); });
+$('#prjSites').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-remove]');
+  if (!b) return;
+  readSites();
+  const key = b.dataset.remove;
+  const used = prj.project.rules.filter((r) => r.site === key).length;
+  if (used && !confirm(`Bu siteye giden ${used} kural da silinir. Devam edilsin mi?`)) return;
+  prj.project.sites = prj.project.sites.filter((s) => s.key !== key);
+  prj.project.rules = prj.project.rules.filter((r) => r.site !== key);
+  saveProject('Site kaldırıldı.');
+});
+$('#prjStructure').addEventListener('change', () => {
+  readSites();
+  if (prj.project.structure === 'domains' && !prj.project.sites.some((s) => s.role === 'extra')) { addSite(); readSites(); }
+  saveProject();
+});
+$('#prjDelete').addEventListener('click', async () => {
+  if (!confirm('Proje silinsin mi? Taramalar silinmez.')) return;
+  await api(`/api/projects/${prj.id}`, { method: 'DELETE' });
+  prj.id = null;
+  location.hash = '#/';
+});
+
+// ---------- Step 2: Tarama ----------
+const STATE = {
+  none: ['Taranmadı', 'idle'], running: ['Taranıyor', 'run'], done: ['Tamam', 'ok'], deleted: ['Silinmiş', 'idle'], stale: ['Adres değişti', 'warn'],
+};
+let crawlHistory = [];
+async function renderCrawls() {
+  try { crawlHistory = (await api('/api/crawls')).history; } catch {}
+  const p = prj.project;
+  $('#prjCrawls').innerHTML = p.sites.map((s) => {
+    const x = prj.status[s.key] || { state: 'none' };
+    const [label, cls] = STATE[x.state];
+    const host = siteHost(s);
+    const tag = x.state === 'done' ? `${label} · ${x.pages} sayfa` : x.state === 'running' ? `${label} · ${x.done} URL` : label;
+    const warnTag = x.state === 'done' && x.pages && !x.ok ? '<span class="tag-s warn">Açılan sayfa yok</span>' : x.state === 'done' && x.limitReached ? '<span class="tag-s warn">URL limiti</span>' : '';
+    const same = crawlHistory.filter((h) => host && bare(h.host) === bare(host) && h.id !== x.crawlId);
+    const btn = !s.url ? `<button type="button" class="ghost small" data-goto-proje>Adresi yazın</button>`
+      : x.state === 'running' ? `<a class="ghost small" href="#/live/${esc(x.jobId)}">İzle</a>`
+      : `<button type="button" class="ghost small${x.state === 'done' ? '' : ' strong'}" data-crawl="${esc(s.key)}">${x.state === 'done' ? 'Tekrar tara' : 'Tara'}</button>`;
+    return `<div class="crawl-row" data-site="${esc(s.key)}">
+      <div class="crawl-main"><b>${esc(host || 'Adres yok')}</b><span class="small">${esc(siteName(s))}</span></div>
+      <div class="crawl-state"><span class="tag-s ${cls}">${esc(tag)}</span>${warnTag}
+        ${x.startedAt ? `<span class="small">${esc(fmtDate(x.startedAt))}</span>` : ''}${x.error ? `<span class="small flag">Son deneme: ${esc(x.error)}</span>` : ''}
+        ${x.crawlId && x.state === 'done' ? `<a class="small" href="#/crawl/${esc(x.crawlId)}">Sorunları aç</a>` : ''}</div>
+      <div class="crawl-act">${btn}${same.length && x.state !== 'running' ? `<label class="sr" for="link-${esc(s.key)}">Var olan taramayı bağla</label>
+        <select id="link-${esc(s.key)}" data-link="${esc(s.key)}"><option value="">Var olan tarama…</option>${same.map((h) => `<option value="${esc(h.id)}">${esc(fmtDate(h.startedAt))} · ${h.summary.total} URL</option>`).join('')}</select>` : ''}</div>
+    </div>`;
+  }).join('');
+}
+async function startSiteCrawl(key) {
+  $('#crawlErr').textContent = '';
+  try {
+    await api(`/api/projects/${prj.id}/crawl`, { method: 'POST', body: JSON.stringify({ site: key, options: {
+      auth: $('#crawlAuth').value.trim() || null, ignoreRobots: $('#crawlRobots').checked, maxUrls: $('#crawlMax').value,
+    } }) });
+    Object.assign(prj, await api(`/api/projects/${prj.id}`));
+    prj.match = null; prj.matchKey = '';
+    renderProject();
+    watchCrawls();
+  } catch (e) { $('#crawlErr').textContent = e.message; }
+}
+$('#prjCrawls').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-crawl]');
+  if (b) { b.disabled = true; startSiteCrawl(b.dataset.crawl); }
+  if (e.target.closest('[data-goto-proje]')) goStep('proje');
+});
+$('#prjCrawls').addEventListener('change', async (e) => {
+  const sel = e.target.closest('[data-link]');
+  if (!sel?.value) return;
+  siteByKey(sel.dataset.link).crawlId = sel.value;
+  await saveProject('Tarama bağlandı.');
+});
+// While a crawl runs, the project screen asks the server every 2 seconds.
+function watchCrawls() {
+  clearTimeout(prj.poll);
+  const running = Object.values(prj.status || {}).some((x) => x.state === 'running');
+  if (!running) return;
+  prj.poll = setTimeout(async () => {
+    if ($('#projectView').hidden) return;
+    try {
+      const d = await api(`/api/projects/${prj.id}`);
+      const finished = Object.keys(d.status).some((k) => prj.status[k]?.state === 'running' && d.status[k].state !== 'running');
+      Object.assign(prj, d);
+      if (finished) { prj.match = null; prj.matchKey = ''; loadHistory(); }
+      renderProject();
+    } catch {}
+    watchCrawls();
+  }, 2000);
+}
+
+// ---------- Step 3: Eşleştirme ----------
+const crawlKey = () => JSON.stringify([prj.project.updatedAt, Object.values(prj.status).map((x) => x.crawlId)]);
+async function loadMatch() {
+  const key = crawlKey();
+  if (prj.matchKey === key || prj.loading) { renderProject(); return; }
+  if (!isReady('old') || !isReady('heir')) { prj.match = null; prj.matchErr = null; renderProject(); return; }
+  prj.loading = true; prj.matchErr = null;
+  renderProject();
+  try { prj.match = await api(`/api/projects/${prj.id}/match`); prj.matchKey = key; }
+  catch (e) { prj.match = null; prj.matchErr = e.message; }
+  finally { prj.loading = false; }
+  renderProject();
+}
+const sectionName = (x) => (x.from === '/*' ? 'Diğer sayfalar' : x.from.slice(0, -1));
+function optionLabel(sec, o) {
+  if (o.drop) return 'Bölüm kaldırıldı';
+  const s = siteByKey(o.site);
+  const seg = sec.from === '/*' ? '' : sec.from.slice(0, -1);
+  const how = o.to === sec.from ? 'aynı yol' : o.to === '/*' ? `${seg} kalkar` : seg ? `${seg} → ${o.to.slice(0, -1)}` : `${o.to.slice(0, -1)} eklenir`;
+  return `${siteName(s, true)} · ${how}`;
+}
+const optVal = (o) => (o.drop ? 'drop' : `${o.site}|${o.to}`);
+function renderSections() {
+  const busy = prj.loading;
+  $('#matchBusy').hidden = !busy;
+  const m = prj.match;
+  $('#matchErr').textContent = !busy && prj.matchErr ? prj.matchErr : '';
+  renderLsImport();
+  if (!m) {
+    $('#prjSections').innerHTML = !busy && !prj.matchErr && (!isReady('old') || !isReady('heir'))
+      ? '<div class="empty">Eşleştirme için eski site ve eski alan adına geçecek site taranmalı. Sıradaki iş kartındaki düğmeyi kullanın.</div>' : '';
+    $('#matchWarn').innerHTML = '';
+    renderRuleEditor();
+    return;
+  }
+  $('#matchWarn').innerHTML = m.warnings.map((w) => `<p class="warn">${esc(w)}</p>`).join('');
+  $('#prjSections').innerHTML = `<div class="sec-head" aria-hidden="true"><span>Eski bölüm</span><span></span><span>Nereye gidiyor?</span><span>Sonuç</span></div>` + m.sections.map((x) => {
+    const cur = x.needsDecision ? 'decide' : optVal(x.current);
+    const opts = [...x.options];
+    if (!x.current.drop && !opts.some((o) => optVal(o) === cur) && cur !== 'decide') opts.unshift({ ...x.current, hits: null });
+    const optsHtml = (x.needsDecision ? '<option value="decide" selected>Karar verin…</option>' : '')
+      + opts.map((o) => `<option value="${esc(optVal(o))}"${optVal(o) === cur ? ' selected' : ''}>${esc(optionLabel(x, o))}${o.hits != null ? ` (${o.hits} / ${x.pages})` : ''}</option>`).join('')
+      + `<option value="drop"${cur === 'drop' ? ' selected' : ''}>Bölüm kaldırıldı</option>`;
+    const ratio = x.found / x.pages;
+    const extra = [x.no301 && `${x.no301} sayfada 301 eksik`, x.notarget && `${x.notarget} hedef yok`].filter(Boolean).join(' · ');
+    const res = x.needsDecision ? ['Karar gerekli', 'warn'] : x.current.drop ? ['301 veya 410 gerekli', 'idle']
+      : [`${x.found} / ${x.pages} bulundu`, ratio >= 0.999 && !extra ? 'ok' : 'warn'];
+    const sug = x.needsDecision && x.suggestion ? `<span class="tag-s warn" title="${esc(x.suggestion.why)}">Öneri: ${esc(x.suggestion.drop ? 'Bölüm kaldırıldı' : optionLabel(x, x.suggestion))}</span>` : '';
+    return `<div class="sec" data-sec="${esc(x.from)}">
+      <div class="sec-from"><code>${esc(x.from === '/*' ? '/' : x.from.slice(0, -1))}</code><span class="small">${x.from === '/*' ? 'Diğer sayfalar · ' : ''}${x.pages} sayfa</span></div>
+      <span class="cmp-arrow" aria-hidden="true">→</span>
+      <div class="sec-to"><label class="sr" for="sec-${esc(x.from)}">${esc(sectionName(x))} nereye gidiyor?</label>
+        <select id="sec-${esc(x.from)}" data-from="${esc(x.from)}">${optsHtml}</select>
+        ${x.auto ? `<span class="tag-s idle" title="${esc(x.suggestion?.why || 'Araç bu taşımayı önerdi. Değiştirmek için listeden seçin.')}">Öneri</span>` : ''}${sug}</div>
+      <div class="sec-res"><span class="tag-s ${res[1]}">${esc(res[0])}</span>${extra && !x.needsDecision ? `<span class="small">${esc(extra)}</span>` : ''}</div>
+    </div>`;
+  }).join('') + `<p class="small sec-note">Parantez içindeki sayı: seçimin taramalarda bulduğu sayfa. "Öneri" etiketi: araç bu taşımayı kendisi seçti. Değiştirmek için listeden seçin.</p>`;
+  renderRuleEditor();
+}
+$('#prjSections').addEventListener('change', async (e) => {
+  const sel = e.target.closest('[data-from]');
+  if (!sel || sel.value === 'decide') return;
+  const from = sel.dataset.from;
+  const rules = prj.project.rules.filter((r) => r.from !== from);
+  if (sel.value === 'drop') rules.push({ from, drop: true });
+  else { const [site, to] = sel.value.split('|'); rules.push({ from, site, to }); }
+  prj.project.rules = rules;
+  if (await saveProject('Karar kaydedildi.')) loadMatch();
+});
+
+// v0.6.1 kept path rules in the browser per old host. Offer them to the project once.
+function renderLsImport() {
+  const old = prj.project.sites.find((s) => s.role === 'old');
+  const host = siteHost(old);
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(`seo-audit:kurallar:${bare(host)}`) || '[]'); } catch {}
+  if (!host || prj.project.rules.length || !Array.isArray(list) || !list.length) { $('#lsImport').innerHTML = ''; return; }
+  $('#lsImport').innerHTML = `<div class="suggest"><div class="suggest-h"><b>Önceki sürümden ${list.length} kural var</b><span class="small">Bu tarayıcı ${esc(host)} için kural sakladı.</span>
+    <button type="button" class="ghost small" id="lsImportBtn">Projeye aktar</button></div></div>`;
+  $('#lsImportBtn').onclick = async () => {
+    const keyOf = (h) => (!h ? 'heir' : prj.project.sites.find((s) => s.role !== 'old' && bare(siteHost(s)) === bare(h))?.key);
+    const out = [], skipped = [];
+    for (const r of list) {
+      if (r.drop) out.push({ from: r.from, drop: true });
+      else if (keyOf(r.host)) out.push({ from: r.from, site: keyOf(r.host), to: r.to || '/*' });
+      else skipped.push(r.from);
+    }
+    prj.project.rules = out;
+    if (await saveProject(skipped.length ? `${out.length} kural aktarıldı. ${skipped.join(', ')}: hedef site projede yok.` : `${out.length} kural aktarıldı.`)) {
+      try { localStorage.removeItem(`seo-audit:kurallar:${bare(host)}`); } catch {}
+      loadMatch();
+    }
+  };
+}
+
+// Free rule editor (v0.6.1), now inside the project. Rules point to a site of the project, not to a host.
+function ruleSiteOptions(cur) {
+  return prj.project.sites.filter((s) => s.role !== 'old').map((s) => `<option value="${esc(s.key)}"${s.key === cur ? ' selected' : ''}>${esc(siteName(s, true))}</option>`).join('')
+    + `<option value="__drop"${cur === '__drop' ? ' selected' : ''}>Bölüm kaldırıldı</option>`;
+}
+function renderRuleEditor() {
+  const stats = new Map((prj.match?.rules || []).map((r) => [r.from, r]));
+  $('#cmpRules').innerHTML = prj.project.rules.map((r, i) => {
+    const st = stats.get(r.from);
+    return `<div class="rule${r.drop ? ' drop' : ''}">
+      <label><span class="sr">Kural ${i + 1}: eski yol</span><input name="from" value="${esc(r.from)}" placeholder="/tr/*" spellcheck="false" autocomplete="off"></label>
+      <span class="cmp-arrow" aria-hidden="true">→</span>
+      <label><span class="sr">Kural ${i + 1}: hedef site</span><select name="site">${ruleSiteOptions(r.drop ? '__drop' : r.site)}</select></label>
+      <label><span class="sr">Kural ${i + 1}: yeni yol</span><input name="to" value="${esc(r.drop ? '' : r.to || '/*')}" placeholder="/*" spellcheck="false" autocomplete="off"${r.drop ? ' disabled' : ''}></label>
+      <button type="button" class="ghost small" data-del-rule="${i}" aria-label="Kural ${i + 1} sil">Sil</button>
+      ${st ? `<span class="small rule-st">${st.pages} sayfa · ${st.found} bulundu</span>` : ''}
+    </div>`;
+  }).join('') || '<p class="small">Serbest kural yok. Bölüm kararları yukarıdaki tabloda.</p>';
+}
+function readRules() {
+  return [...$('#cmpRules').querySelectorAll('.rule')].map((row) => {
+    const from = row.querySelector('[name=from]').value.trim();
+    const site = row.querySelector('[name=site]').value;
+    const to = row.querySelector('[name=to]').value.trim();
+    return site === '__drop' ? { from, drop: true } : { from, site, to: to || '/*' };
+  });
+}
+$('#cmpRules').addEventListener('change', (e) => { if (e.target.name === 'site') { prj.project.rules = readRules(); renderRuleEditor(); } });
+$('#cmpRules').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-del-rule]');
+  if (!b) return;
+  prj.project.rules = readRules();
+  prj.project.rules.splice(+b.dataset.delRule, 1);
+  renderRuleEditor();
+});
+$('#cmpAddRule').addEventListener('click', () => {
+  prj.project.rules = [...readRules(), { from: '', site: 'heir', to: '/*' }];
+  renderRuleEditor();
+  $('#cmpRules').querySelector('.rule:last-child [name=from]').focus();
+});
+$('#ruleSave').addEventListener('click', async () => {
+  prj.project.rules = readRules().filter((r) => r.from);
+  const ok = await saveProject('Kurallar kaydedildi.');
+  if (ok) loadMatch(); else $('#matchErr').textContent = $('#prjSaved').textContent;
+});
+
+// ---------- Step 4: Yapılacaklar (all pages view; the work list by place comes next) ----------
 const CMP_KINDS = [
   { k: 'same', label: 'Aynı kaldı', cls: 'ok' },
   { k: 'changed', label: 'İçerik değişti', cls: 'warning' },
+  { k: 'moved', label: 'Hedef hazır, 301 kurulu', cls: 'ok2' },
+  { k: 'no301', label: 'Hedef hazır, 301 eksik', cls: 'critical' },
+  { k: 'notarget', label: 'Hedef yok', cls: 'critical' },
   { k: 'redirected', label: 'Yönleniyor', cls: 'redirect' },
   { k: 'lost', label: 'Kayboldu', cls: 'critical' },
   { k: 'removed', label: 'Bölüm kaldırıldı', cls: 'removed' },
@@ -480,207 +956,50 @@ const CMP_KINDS = [
   { k: 'unknown', label: 'Kontrol edilemedi', cls: 'notice' },
   { k: 'added', label: 'Yeni sayfa', cls: 'new' },
 ];
-const OPTIONAL_KINDS = ['removed', 'unknown', 'unlinked'];
-const DROP = '__drop';
-const cmpState = { data: null, tab: 'lost', q: '', history: [], rules: [], rulesHost: null, extra: [] };
-const crawlLabel = (h) => `${h.host}${h.label ? ' · ' + h.label : ''} · ${fmtDate(h.startedAt)} · ${h.summary.total} URL`;
-const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
-const rulesKey = (host) => `seo-audit:kurallar:${bare(host)}`;
-const crawlById = (id) => cmpState.history.find((h) => h.id === id);
-
-function loadPathRules(host) {
-  try { const r = JSON.parse(localStorage.getItem(rulesKey(host)) || '[]'); return Array.isArray(r) ? r : []; } catch { return []; }
-}
-function savePathRules(host, rules) {
-  try { localStorage.setItem(rulesKey(host), JSON.stringify(rules)); } catch {}
-}
-
-// ---------- Targets ----------
-const crawlOptions = () => cmpState.history.map((h) => `<option value="${esc(h.id)}">${esc(crawlLabel(h))}</option>`).join('');
-function renderExtra() {
-  $('#cmpExtra').innerHTML = cmpState.extra.map((id, i) => `<div class="cmp-extra">
-    <label>Yeni site ${i + 2}<select data-extra="${i}">${crawlOptions()}</select></label>
-    <button type="button" class="ghost small" data-del-extra="${i}" aria-label="Yeni site ${i + 2} kaldır">Kaldır</button></div>`).join('');
-  cmpState.extra.forEach((id, i) => { $(`[data-extra="${i}"]`).value = id; });
-  $('#cmpAddTarget').hidden = cmpState.extra.length >= (cmpState.maxTargets || 4) - 1;
-}
-const targetIds = () => [$('#cmpNew').value, ...cmpState.extra].filter(Boolean);
-const targetHosts = () => [...new Set(targetIds().map((id) => crawlById(id)?.host).filter(Boolean))];
-
-// ---------- Rule editor ----------
-function readRules() {
-  return [...$('#cmpRules').querySelectorAll('.rule')].map((row) => {
-    const from = row.querySelector('[name=from]').value.trim();
-    const host = row.querySelector('[name=host]').value;
-    const to = row.querySelector('[name=to]').value.trim();
-    return host === DROP ? { from, drop: true } : { from, host, to: to || '/*' };
-  });
-}
-function renderRules(stats = null) {
-  const hosts = targetHosts();
-  const main = hosts[0] || '';
-  const opts = (r) => {
-    const h = r.drop ? DROP : (bare(r.host) === bare(main) ? '' : r.host || '');
-    const list = [['', `Ana hedef${main ? ' · ' + main : ''}`], ...hosts.slice(1).map((x) => [x, x])];
-    if (h && h !== DROP && !hosts.some((x) => bare(x) === bare(h))) list.push([h, `${h} (seçili değil)`]);
-    list.push([DROP, 'Bölüm kaldırıldı']);
-    return list.map(([v, t]) => `<option value="${esc(v)}"${v === h ? ' selected' : ''}>${esc(t)}</option>`).join('');
-  };
-  $('#cmpRules').innerHTML = cmpState.rules.map((r, i) => {
-    const st = stats?.[i];
-    return `<div class="rule${r.drop ? ' drop' : ''}">
-      <label><span class="sr">Kural ${i + 1}: eski yol</span><input name="from" value="${esc(r.from)}" placeholder="/tr/*" spellcheck="false" autocomplete="off"></label>
-      <span class="cmp-arrow" aria-hidden="true">→</span>
-      <label><span class="sr">Kural ${i + 1}: hedef site</span><select name="host">${opts(r)}</select></label>
-      <label><span class="sr">Kural ${i + 1}: yeni yol</span><input name="to" value="${esc(r.drop ? '' : r.to || '/*')}" placeholder="/*" spellcheck="false" autocomplete="off"${r.drop ? ' disabled' : ''}></label>
-      <button type="button" class="ghost small" data-del-rule="${i}" aria-label="Kural ${i + 1} sil">Sil</button>
-      ${st ? `<span class="small rule-st">${st.pages} sayfa · ${st.found} bulundu</span>` : ''}
-    </div>`;
-  }).join('') || '<p class="small">Kural yok. Sonuçta önerilen kurallar görünür.</p>';
-}
-$('#cmpRules').addEventListener('change', (e) => {
-  if (e.target.name !== 'host') return;
-  cmpState.rules = readRules();
-  renderRules();
-});
-$('#cmpRules').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-del-rule]');
-  if (!b) return;
-  cmpState.rules = readRules();
-  cmpState.rules.splice(+b.dataset.delRule, 1);
-  renderRules();
-});
-$('#cmpAddRule').addEventListener('click', () => {
-  cmpState.rules = [...readRules(), { from: '', host: '', to: '/*' }];
-  renderRules();
-  $('#cmpRules').querySelector('.rule:last-child [name=from]').focus();
-});
-$('#cmpAddTarget').addEventListener('click', () => {
-  const used = new Set([$('#cmpOld').value, ...targetIds()]);
-  cmpState.extra.push((cmpState.history.find((h) => !used.has(h.id)) || cmpState.history[0]).id);
-  cmpState.rules = readRules();
-  renderExtra(); renderRules();
-});
-$('#cmpExtra').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-del-extra]');
-  if (!b) return;
-  cmpState.extra.splice(+b.dataset.delExtra, 1);
-  cmpState.rules = readRules();
-  renderExtra(); renderRules();
-});
-$('#cmpExtra').addEventListener('change', (e) => {
-  const s = e.target.closest('[data-extra]');
-  if (!s) return;
-  cmpState.extra[+s.dataset.extra] = s.value;
-  cmpState.rules = readRules(); renderRules();
-});
-$('#cmpNew').addEventListener('change', () => { cmpState.rules = readRules(); renderRules(); });
-$('#cmpOld').addEventListener('change', () => {
-  // Rules belong to the old site: show the saved rules of the new old site.
-  cmpState.rulesHost = crawlById($('#cmpOld').value)?.host;
-  cmpState.rules = loadPathRules(cmpState.rulesHost);
-  renderRules();
-});
-
-// ---------- Open and run ----------
-async function openCompare(a, bList = []) {
-  currentId = null; es?.close();
-  show('compareView');
-  loadHistory();
-  $('#cmpErr').textContent = '';
-  let history = [];
-  try { ({ history } = await api('/api/crawls')); } catch (e) { $('#cmpErr').textContent = e.message; }
-  try { cmpState.maxTargets = (await api('/api/info')).maxTargets || 4; } catch {}
-  cmpState.history = history;
-  $('#cmpOld').innerHTML = crawlOptions(); $('#cmpNew').innerHTML = crawlOptions();
-  if (history.length < 2) {
-    $('#cmpResult').hidden = true;
-    $('#cmpErr').textContent = 'Karşılaştırma için en az iki tarama gerekir. Eski siteyi "Eski site", yeni siteyi "Yeni site" etiketi ile tarayın.';
-    return;
-  }
-  const known = (id) => history.some((h) => h.id === id);
-  const pick = (label, skip) => history.find((h) => h.label === label && h.id !== skip)?.id;
-  const oldId = (known(a) && a) || pick('eski') || history[1].id;
-  const ids = bList.filter(known);
-  const newId = ids[0] || pick('yeni', oldId) || history.find((h) => h.id !== oldId).id;
-  $('#cmpOld').value = oldId; $('#cmpNew').value = newId;
-  cmpState.extra = ids.slice(1);
-  renderExtra();
-  cmpState.rulesHost = crawlById(oldId)?.host;
-  cmpState.rules = loadPathRules(cmpState.rulesHost);
-  renderRules();
-  $('#cmpNoRule').textContent = '';
-  if (!a || !ids.length) { $('#cmpResult').hidden = true; return; }
-  await runCompare(oldId, ids);
-}
-
-async function runCompare(a, ids) {
-  $('#cmpResult').hidden = true;
-  $('#cmpBusy').hidden = false;
-  const rules = cmpState.rules.filter((r) => r.from);
-  const qs = `old=${encodeURIComponent(a)}&new=${ids.map(encodeURIComponent).join(',')}&rules=${encodeURIComponent(JSON.stringify(rules))}`;
-  try {
-    const d = cmpState.data = await api(`/api/compare?${qs}`);
-    const s = d.summary;
-    cmpState.tab = s.lost ? 'lost' : s.contentLost ? 'changed' : s.redirectFix ? 'redirected' : s.unknown ? 'unknown' : s.redirected ? 'redirected' : 'added';
+const OPTIONAL_KINDS = ['removed', 'unknown', 'unlinked', 'moved', 'no301', 'notarget'];
+const cmpState = { tab: 'lost', q: '' };
+function renderTodo() {
+  $('#todoBusy').hidden = !prj.loading;
+  $('#todoErr').textContent = !prj.loading && prj.matchErr ? prj.matchErr : '';
+  const d = prj.match;
+  $('#cmpResult').hidden = !d;
+  if (!d) return;
+  const s = d.summary;
+  if (!cmpState.data || cmpState.data !== d) {
+    cmpState.data = d;
+    cmpState.tab = ['no301', 'notarget', 'lost'].find((k) => s[k]) || (s.contentLost ? (s.changed ? 'changed' : 'moved') : s.redirectFix ? 'redirected' : s.moveFix ? 'moved' : s.unknown ? 'unknown' : 'added');
     cmpState.q = ''; $('#cmpQ').value = '';
-    $('#cmpExcel').href = `/api/compare/excel?${qs}`;
-    // The server returns the rules in the order it applies them, with counts.
-    cmpState.rules = d.rules.map(({ from, host, to, drop }) => (drop ? { from, drop } : { from, host, to }));
-    savePathRules(cmpState.rulesHost, cmpState.rules);
-    renderRules(d.rules);
-    $('#cmpNoRule').textContent = `Kural yok (aynı yol, ana hedef): ${d.noRule.pages} sayfa · ${d.noRule.found} bulundu`;
-    renderCompare();
-    $('#cmpResult').hidden = false;
-  } catch (e) { $('#cmpErr').textContent = e.message; }
-  finally { $('#cmpBusy').hidden = true; }
-}
-
-function renderCompare() {
-  const { summary: s, warnings, suggestions } = cmpState.data;
+  }
+  $('#cmpExcel').href = `/api/projects/${prj.id}/excel`;
   $('#cmpKept').textContent = `%${s.kept}`;
-  $('#cmpKeptText').textContent = `Eski sitenin ${s.oldPages} sayfasından ${s.same + s.changed} tanesi beklenen adreste açılıyor.`;
-  $('#cmpWarn').innerHTML = warnings.map((w) => `<p class="warn">${esc(w)}</p>`).join('');
-  $('#cmpSuggest').innerHTML = suggestions.length ? `<div class="suggest">
-    <div class="suggest-h"><b>Önerilen kurallar</b><span class="small">Araç eski yolları yeni taramalarda aradı. Öneriyi ekleyin, karşılaştırma tekrar çalışır.</span>
-    ${suggestions.length > 1 ? '<button type="button" class="ghost small" data-sug="all">Hepsini ekle</button>' : ''}</div>
-    <ul>${suggestions.map((x, i) => `<li><code>${esc(x.text)}</code><span>${esc(x.why)}</span><button type="button" class="ghost small" data-sug="${i}">Ekle</button></li>`).join('')}</ul></div>` : '';
-  // Bar: only old pages, so the parts add up to 100%.
+  $('#cmpKeptText').textContent = `Eski sitenin ${s.oldPages} sayfasından ${s.same + s.changed + s.moved} tanesi yerinde: aynı yolda açılıyor veya hedefe 301 ile gidiyor.`;
+  $('#cmpWarn').innerHTML = d.warnings.map((w) => `<p class="warn">${esc(w)}</p>`).join('');
   const parts = CMP_KINDS.filter((x) => x.k !== 'added').map((x) => ({ ...x, n: s[x.k] || 0 })).filter((x) => x.n);
   $('#cmpBar').innerHTML = parts.map((x) => `<i class="${x.cls}" style="flex-grow:${x.n}" title="${x.label}: ${x.n}"></i>`).join('');
   $('#cmpBar').setAttribute('aria-label', parts.map((x) => `${x.label}: ${x.n}`).join(', '));
   const sub = {
     changed: s.contentLost ? `${s.contentLost} sayfada kayıp` : 'kayıp yok',
     redirected: s.redirectFix ? `${s.redirectFix} düzeltme gerekli` : 'hedefler doğru',
-    lost: s.lost ? '301 gerekli' : '', removed: '301 veya 410 gerekli',
+    moved: s.moveFix ? `${s.moveFix} düzeltme gerekli` : '',
+    lost: s.lost ? '301 gerekli' : '', removed: '301 veya 410 gerekli', no301: '301 kurun', notarget: 'sayfa gerekli',
   };
   $('#cmpTiles').innerHTML = CMP_KINDS.filter((x) => !OPTIONAL_KINDS.includes(x.k) || s[x.k]).map((x) => `<button type="button" class="${x.cls}" data-tab="${x.k}" aria-pressed="${cmpState.tab === x.k}">
     <b>${s[x.k]}</b><span>${x.label}</span>${sub[x.k] ? `<em>${sub[x.k]}</em>` : ''}</button>`).join('');
   renderCompareTable();
 }
-
-$('#cmpSuggest').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-sug]');
-  if (!b) return;
-  const all = cmpState.data.suggestions;
-  const add = b.dataset.sug === 'all' ? all : [all[+b.dataset.sug]];
-  cmpState.rules = [...readRules().filter((r) => r.from), ...add.map(({ from, host, to, drop }) => (drop ? { from, drop } : { from, host, to }))];
-  renderRules();
-  $('#cmpForm').requestSubmit();
-});
-
 const cmpLink = (u, txt) => (u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(txt ?? u)}</a>` : esc(txt));
 // Explanation under every row: the checked URL, the rule and what to do.
 function explain(r, { reason = true, cls = 'flag' } = {}) {
   const ctx = [r.checkUrl && `Kontrol edilen: ${cmpLink(r.checkUrl)}`, r.rule && `Kural: <code>${esc(r.rule)}</code>`].filter(Boolean).join(' · ');
   return `${reason && r.reason ? `<span class="${cls}">${esc(r.reason)}</span>` : ''}${ctx ? `<div class="why">${ctx}</div>` : ''}${r.todo ? `<div class="todo">${esc(r.todo)}</div>` : ''}`;
 }
-
+const redirectCell = (r) => (r.target ? `<span class="${r.todo && !r.lostCount ? 'st warnish' : 'st okish'}">${r.status}</span> → ${cmpLink(r.target)}${r.hops > 1 ? ` <span class="small">${r.hops} adım</span>` : ''}`
+  : r.heirStatus ? `<span class="flag">Yönlenmiyor (${r.heirStatus})</span>` : '<span class="small">—</span>');
 function renderCompareTable() {
   const { rows, summary: s, targets } = cmpState.data;
   const t = cmpState.tab, q = cmpState.q.toLowerCase();
   if (t === 'same') {
-    $('#cmpTable').innerHTML = `<tbody><tr><td class="empty">${s.same} sayfa beklenen adreste açılıyor. Title, meta description ve H1 aynı. Liste gerekmez.</td></tr></tbody>`;
+    $('#cmpTable').innerHTML = `<tbody><tr><td class="empty">${s.same} sayfa aynı yolda açılıyor. Title, meta description ve H1 aynı. Liste gerekmez.</td></tr></tbody>`;
     $('#cmpCount').textContent = ''; return;
   }
   let list = rows[t].filter((r) => !q || r.path.toLowerCase().includes(q) || (r.oldTitle || r.newTitle || '').toLowerCase().includes(q));
@@ -689,6 +1008,8 @@ function renderCompareTable() {
   $('#cmpCount').textContent = `${total} sonuç${total > 500 ? ' · ilk 500 gösteriliyor, tamamı Excel\'de' : ''}`;
   const imp = (r) => `${r.indexable ? '' : '<span class="small">indexlenmez</span> '}<span class="small">${r.inlinks} iç link</span>`;
   const many = targets.length > 1;
+  const moveH = ['Eski yol', 'Hedef', 'Eski adres → yönlendirme', 'Sonuç ve yapılacak'];
+  const moveRow = (r) => [cmpLink(r.oldUrl, r.path), cmpLink(r.newUrl || r.checkUrl, r.newUrl || r.checkUrl), redirectCell(r), explain(r, { cls: t === 'moved' ? 'small' : 'flag' })];
   const H = {
     lost: ['Yol', 'Sonuç ve yapılacak', 'Eski title', 'Önem'],
     redirected: ['Yol', 'Hedef ve yapılacak', 'Status', 'Adım'],
@@ -696,6 +1017,7 @@ function renderCompareTable() {
     removed: ['Yol', 'Sonuç ve yapılacak', 'Önem'],
     unknown: ['Yol', 'Neden ve yapılacak'],
     unlinked: ['Yol', 'Durum ve yapılacak'],
+    moved: moveH, no301: moveH, notarget: moveH,
     added: [...(many ? ['Site'] : []), 'Yol', 'Title'],
   }[t];
   const row = {
@@ -705,24 +1027,13 @@ function renderCompareTable() {
     removed: (r) => [cmpLink(r.oldUrl, r.path), explain(r, { cls: 'small' }), imp(r)],
     unknown: (r) => [esc(r.path), explain(r, { cls: '' })],
     unlinked: (r) => [cmpLink(r.newUrl, r.path), explain(r, { cls: '' })],
+    moved: moveRow, no301: moveRow, notarget: moveRow,
     added: (r) => [...(many ? [esc(r.site)] : []), cmpLink(r.newUrl, r.path), esc(r.newTitle)],
   }[t];
   $('#cmpTable').innerHTML = `<thead><tr>${H.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${
-    list.length ? list.map((r) => `<tr>${row(r).map((c, i) => `<td class="${i === (t === 'added' && many ? 1 : 0) ? 'u' : ''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${H.length}" class="empty">Bu listede sayfa yok.</td></tr>`
+    list.length ? list.map((r) => `<tr>${row(r).map((c, i) => `<td class="${i === (t === 'added' && many ? 1 : 0) || (moveH === H && i === 1) ? 'u' : ''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${H.length}" class="empty">Bu listede sayfa yok.</td></tr>`
   }</tbody>`;
 }
-
-$('#cmpForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  $('#cmpErr').textContent = '';
-  const a = $('#cmpOld').value, ids = [...new Set(targetIds())];
-  if (ids.includes(a)) { $('#cmpErr').textContent = 'Eski ve yeni tarama farklı olmalı.'; return; }
-  cmpState.rules = readRules().filter((r) => r.from);
-  cmpState.rulesHost = crawlById(a)?.host;
-  savePathRules(cmpState.rulesHost, cmpState.rules);
-  const h = `#/compare/${encodeURIComponent(a)}/${ids.map(encodeURIComponent).join(',')}`;
-  if (location.hash === h) runCompare(a, ids); else location.hash = h;
-});
 $('#cmpTiles').addEventListener('click', (e) => {
   const b = e.target.closest('[data-tab]');
   if (!b) return;
@@ -737,13 +1048,14 @@ function route() {
   const [, kind, id] = location.hash.split('/');
   if (kind === 'live' && id) return openLive(decodeURIComponent(id));
   if (kind === 'crawl' && id) return openResult(decodeURIComponent(id));
-  if (kind === 'compare') { const [, , a, b] = location.hash.split('/'); return openCompare(a && decodeURIComponent(a), (b || '').split(',').filter(Boolean).map(decodeURIComponent)); }
-  currentId = null; es?.close();
+  if (kind === 'project' && id) { const step = location.hash.split('/')[3]; return openProject(decodeURIComponent(id), step); }
+  currentId = null; es?.close(); clearTimeout(prj.poll); prj.id = null;
   show('startView');
   heroStrip();
   loadRules();
   loadHistory();
-  $('#url').focus();
+  // v0.6 links (#/compare) open the project mode: comparison lives in projects now.
+  setMode(kind === 'compare' || kind === 'new-project' ? 'project' : 'audit');
 }
 window.addEventListener('hashchange', route);
 route();

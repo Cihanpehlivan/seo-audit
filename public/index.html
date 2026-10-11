@@ -13,8 +13,9 @@
 <div class="shell">
   <aside class="side">
     <div class="brand"><span class="mark" aria-hidden="true"></span>SEO Audit</div>
-    <button class="new" id="newBtn" type="button">Yeni tarama</button>
-    <button class="new" id="cmpBtn" type="button">Karşılaştır</button>
+    <button class="new" id="newBtn" type="button">Yeni tarama veya proje</button>
+    <h2 class="side-h">Projeler</h2>
+    <ul class="history" id="projects"><li class="muted">Henüz proje yok.</li></ul>
     <h2 class="side-h">Taramalar</h2>
     <ul class="history" id="history"><li class="muted">Henüz tarama yok.</li></ul>
   </aside>
@@ -22,6 +23,11 @@
   <main class="main">
     <p class="envnote" id="envNote" role="note" hidden></p>
     <section id="startView" class="landing">
+      <div class="modes" role="radiogroup" aria-label="Ne yapmak istiyorsunuz?">
+        <button type="button" role="radio" data-mode="audit" aria-checked="true"><b>Site denetimi</b><span>Bir siteyi tarayın. Sorunları ekiplere göre görün.</span></button>
+        <button type="button" role="radio" data-mode="project" aria-checked="false"><b>Taşıma projesi</b><span>Eski siteyi yeni siteye taşıyın. Araç adım adım yol gösterir.</span></button>
+      </div>
+      <div id="auditStart">
       <h1 class="display">Bir siteyi tarayın</h1>
       <p class="lede">Araç iç linkleri, sitemap'i ve robots.txt'yi okur. Sayfaları <span id="ruleTotal">88</span> kuralla denetler. Sorunları ekiplere göre listeler.</p>
       <form id="form" class="form" novalidate>
@@ -32,14 +38,6 @@
         </div>
         <div class="hero-strip" id="heroStrip" aria-hidden="true"></div>
         <p class="err" id="formErr" role="alert"></p>
-        <fieldset class="labels">
-          <legend>Bu tarama hangi site için?</legend>
-          <div class="seg">
-            <label><input type="radio" name="label" value="" checked><span>Tek site</span></label>
-            <label><input type="radio" name="label" value="eski"><span>Eski site</span></label>
-            <label><input type="radio" name="label" value="yeni"><span>Yeni site (staging)</span></label>
-          </div>
-        </fieldset>
         <details class="adv" id="adv">
           <summary>Gelişmiş ayarlar</summary>
           <div class="grid">
@@ -59,13 +57,28 @@
         </details>
       </form>
 
+      </div>
+      <div id="projectStart" hidden>
+        <h1 class="display">Siteyi güvenle taşıyın</h1>
+        <p class="lede">Eski siteyi ve yeni siteleri tanımlayın. Araç bölümleri eşleştirir, eksik sayfaları ve eksik 301'leri listeler.</p>
+        <form id="prjForm" class="form" novalidate>
+          <div class="url-row">
+            <label class="sr" for="prjNewName">Proje adı</label>
+            <input id="prjNewName" type="text" placeholder="Proje adı" autocomplete="off" maxlength="80">
+            <button class="primary big" type="submit">Projeyi oluştur</button>
+          </div>
+          <p class="err" id="prjFormErr" role="alert"></p>
+          <p class="hint">Proje dosyanız var mı? <label class="linkish file-btn">Proje yükle<input type="file" accept=".json,application/json" id="prjUpload" class="sr"></label></p>
+        </form>
+      </div>
       <div class="below">
         <section class="flow" aria-labelledby="flowH">
           <h2 id="flowH">Site yenilemede kullanım</h2>
           <ol>
-            <li><div><b>Eski siteyi tarayın.</b> Yayına çıkmadan önce canlı siteyi "Eski site" etiketi ile tarayın.</div></li>
-            <li><div><b>Yeni siteyi tarayın.</b> Staging'i "Yeni site" etiketi ile tarayın. Şifreyi ve robots ayarını gelişmiş ayarlara yazın.</div></li>
-            <li><div><b>İki taramayı karşılaştırın.</b> Kaybolan sayfaları ve içerik kayıplarını görün. <a href="#/compare">Karşılaştırmayı açın.</a> 301 haritası sonraki sürümde gelir.</div></li>
+            <li><div><b>Proje oluşturun.</b> Eski siteyi ve eski alan adına geçecek siteyi yazın. Diller ayrı alan adlarına taşınıyorsa ek site ekleyin.</div></li>
+            <li><div><b>Siteleri tarayın.</b> Her site için tek düğme. Staging şifresini tarama sırasında girin.</div></li>
+            <li><div><b>Bölümleri eşleştirin.</b> Araç her eski bölüm için yeni yeri önerir. Hedef sayfayı ve 301'i kontrol eder.</div></li>
+            <li><div><b>Yapılacakları indirin.</b> Eksik sayfalar, eksik 301'ler ve içerik kayıpları Excel'de.</div></li>
           </ol>
         </section>
         <section class="cats" aria-labelledby="catH">
@@ -93,6 +106,7 @@
         <div>
           <h1 class="title" id="resHost"></h1>
           <p class="meta" id="resMeta"></p>
+          <a class="back" id="resProject" href="#" hidden></a>
         </div>
         <div class="actions">
           <a class="primary" id="excelBtn" href="#">Excel indir</a>
@@ -132,56 +146,102 @@
         <div class="pager" id="pager"></div>
       </div>
     </section>
-    <section id="compareView" hidden>
-      <h1 class="title">Eski ve yeni site</h1>
-      <p class="meta">Araç sayfaları URL yoluna göre eşleştirir. Eski site canlıda, yeni site staging'de olabilir. Yol değiştiyse veya bir dil başka alan adına taşındıysa yol kuralı yazın.</p>
-      <form id="cmpForm" class="cmp-form" novalidate>
-        <div class="cmp-sites">
-          <label>Eski site taraması<select id="cmpOld"></select></label>
-          <span class="cmp-arrow" aria-hidden="true">→</span>
-          <div class="cmp-targets">
-            <label>Yeni site taraması (ana hedef)<select id="cmpNew"></select></label>
-            <div id="cmpExtra"></div>
-            <button type="button" class="ghost small" id="cmpAddTarget">+ Yeni site ekle</button>
-          </div>
+    <section id="projectView" hidden>
+      <div class="res-head">
+        <div>
+          <h1 class="title" id="prjName"></h1>
+          <p class="meta" id="prjSummary"></p>
         </div>
-        <fieldset class="cmp-rules">
-          <legend>Yol kuralları</legend>
-          <p class="hint">Eski yolu yeni yere taşıyın. Örnek: <code>/tr/*</code> → Türkçe site, <code>/*</code>. Yıldız (<code>*</code>) yolun geri kalanıdır. En uzun eski yol önce uygulanır. Kurala girmeyen yol, ana hedefte aynı yolda aranır.</p>
-          <div id="cmpRules"></div>
-          <p class="small" id="cmpNoRule"></p>
-          <div class="cmp-actions">
-            <button type="button" class="ghost small" id="cmpAddRule">+ Kural ekle</button>
-            <button class="primary" type="submit">Karşılaştır</button>
+      </div>
+      <nav class="steps" aria-label="Taşıma adımları"><ol id="prjSteps"></ol></nav>
+      <div class="next" id="prjNext" role="status"></div>
+
+      <div id="stepProje" class="step-pane" hidden>
+        <fieldset class="structure">
+          <legend>Yeni yapı nasıl?</legend>
+          <div class="choices" id="prjStructure">
+            <label><input type="radio" name="structure" value="same"><span><b>Aynı alan adı, aynı yollar</b>Tasarım veya altyapı değişiyor. Adresler aynı kalıyor.</span></label>
+            <label><input type="radio" name="structure" value="paths"><span><b>Aynı alan adı, yollar değişiyor</b>Örnek: /en/about adresi /about olur. 301 gerekir.</span></label>
+            <label><input type="radio" name="structure" value="domains"><span><b>Diller ayrı alan adlarına</b>Örnek: /tr/ bölümü tr.ornek.com sitesine taşınır.</span></label>
           </div>
         </fieldset>
-      </form>
-      <p class="err" id="cmpErr" role="alert"></p>
-      <p class="muted" id="cmpBusy" hidden>Karşılaştırılıyor. Yeni taramada olmayan eski adresler tek tek isteniyor…</p>
-      <div id="cmpResult" hidden>
+        <h2 class="sub-h">Siteler</h2>
+        <div class="sites" id="prjSites"></div>
+        <div class="row-actions">
+          <button type="button" class="ghost small" id="prjAddSite">+ Site ekle</button>
+          <span class="small" id="prjSaved" role="status"></span>
+        </div>
+        <div class="row-actions file-actions">
+          <a class="ghost small" id="prjExport" href="#" download>Projeyi indir</a>
+          <label class="ghost small file-btn">Proje yükle<input type="file" accept=".json,application/json" id="prjUpload2" class="sr"></label>
+          <button type="button" class="ghost small danger" id="prjDelete">Projeyi sil</button>
+        </div>
+        <p class="hint" id="prjDiskNote"></p>
+      </div>
+
+      <div id="stepTarama" class="step-pane" hidden>
+        <div class="crawls" id="prjCrawls"></div>
+        <details class="adv">
+          <summary>Tarama ayarları</summary>
+          <div class="grid">
+            <label class="wide">Staging şifresi (kullanıcı:şifre)<input id="crawlAuth" type="text" placeholder="demo:1234" autocomplete="off"></label>
+            <label>En fazla URL<input id="crawlMax" type="number" min="1" max="50000" value="5000"></label>
+            <label class="check"><input id="crawlRobots" type="checkbox"> robots.txt kurallarını yok say</label>
+          </div>
+        </details>
+        <p class="hint">Staging şifreli ise şifreyi tarama ayarlarına yazın, sonra "Tara" düğmesine basın. Araç şifreyi saklamaz. Staging robots.txt ile kapalı ise "robots.txt kurallarını yok say" seçin.</p>
+        <p class="err" id="crawlErr" role="alert"></p>
+      </div>
+
+      <div id="stepEslestirme" class="step-pane" hidden>
+        <p class="meta">Eski sitenin her bölümü için yeni yeri seçin. Araç her sayfa için iki şeyi kontrol eder: hedef sayfa var mı, eski adres hedefe 301 veriyor mu.</p>
+        <div id="lsImport"></div>
+        <p class="muted" id="matchBusy" hidden>Eşleştiriliyor. Araç eski adresleri yeni sitelerde istiyor. Büyük sitelerde bu bir dakika sürebilir.</p>
+        <p class="err" id="matchErr" role="alert"></p>
+        <div id="matchWarn"></div>
+        <div class="sections" id="prjSections"></div>
+        <details class="adv" id="ruleAdv">
+          <summary>Gelişmiş: serbest kural yazın</summary>
+          <p class="hint">Bir bölümün sadece bir kısmı başka yere gidiyorsa kural yazın. Örnek: <code>/tr/blog/*</code> → Türkçe site, <code>/yazilar/*</code>. Yıldız (<code>*</code>) yolun geri kalanıdır. En uzun eski yol önce uygulanır.</p>
+          <div id="cmpRules"></div>
+          <div class="cmp-actions">
+            <button type="button" class="ghost small" id="cmpAddRule">+ Kural ekle</button>
+            <button type="button" class="ghost small strong" id="ruleSave">Kuralları kaydet</button>
+          </div>
+        </details>
+      </div>
+
+      <div id="stepYapilacaklar" class="step-pane" hidden>
+        <p class="muted" id="todoBusy" hidden>Eşleştiriliyor…</p>
+        <p class="err" id="todoErr" role="alert"></p>
+        <div id="cmpResult" hidden>
+        <h2 class="sub-h">Bütün sayfalar</h2>
         <div class="cmp-head">
           <p class="cmp-kept"><b id="cmpKept"></b><span id="cmpKeptText"></span></p>
-          <a class="primary" id="cmpExcel" href="#">Excel indir</a>
+          <a class="ghost small" id="cmpExcel" href="#">Excel indir</a>
         </div>
         <div id="cmpWarn"></div>
-        <div id="cmpSuggest"></div>
         <div class="cmp-bar" id="cmpBar" role="img"></div>
         <div class="cmp-tiles" id="cmpTiles"></div>
         <details class="cmp-help">
           <summary>Gruplar ne anlama gelir?</summary>
           <dl>
-            <dt>Aynı kaldı</dt><dd>Sayfa beklenen adreste açılıyor. Title, meta description ve H1 aynı.</dd>
+            <dt>Aynı kaldı</dt><dd>Sayfa aynı yolda açılıyor. Title, meta description ve H1 aynı.</dd>
             <dt>İçerik değişti</dt><dd>Sayfa açılıyor ama title, meta veya H1 farklı. Alan boşaldıysa veya noindex eklendiyse "kayıp" yazılır.</dd>
+            <dt>Hedef hazır, 301 kurulu</dt><dd>Sayfa başka yola veya başka siteye taşındı. Hedef sayfa var. Eski adres eski alan adına geçecek sitede hedefe 301 veriyor.</dd>
+            <dt>Hedef hazır, 301 eksik</dt><dd>Hedef sayfa var. Eski adres yönlenmiyor veya yanlış adrese gidiyor. 301 gerekir.</dd>
+            <dt>Hedef yok</dt><dd>Taşınan sayfanın hedefi yeni sitede yok. Sayfayı oluşturun veya başka hedef seçin.</dd>
             <dt>Yönleniyor</dt><dd>Eski adres başka bir adrese gidiyor. Hedef hatalıysa, zincir varsa veya 302 ise satırda yapılacak iş yazılır.</dd>
             <dt>Kayboldu</dt><dd>Beklenen adres 404 veya başka bir hata veriyor. 301 gerekir.</dd>
             <dt>Bölüm kaldırıldı</dt><dd>"Bölüm kaldırıldı" kuralına giren ve bulunmayan sayfa. Bilinçli bir karardır ama 301 veya 410 yine gerekir.</dd>
             <dt>Açılıyor, link yok</dt><dd>Adres açılıyor ama yeni sitede bu sayfaya link yok.</dd>
             <dt>Kontrol edilemedi</dt><dd>robots.txt engeli, şifreli staging, bağlantı hatası veya taranmayan hedef.</dd>
           </dl>
-          <p class="small">Beklenen adres: kural varsa kuralın hedefi, yoksa ana hedefte aynı yol. Yeni taramada olmayan adresi araç tek tek ister. Her satır kontrol edilen adresi, kuralı ve yapılacak işi gösterir.</p>
+          <p class="small">Beklenen adres: bölüm kararı veya kural varsa onun hedefi, yoksa eski alan adına geçecek sitede aynı yol. Yeni taramada olmayan adresi araç tek tek ister. Her satır kontrol edilen adresi, kuralı ve yapılacak işi gösterir.</p>
         </details>
         <div class="tools"><label class="sr" for="cmpQ">Ara</label><input id="cmpQ" type="search" placeholder="Yol veya title ara" autocomplete="off"><span class="muted" id="cmpCount"></span></div>
         <div class="table-wrap"><table id="cmpTable"></table></div>
+        </div>
       </div>
     </section>
   </main>

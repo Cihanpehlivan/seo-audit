@@ -5,7 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crawl } from './crawler.js';
 import { exportExcel, exportCompareExcel } from './export.js';
-import { compareCrawls, probeLost, parseRules } from './compare.js';
+import { compareCrawls, probeLost, parseRules, sectionTable } from './compare.js';
+import { ProjectStore, PID_RE, validateProject, engineRules } from './projects.js';
 import { Store, ID_RE } from './store.js';
 import { normalizeUrl } from './normalize.js';
 import { runAudit, loadConfig, RULES, CATEGORIES } from './rules/index.js';
@@ -38,11 +39,12 @@ const startGuard = PUBLIC_MODE ? makeGuard() : null;
 // Comparison results are cached per crawl pair: probing old paths on the new host takes time.
 const cmpCache = new Map();
 // The cache key holds the crawl ids and the rules, so a new rule set runs a new comparison.
-async function compareWithProbe(a, ids, oldRes, newList, rules, cc) {
-  const key = `${a}|${ids.join(',')}|${JSON.stringify(rules.map((r) => r.text))}`;
+// live: { crawl host → live host } of the target sites (project only).
+async function compareWithProbe(a, ids, oldRes, newList, rules, cc, live = {}) {
+  const key = `${a}|${ids.join(',')}|${JSON.stringify(rules.map((r) => r.text))}|${JSON.stringify(live)}`;
   if (cmpCache.has(key)) return cmpCache.get(key);
   const cmp = compareCrawls(oldRes, newList, {
-    rules, suggest: { minPages: cc.suggestMinPages, minRatio: cc.suggestMinRatio, max: cc.maxSuggestions },
+    rules, live, suggest: { minPages: cc.suggestMinPages, minRatio: cc.suggestMinRatio, max: cc.maxSuggestions },
   });
   const guard = PUBLIC_MODE ? makeGuard() : null;
   const cfg = loadConfig().checks;
@@ -63,8 +65,11 @@ async function compareWithProbe(a, ids, oldRes, newList, rules, cc) {
   return cmp;
 }
 
-const store = new Store(process.env.CRAWL_DIR || path.join(ROOT, 'crawls'));
+const CRAWL_DIR = process.env.CRAWL_DIR || path.join(ROOT, 'crawls');
+const store = new Store(CRAWL_DIR);
 await store.init();
+const projects = new ProjectStore(path.join(CRAWL_DIR, 'projects'));
+await projects.init();
 
 const jobs = new Map(); // id -> { id, label, url, status, progress, counts, clients:Set, controller, error }
 
@@ -112,6 +117,84 @@ async function getAudit(id, result) {
   return audit;
 }
 
+
+// ---------- Projects (v0.7.0) ----------
+const bareHost = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
+const projectLimits = () => { const cc = loadConfig().compare; return { maxExtras: cc.maxTargets - 1, maxRules: cc.maxRules }; };
+
+// State of every site: none (not crawled), running, done, deleted (crawl file gone), stale (address changed).
+async function projectStatus(p) {
+  const out = {};
+  for (const site of p.sites) {
+    const job = site.pendingCrawlId && jobs.get(site.pendingCrawlId);
+    if (job && job.status === 'running') { out[site.key] = { state: 'running', jobId: job.id, done: job.progress.done, phase: job.progress.phase || 'crawl' }; continue; }
+    if (!site.crawlId) { out[site.key] = { state: 'none', error: site.lastError || null }; continue; }
+    const m = await store.meta(site.crawlId);
+    if (!m) { out[site.key] = { state: 'deleted', crawlId: site.crawlId }; continue; }
+    const urlHost = site.url ? bareHost(new URL(site.url).hostname) : '';
+    out[site.key] = {
+      state: urlHost && bareHost(m.host) !== urlHost ? 'stale' : 'done',
+      crawlId: m.id, host: m.host, startedAt: m.startedAt, pages: m.summary.total, ok: m.summary.ok,
+      blocked: m.summary.blocked, limitReached: !!m.limitReached, cancelled: !!m.cancelled, error: site.lastError || null,
+    };
+  }
+  return out;
+}
+
+// Starts a crawl for one site of a project. The crawl id is written to the project when the crawl ends.
+async function startProjectCrawl(id, key, options) {
+  const p = await projects.get(id);
+  const site = p.sites.find((s) => s.key === key);
+  if (!site) throw Object.assign(new Error('Site projede yok.'), { code: 404 });
+  if (!site.url) throw Object.assign(new Error('Önce sitenin adresini yazın.'), { code: 400 });
+  const job = await startJob({ url: site.url, label: site.role === 'old' ? 'eski' : 'yeni', options });
+  await projects.update(id, (q) => { const s = q.sites.find((x) => x.key === key); if (s) { s.pendingCrawlId = job.id; s.lastError = null; } });
+  job.finished.then((r) => projects.update(id, (q) => {
+    const s = q.sites.find((x) => x.key === key);
+    if (!s || s.pendingCrawlId !== job.id) return;
+    s.pendingCrawlId = null;
+    if (r.status === 'error') s.lastError = r.error; else { s.crawlId = job.id; s.lastError = null; }
+  })).catch((e) => console.error('Proje güncellenemedi:', e.message));
+  return job;
+}
+
+// Matching of a project: old site → heir and other sites. Sections without a decision get the suggested move.
+async function projectMatch(p) {
+  const cc = loadConfig().compare;
+  const status = await projectStatus(p);
+  const old = p.sites.find((s) => s.role === 'old'), heir = p.sites.find((s) => s.role === 'heir');
+  const missing = [old, heir].filter((s) => status[s.key].state !== 'done' && status[s.key].state !== 'stale');
+  if (missing.length) {
+    const names = missing.map((s) => (s.role === 'old' ? 'Eski site' : 'Eski alan adına geçecek site'));
+    throw Object.assign(new Error(`${names.join(' ve ')} taranmadı. Eşleştirme için gerekli.`), { code: 409, need: missing.map((s) => s.key) });
+  }
+  const targets = [heir, ...p.sites.filter((s) => s.role === 'extra' && ['done', 'stale'].includes(status[s.key].state))];
+  const ids = targets.map((s) => status[s.key].crawlId);
+  const [oldRes, ...newList] = await Promise.all([status[old.key].crawlId, ...ids].map((x) => store.load(x)));
+  const hostOf = (key) => {
+    const s = p.sites.find((x) => x.key === key);
+    return status[key]?.host ? bareHost(status[key].host) : s?.url ? bareHost(new URL(s.url).hostname) : '';
+  };
+  const keyOfHost = (h) => (!h ? 'heir' : p.sites.find((s) => s.role !== 'old' && hostOf(s.key) === bareHost(h))?.key || null);
+  const live = {};
+  for (const s of targets) if (s.live) live[hostOf(s.key)] = s.live;
+  const suggest = { minPages: cc.suggestMinPages, minRatio: cc.suggestMinRatio, max: cc.maxSuggestions };
+  const userRules = parseRules(engineRules(p, hostOf), cc.maxRules);
+  // First pass without requests: which sections have a suggested move?
+  const first = compareCrawls(oldRes, newList, { rules: userRules, live, suggest });
+  const auto = first.suggestions.filter((x) => !x.drop).map(({ from, host, to }) => ({ from, host, to }));
+  const rules = parseRules([...userRules.map(({ from, host, to, drop }) => ({ from, host, to, drop })), ...auto], cc.maxRules + cc.maxSuggestions);
+  const cmp = await compareWithProbe(status[old.key].crawlId, ids, oldRes, newList, rules, cc, live);
+  const autoFrom = new Set(auto.map((a) => a.from));
+  const sections = sectionTable(cmp, { minPages: cc.suggestMinPages }).map((sec) => ({
+    ...sec, auto: autoFrom.has(sec.from),
+    current: sec.current.drop ? sec.current : { site: keyOfHost(sec.current.host), to: sec.current.to },
+    options: sec.options.map((o) => ({ site: keyOfHost(o.host), to: o.to, hits: o.hits })).filter((o) => o.site),
+    suggestion: sec.suggestion && (sec.suggestion.drop ? { drop: true, why: sec.suggestion.why } : { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to, why: sec.suggestion.why }),
+  }));
+  return { cmp, sections, targets: targets.map((s) => s.key), status };
+}
+
 async function startJob(body) {
   const url = normalizeUrl(String(body.url || '').trim());
   if (!url) throw Object.assign(new Error('Geçerli bir adres yazın. Örnek: https://www.ornek.com'), { code: 400 });
@@ -143,7 +226,7 @@ async function startJob(body) {
     pending = [];
   }, 300);
 
-  crawl(url, {
+  job.finished = crawl(url, {
     maxUrls: num(o.maxUrls, Math.min(5000, URL_LIMIT), 1, URL_LIMIT),
     blockPrivate: PUBLIC_MODE,
     maxDepth: num(o.maxDepth, 50, 0, 100),
@@ -172,9 +255,11 @@ async function startJob(body) {
     const entry = await store.save(id, label, result, audit);
     job.status = result.meta.cancelled ? 'cancelled' : 'done';
     broadcast(job, 'done', { entry, status: job.status });
+    return { status: job.status, entry };
   }).catch((e) => {
     job.status = 'error'; job.error = e.message;
     broadcast(job, 'failed', { error: e.message });
+    return { status: 'error', error: e.message };
   }).finally(() => {
     clearInterval(flush);
     for (const c of job.clients) c.end();
@@ -240,6 +325,70 @@ const server = http.createServer(async (req, res) => {
       const buf = await readFile(tmp);
       unlink(tmp).catch(() => {});
       return res.end(buf);
+    }
+
+
+    // /api/projects: migration projects. /api/projects/:id/(crawl|match|excel|export)
+    if (parts[1] === 'projects') {
+      const pid = parts[2];
+      if (!pid) {
+        if (req.method === 'GET') {
+          const list = await projects.list();
+          return send(res, 200, list.map((p) => ({ id: p.id, name: p.name, updatedAt: p.updatedAt, sites: p.sites.length, rules: p.rules.length,
+            crawlIds: p.sites.flatMap((s) => [s.crawlId, s.pendingCrawlId]).filter(Boolean) })));
+        }
+        if (req.method === 'POST') {
+          const def = validateProject(await readJson(req), projectLimits());
+          return send(res, 201, await projects.create(def));
+        }
+      }
+      if (pid && !PID_RE.test(pid)) return send(res, 400, { error: 'Geçersiz proje' });
+      const action = parts[3];
+      if (pid && !action) {
+        if (req.method === 'GET') { const p = await projects.get(pid); return send(res, 200, { project: p, status: await projectStatus(p) }); }
+        if (req.method === 'PUT') {
+          const def = validateProject(await readJson(req), projectLimits());
+          const p = await projects.update(pid, (old) => ({ ...old, ...def, sites: def.sites.map((s) => {
+            const prev = old.sites.find((x) => x.key === s.key);
+            return { ...s, pendingCrawlId: prev?.pendingCrawlId || null, lastError: prev?.lastError || null };
+          }) }));
+          return send(res, 200, { project: p, status: await projectStatus(p) });
+        }
+        if (req.method === 'DELETE') { await projects.remove(pid); return send(res, 200, { ok: true }); }
+      }
+      if (action === 'crawl' && req.method === 'POST') {
+        const body = await readJson(req);
+        const job = await startProjectCrawl(pid, String(body.site || ''), body.options || {});
+        return send(res, 201, publicJob(job));
+      }
+      if ((action === 'match' || action === 'excel') && req.method === 'GET') {
+        let m;
+        try { m = await projectMatch(await projects.get(pid)); }
+        catch (e) { if (e.code === 409) return send(res, 409, { error: e.message, need: e.need }); throw e; }
+        if (action === 'match') {
+          const { cmp, sections, targets, status } = m;
+          return send(res, 200, { ...cmp, sections, targetSites: targets, status });
+        }
+        const tmp = path.join(os.tmpdir(), `prj-${Date.now()}.xlsx`);
+        await exportCompareExcel(m.cmp, tmp);
+        res.writeHead(200, {
+          'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'content-disposition': `attachment; filename="tasima-${m.cmp.old.host}.xlsx"`,
+        });
+        const buf = await readFile(tmp);
+        unlink(tmp).catch(() => {});
+        return res.end(buf);
+      }
+      if (action === 'export' && req.method === 'GET') {
+        const p = await projects.get(pid);
+        const { id, name, structure, sites, rules, createdAt, updatedAt } = p;
+        const body = JSON.stringify({ format: 'seo-audit-proje', version: 1, id, name, structure, rules, createdAt, updatedAt,
+          sites: sites.map(({ key, role, name: n, url, live, crawlId }) => ({ key, role, name: n, url, live, crawlId })) }, null, 2);
+        const tr = { ğ: 'g', ü: 'u', ş: 's', ı: 'i', ö: 'o', ç: 'c' };
+        const file = name.toLocaleLowerCase('tr').replace(/[ğüşıöç]/g, (c) => tr[c]).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'proje';
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename="proje-${file}.json"` });
+        return res.end(body);
+      }
     }
 
     // /api/info: server mode for the interface

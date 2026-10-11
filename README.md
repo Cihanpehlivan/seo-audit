@@ -17,11 +17,11 @@ npm test          # crawler testi ve kural testi
 npm start
 ```
 
-Tarayıcıda `http://localhost:3300` adresini açın. Giriş ekranı açılır: adres alanı, site etiketi, gelişmiş ayarlar, yenileme akışı ve denetlenen alanlar.
+Tarayıcıda `http://localhost:3300` adresini açın. Giriş ekranında iki seçenek var: "Site denetimi" (tek site) ve "Taşıma projesi" (site yenileme).
 
 Arayüz koyu temadır. Yazı tipi Google Fonts'tan (Archivo) gelir. İnternet yoksa sistem yazı tipi kullanılır.
 
-- Adresi yazın. Etiketi seçin (tek site / eski / yeni). "Taramayı başlat" butonuna basın.
+- "Site denetimi" seçili iken adresi yazın. "Taramayı başlat" butonuna basın.
 - Tarama sırasında her URL bir hücre olarak görünür. Gri: 200. Turuncu: redirect. Kırmızı: 4xx/5xx. Boş kırmızı çerçeve: bağlantı hatası. Boş gri çerçeve: robots engeli.
 - Tarama bitince "Sorunlar" sekmesi açılır. Sağlık skoru, önem (kritik / uyarı / bilgi) ve ekip (Frontend / Backend / İçerik / SEO) filtreleri vardır. Soruna tıklayın: açıklama, çözüm ve etkilenen URL'ler görünür.
 - Sorunlar sekmesindeki site kartı ek kontrollerin sonucunu gösterir: site sürümleri, SSL, HSTS, llms.txt, sıkıştırma, dış linkler, görseller. Renkli kutuya tıklayın, ilgili sorun açılır.
@@ -56,39 +56,42 @@ Ortam değişkenleri:
 
 Not: Bu tool sunucu tarafında tarama yapar. Tarayıcı içinde tek başına çalışamaz, çünkü tarayıcılar başka sitelerin içeriğini okumayı engeller (CORS).
 
-## Eski ve yeni site karşılaştırması (Sprint 3, Parça 1)
+## Taşıma projesi (v0.7.0)
 
-Site yenilemede eski siteyi "Eski site", yeni siteyi (staging) "Yeni site" etiketi ile tarayın. Sonra kenar çubuğunda "Karşılaştır" düğmesine basın. Araç iki taramayı otomatik seçer.
+Site yenilemede "Taşıma projesi" seçin. Proje adını yazın. Araç dört adımda yol gösterir. Her ekranda tek bir "Sıradaki iş" kartı durur: tek cümle ve tek düğme.
 
-Araç sayfaları URL yoluna göre eşleştirir: `www.ornek.com/hakkimizda` = `staging.ornek.com/hakkimizda`. Eski sitenin her 200 sayfası şu gruplardan birine girer:
+| Adım | Ne yapılır |
+|---|---|
+| Proje | "Yeni yapı nasıl?" sorusunu cevaplayın. Siteleri yazın: eski site (canlı), eski alan adına geçecek site (staging olabilir), ek siteler (örnek: Türkçe sitesi ayrı alan adında). |
+| Tarama | Her site için "Tara" düğmesi. Var olan bir taramayı da bağlayabilirsiniz. Staging şifresini tarama ayarlarına yazın. Araç şifreyi saklamaz. |
+| Eşleştirme | Eski sitenin her bölümü (`/tr/`, `/fr/`…) bir satırdır. Araç yeni yeri önerir ve seçili getirir. Bulamadığı bölüm "Karar verin" der. Serbest kural "Gelişmiş" altındadır. |
+| Yapılacaklar | Bütün sayfalar gruplara ayrılır. "Excel indir" bütün listeleri verir. |
+
+**Eski alan adına geçecek site:** Canlıdan sonra eski alan adını bu site kullanır. Bütün 301'ler bu sitede kurulur. Kurala girmeyen yol bu sitede aynı yolda aranır.
+
+Başka yola veya başka siteye taşınan sayfa için araç iki şeyi kontrol eder:
+
+1. Hedef sayfa var mı (hedef sitenin taramasında veya tek istek ile).
+2. Eski yol, eski alan adına geçecek sitede hedefe 301 veriyor mu. 301 hedefi staging alan adı, ek sitenin "canlı alan adı" veya eski alan adı olabilir.
 
 | Grup | Anlamı |
 |---|---|
 | Aynı kaldı | Aynı yolda açılıyor. Title, meta description ve H1 aynı. |
 | İçerik değişti | Aynı yolda açılıyor ama title, meta veya H1 farklı. Boşaldıysa veya noindex eklendiyse "kayıp" olarak işaretlenir. |
-| Yönleniyor | Yeni sitede başka bir adrese yönleniyor. Hedef 4xx/5xx ise "hedef hatalı". |
+| Hedef hazır, 301 kurulu | Taşınan sayfanın hedefi var. Eski adres hedefe 301 veriyor. Zincir veya 302 varsa satırda yapılacak iş yazılır. |
+| Hedef hazır, 301 eksik | Hedef var. Eski adres yönlenmiyor veya başka sayfaya gidiyor. |
+| Hedef yok | Taşınan sayfanın hedefi yeni sitede yok. |
+| Yönleniyor | Aynı yol yeni sitede başka bir adrese yönleniyor. Hedef 4xx/5xx ise "hedef hatalı". |
 | Açılıyor, link yok | Adres açılıyor ama yeni sitede bu sayfaya hiç link yok. |
 | Kayboldu | Yeni sitede 404 veya başka bir hata. 301 gerekir. |
+| Bölüm kaldırıldı | "Bölüm kaldırıldı" kararı verilen bölümün sayfası. 301 veya 410 yine gerekir. |
 | Kontrol edilemedi | robots.txt engeli, şifreli staging (401) veya bağlantı hatası. |
 
-Yeni tarama eski adresleri bulamaz, çünkü yeni sitede onlara link yoktur. Bu yüzden araç bulunamayan her eski yolu yeni sitede tek tek ister. İlk karşılaştırma bu yüzden birkaç saniye sürebilir.
+Yeni tarama eski adresleri bulamaz, çünkü yeni sitede onlara link yoktur. Bu yüzden araç gereken her adresi tek tek ister. İlk eşleştirme birkaç saniye sürebilir. Araç sadece projede taranan sitelere istek gönderir.
 
-"Excel indir" bütün listeleri ayrı sayfalar halinde verir: Özet, Kaybolan, Yönlenen, İçerik değişimi, Linksiz, Bölüm kaldırıldı, Kontrol edilemedi, Yeni sayfalar, Kurallar, Öneriler. Her satırda kural, kontrol edilen URL ve yapılacak iş yazılır.
+Proje sunucuda `crawls/projects/` klasöründe durur. Projede sonuç yok, sadece tanım var: siteler, roller, tarama kimlikleri, kurallar. Ücretsiz Render planında disk kalıcı değildir: "Projeyi indir" ile JSON dosyasını alın, "Proje yükle" ile geri yükleyin.
 
-### Yol kuralları ve çoklu hedef (v0.6.1)
-
-Yol değiştiyse veya bir dil başka alan adına taşındıysa yol kuralı yazın. Örnek: eski sitede İngilizce kökte, Türkçe `/tr/` altında, Fransızca `/fr/` altında. Yeni İngilizce site öneksiz, Türkçe site ayrı alan adında, Fransızca yok.
-
-| Eski yol | Hedef site | Yeni yol | Anlamı |
-|---|---|---|---|
-| (kural yok) | Ana hedef | aynı yol | `/about` → ana hedefte `/about` |
-| `/tr/*` | Türkçe site | `/*` | `/tr/hakkimizda` → Türkçe sitede `/hakkimizda` |
-| `/fr/*` | Bölüm kaldırıldı | — | Bulunmayan sayfa "Kayboldu" yerine "Bölüm kaldırıldı" grubuna girer. 301 veya 410 yine gerekir. |
-
-- "+ Yeni site ekle" ile en fazla 4 yeni tarama seçin. İlk seçilen ana hedeftir.
-- `*` yolun geri kalanıdır. `/tr/` yazarsanız araç `/tr/*` olarak okur. En uzun eski yol önce uygulanır.
-- Araç kural önerir: eski sayfaları ilk yol parçasına göre gruplar (`/tr`, `/fr`) ve yeni taramalarda arar. "Ekle" ile öneriyi kabul edin. Eşikler: `config/rules.json` → `compare`.
-- Kurallar tarayıcıda, eski sitenin alan adına göre saklanır. Sayfa yenilense de kalır.
+v0.6.1'de tarayıcıda saklanan yol kuralları Eşleştirme adımında "Projeye aktar" ile projeye geçer.
 
 ## Yayın (Render, ücretsiz plan)
 
@@ -209,13 +212,14 @@ Skor = kritik sorunu olmayan URL oranı (robots ile engelli URL'ler hariç). Sit
 
 ## Testler
 
-`npm test` dört test çalıştırır:
+`npm test` beş test çalıştırır:
 
 1. Crawler testi (19 kontrol).
 2. Kural testi (99 kontrol): `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. SSL ve HSTS kuralları `test/fixture-https.js` (self-signed sertifika, 2046'ya kadar geçerli) ile test edilir. Testler internete çıkmaz: dış linkler `.invalid` alan adı kullanır. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü).
 
 3. Yayın modu testi (12 kontrol): iç ağ adresleri, tarayıcının iç adrese hiç istek göndermemesi, şifre zorunluluğu, `/healthz` ve limitler.
-4. Karşılaştırma testi (38 kontrol): yol eşleşmesi, kaybolan, yönlenen, içerik kaybı, yeni hostta yoklama, yol kuralları, çoklu hedef, bölüm kaldırıldı, desen önerisi, satır açıklaması, Excel.
+4. Karşılaştırma testi (48 kontrol): yol eşleşmesi, kaybolan, yönlenen, içerik kaybı, yeni hostta istek, yol kuralları, çoklu hedef, bölüm kaldırıldı, desen önerisi, taşınan sayfanın 301 kontrolü, Excel.
+5. Proje testi (13 kontrol): proje tanımı, kayıt, API, "Tara" düğmesi, gerçek test siteleri ile eşleştirme ve 301 kontrolü (`test/fixture-migration.js`), proje dosyası indir/yükle.
 
 Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 
@@ -231,7 +235,7 @@ Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 2. **Sprint 1 — Kural motoru (77 kural), Sorunlar sekmesi, sağlık skoru, başlık ağacı** ✅
 3. **Sprint 2 — Ek kontroller: dış link, görsel, site sürümleri, HSTS, SSL, sıkıştırma, llms.txt (11 kural)** ✅
 4. **v0.5 — Yayın hazırlığı: Render, SSRF koruması, yayın modu** ✅
-5. Sprint 3 — Migration: **Parça 1 karşılaştırma ekranı ✅ (v0.6.1: yol kuralları, çoklu hedef, desen önerisi)**, Parça 2 301 haritası, Parça 3 canlıya çıkış kontrolü, Parça 4 canlıda 301 doğrulama.
+5. Sprint 3 — Migration: **Parça 1 karşılaştırma ✅ (v0.6.1: yol kuralları, çoklu hedef, desen önerisi)**, **v0.7.0 taşıma projesi ✅ (proje, tarama, eşleştirme, 301 kontrolü)**, v0.7.1 yapılacaklar listesi, Parça 2 301 haritası, Parça 3 canlıya çıkış kontrolü, Parça 4 canlıda 301 doğrulama.
 5. Sprint 4 — AI: title/description, alt text, başlık önerisi, schema, yazım, 301 eşleştirme
 6. Sprint 5 — Entegrasyon: PageSpeed (CWV), Search Console, ClickUp
 7. Sprint 6 — JS render (Playwright)
