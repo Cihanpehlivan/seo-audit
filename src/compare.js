@@ -100,6 +100,18 @@ const REMOVED_TODO = 'Bölüm bilerek kaldırıldı. Sayfayı en yakın karşıl
 const FOUND = new Set(['same', 'changed', 'redirected', 'unlinked', 'moved', 'no301', 'moving-found']);
 const MOVE_TODO = (path, url) => `Eski alan adına geçecek sitede 301 kurun: ${path} → ${url}`;
 
+// v0.8.1: language of a page from <html lang> (primary subtag: tr-TR → tr). Empty when unknown.
+export const langCode = (v) => (String(v || '').toLowerCase().match(/^[a-z]{2,3}(?=$|[-_])/) || [''])[0];
+// The language of a page set: the most common page language, if it has at least minShare of the pages with a language.
+export function dominantLang(langs, minShare = 0.6) {
+  const c = new Map();
+  let n = 0;
+  for (const l of langs) if (l) { c.set(l, (c.get(l) || 0) + 1); n++; }
+  if (!n) return '';
+  const [l, k] = [...c].sort((a, b) => b[1] - a[1])[0];
+  return k / n >= minShare ? l : '';
+}
+
 const side = (r) => ({ host: r.meta.host, startUrl: r.meta.startUrl, startedAt: r.meta.startedAt, pages: r.pages.length, limitReached: !!r.meta.limitReached, cancelled: !!r.meta.cancelled });
 
 // Hidden state for summaries and suggestions. Not sent to the browser.
@@ -184,7 +196,8 @@ export function compareCrawls(oldRes, newList, { rules = [], suggest = {}, live 
       // A page that answered wins over a redirect or an error with the same path.
       if (!byKey.has(k) || (isOk(p) && !isOk(byKey.get(k)))) byKey.set(k, p);
     }
-    return { res, host: res.meta.host, origin: new URL(res.meta.startUrl).origin, byKey, used: new Set() };
+    const lang = dominantLang(res.pages.filter(isOk).map((p) => langCode(p.htmlLang)));
+    return { res, host: res.meta.host, origin: new URL(res.meta.startUrl).origin, byKey, used: new Set(), lang };
   });
   const findTarget = (host) => (host ? targets.find((t) => bareHost(t.host) === host) : targets[0]);
   const heir = targets[0];
@@ -275,7 +288,9 @@ export function compareCrawls(oldRes, newList, { rules = [], suggest = {}, live 
     rules: parsed.map((r) => ({ from: r.from, host: r.host, to: r.to, drop: r.drop, text: ruleLabel(r) })),
     baseWarnings: warnings, rows, probed: 0,
   };
-  CTX.set(cmp, { targets, kindByKey, ruleByKey, oldKeys, suggest, acceptOf, findTarget });
+  const oldLang = new Map();
+  for (const p of oldRes.pages) { const k = pathKey(p.url); if (isOk(p) && !oldLang.has(k)) oldLang.set(k, langCode(p.htmlLang)); }
+  CTX.set(cmp, { targets, kindByKey, ruleByKey, oldKeys, suggest, acceptOf, findTarget, oldLang });
   summarize(cmp);
   return cmp;
 }
@@ -480,8 +495,11 @@ export async function probeLost(cmp, request, { concurrency = 5, maxHops = 5 } =
 // Every choice shows how many pages of the section it finds in the crawls (no requests).
 // v0.7.1: every section also lists its old pages: where the page is now, or why it is not found.
 // Not-found pages come first. The list stops at pageLimit (the Excel file has all pages).
-export function sectionTable(cmp, { minPages = 3, maxSegs = 3, pageLimit = 200 } = {}) {
-  const { targets, kindByKey, oldKeys } = CTX.get(cmp);
+// v0.8.1: a section decision gets an alert when it is probably wrong: the target site has another language than the
+// section pages and a site in the section language exists (kind 'lang'), or the choice finds no page in the crawls
+// and another choice finds some (kind 'zero'). The alert names the better choice. It is never applied by itself.
+export function sectionTable(cmp, { minPages = 3, maxSegs = 3, pageLimit = 200, langMinShare = 0.6 } = {}) {
+  const { targets, kindByKey, oldKeys, oldLang } = CTX.get(cmp);
   const rowByKey = new Map();
   for (const [k, list] of Object.entries(cmp.rows)) {
     if (Array.isArray(list) && k !== 'added') for (const r of list) rowByKey.set(r.path, r);
@@ -517,9 +535,11 @@ export function sectionTable(cmp, { minPages = 3, maxSegs = 3, pageLimit = 200 }
         : ['/*', ...tSegs[i].slice(0, maxSegs).map((q) => `/${q}/*`)];
       for (const to of moves) {
         const r = parseRule({ from, host: i === 0 ? '' : bareHost(t.host), to });
-        options.push({ host: r.host, to: r.to, hits: keys.filter((k) => has(t, applyRule(r, k))).length });
+        options.push({ host: r.host, to: r.to, hits: keys.filter((k) => has(t, applyRule(r, k))).length, lang: t.lang });
       }
     });
+    const lang = dominantLang(keys.map((k) => oldLang.get(k)), langMinShare);
+    const alert = sectionAlert({ rule, from, keys, options, lang, targets, has, findTarget: CTX.get(cmp).findTarget });
     const list = keys.map(pageOf).sort((a, b) => (a.found - b.found) || a.path.localeCompare(b.path));
     const found = list.filter((x) => x.found).length;
     const suggestion = cmp.suggestions.find((s) => s.from === from) || null;
@@ -527,8 +547,29 @@ export function sectionTable(cmp, { minPages = 3, maxSegs = 3, pageLimit = 200 }
       from, pages: keys.length, found, pageList: list.slice(0, pageLimit), more: Math.max(0, list.length - pageLimit),
       no301: keys.filter((k) => kindByKey.get(k) === 'no301').length, notarget: keys.filter((k) => kindByKey.get(k) === 'notarget').length,
       rule: !!rule, current: rule ? (rule.drop ? { drop: true } : { host: rule.host || '', to: rule.to }) : { host: '', to: from },
-      options, suggestion,
+      options, suggestion, lang, alert,
       needsDecision: !rule && !!suggestion?.notFound,
     };
   });
+}
+
+function sectionAlert({ rule, from, keys, options, lang, targets, has, findTarget }) {
+  const best = (list) => list.reduce((a, o) => (!a || o.hits > a.hits ? o : a), null);
+  const pick = (o) => o && { host: o.host, to: o.to, hits: o.hits };
+  if (rule?.drop) {
+    // The section is removed, but a site in its language has some of its pages.
+    const same = best(options.filter((o) => lang && o.lang === lang && o.hits > 0));
+    return same ? { kind: 'lang-drop', lang, better: pick(same) } : null;
+  }
+  const t = rule ? findTarget(rule.host || '') : targets[0];
+  if (!t) return null;
+  const cur = parseRule(rule ? { from: rule.from, host: rule.host, to: rule.to } : { from, host: '', to: from });
+  const hits = keys.filter((k) => has(t, applyRule(cur, k))).length;
+  if (lang && t.lang && t.lang !== lang) {
+    const same = best(options.filter((o) => o.lang === lang));
+    if (same) return { kind: 'lang', lang, curLang: t.lang, hits, better: pick(same) };
+  }
+  const other = best(options.filter((o) => o.hits > hits));
+  if (!hits && other && rule) return { kind: 'zero', lang, hits, better: pick(other) };
+  return null;
 }

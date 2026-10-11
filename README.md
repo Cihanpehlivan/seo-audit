@@ -65,7 +65,7 @@ Site yenilemede "Taşıma projesi" seçin. Proje adını yazın. Araç beş adı
 | Proje | "Yeni yapı nasıl?" sorusunu cevaplayın. Siteleri yazın: eski site (canlı), eski alan adına geçecek site (staging olabilir), ek siteler (örnek: Türkçe sitesi ayrı alan adında). |
 | Tarama | Her site için "Tara" düğmesi. Var olan bir taramayı da bağlayabilirsiniz. Staging şifresini tarama ayarlarına yazın. Araç şifreyi saklamaz. |
 | Eşleştirme | Eski sitenin her bölümü (`/tr/`, `/fr/`…) bir satırdır. Araç yeni yeri önerir ve seçili getirir. Bulamadığı bölüm "Bulunamadı" der; satırı açın ve sayfaları görün. Serbest kural "Gelişmiş" altındadır. |
-| 301 haritası (v0.8.0) | Adresi değişen her sayfa için araç yeni sayfa önerir: slug, title, H1 ve içerik benzerliği. Güven: Yüksek / Orta / Düşük. Öneriyi onaylayın, başka sayfa seçin, adres yazın veya 410 verin. "CSV indir" son listeyi verir (eski URL, yeni URL, 301/410). Kararlar projede saklanır. |
+| 301 haritası (v0.8.0) | Adresi değişen her sayfa için araç yeni sayfa önerir: slug, title, H1 ve içerik benzerliği. Güven: Yüksek / Orta / Düşük. Öneriyi onaylayın, başka sayfa seçin, adres yazın veya 410 verin. "CSV indir" son listeyi verir (eski URL, yeni URL, 301/410). Kararlar projede saklanır. v0.8.1: araç sayfanın dilini (html lang) kullanır. Türkçe sayfaya Türkçe sayfa önerir. Eski ana sayfaya doğru sitenin ana sayfasını önerir. Excel her satırda kararın kaynağını ve aracın önerisini gösterir. |
 | Yapılacaklar | Bütün sayfalar gruplara ayrılır. "Excel indir" bütün listeleri verir. |
 
 **Eski alan adına geçecek site:** Canlıdan sonra eski alan adını bu site kullanır. Bütün 301'ler bu sitede kurulur. Kurala girmeyen yol bu sitede aynı yolda aranır.
@@ -236,7 +236,7 @@ Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 2. **Sprint 1 — Kural motoru (77 kural), Sorunlar sekmesi, sağlık skoru, başlık ağacı** ✅
 3. **Sprint 2 — Ek kontroller: dış link, görsel, site sürümleri, HSTS, SSL, sıkıştırma, llms.txt (11 kural)** ✅
 4. **v0.5 — Yayın hazırlığı: Render, SSRF koruması, yayın modu** ✅
-5. Sprint 3 — Migration: **Parça 1 karşılaştırma ✅ (v0.6.1: yol kuralları, çoklu hedef, desen önerisi)**, **v0.7.0 taşıma projesi ✅ (proje, tarama, eşleştirme, 301 kontrolü)**, **v0.7.1 eşleştirme düzeltmesi ✅**, **v0.8.0 Parça 2 301 haritası ✅**, yapılacaklar listesi (işin yapıldığı yere göre), Parça 3 canlıya çıkış kontrolü, Parça 4 canlıda 301 doğrulama.
+5. Sprint 3 — Migration: **Parça 1 karşılaştırma ✅ (v0.6.1: yol kuralları, çoklu hedef, desen önerisi)**, **v0.7.0 taşıma projesi ✅ (proje, tarama, eşleştirme, 301 kontrolü)**, **v0.7.1 eşleştirme düzeltmesi ✅**, **v0.8.0 Parça 2 301 haritası ✅**, **v0.8.1 dil kontrolü ve gerçek site düzeltmeleri ✅**, yapılacaklar listesi (işin yapıldığı yere göre), Parça 3 canlıya çıkış kontrolü, Parça 4 canlıda 301 doğrulama.
 5. Sprint 4 — AI: title/description, alt text, başlık önerisi, schema, yazım, 301 eşleştirme
 6. Sprint 5 — Entegrasyon: PageSpeed (CWV), Search Console, ClickUp
 7. Sprint 6 — JS render (Playwright)

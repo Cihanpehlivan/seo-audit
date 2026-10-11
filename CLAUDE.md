@@ -22,7 +22,7 @@ bin/crawl.js            CLI
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
 src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu (v0.7.1: her bölümün sayfa listesi). Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0)
 src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma), 301 haritası kararlarının temizliği
-src/redirectmap.js      301 haritası (v0.8.0): bulunamayan eski sayfaya yeni sayfa önerisi (slug, title, H1, içerik; IDF ağırlığı), güven, kullanıcı kararları, CSV
+src/redirectmap.js      301 haritası (v0.8.0): bulunamayan eski sayfaya yeni sayfa önerisi (slug, title, H1, içerik; IDF ağırlığı), güven, kullanıcı kararları, CSV. v0.8.1: dil filtresi (html lang), eski ana sayfaya ana sayfa önerisi
 src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
 src/checks.js           Ek kontroller (tarama sonrası): site sürümleri, SSL, HSTS, llms.txt, dış link, görsel
 src/parser.js           HTML → SEO alanları (başlık ağacı, JSON-LD, görseller, linkler, parmak izi)
@@ -64,12 +64,12 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, zorunlu şifre, yayın limitleri | Tamam (v0.5.0) |
-| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0). Sırada: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları. Sonra Parça 3: canlıya çıkış kontrolü | Devam ediyor |
-| Sprint 4 | AI özellikleri | Bekliyor (Claude API anahtarı gerekir) |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1). Sırada: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları. Sonra Parça 3: canlıya çıkış kontrolü | Devam ediyor |
+| Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 12, proje 17 kontrol (toplam yaklaşık 12 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 17, proje 17 kontrol (toplam yaklaşık 12 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
 - Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
@@ -87,6 +87,21 @@ v0.7.1 planı (gerçek site denemesinden sonra güncellendi). 1-4 tamam (v0.7.1)
 1. v0.7.1: Eşleştirme ekranı düzeltmesi (yukarıdaki plan 1-4). Tamam.
 2. v0.8.0: Parça 2, 301 haritası önerisi. Tamam (v0.8.0).
 3. Sonra: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları.
+Gerçek site denemesi (v0.8.0, 11 Ekim 2026, çok dilli taşıma: İngilizce kökte, Türkçe /tr/ altında, Fransızca /fr/ altında; yeni İngilizce site eski alan adında, Türkçe site ayrı alan adında). Bulgular:
+- /tr/ bölüm kararı yanlışlıkla geçecek site (İngilizce) olarak kaydedildi (taramada 0 sayfa). Bölüm kararı aramayı o siteye sınırladığı için Türkçe sayfalar İngilizce sayfa önerisi aldı. Araç bu kararı uyarmadı.
+- Fransızca bölüm kaldırıldı. Arama serbest kaldı ve Fransızca sayfalar Türkçe siteye eşleşti.
+- Ana sayfa hiç aday değildi. Eski bölüm ana sayfaları (/tr/home, /fr/page-daccueil) yanlış sayfaya gitti.
+- Excel onaylanan satırda güven, puan ve nedeni silmişti. Önerinin doğruluğu ölçülemedi.
+- Bölüm kuralı doğru olan eski İngilizce /prosedur/ sayfaları çoğunlukla doğru eşleşti. Dolgu sayfaları genel /procedures sayfasına gitti (daha özel sayfa vardı); kaynağı belli değil.
+v0.8.1 bu dört sorunu düzeltti. Tekrar test bekliyor.
+
+Açık noktalar (v0.8.1):
+- v0.8.1 gerçek sitede denenmedi. Aynı projede /tr/ satırında uyarı görünmeli. "Bu seçimi kullan" ile Türkçe siteyi seçin. Ek site için canlı alan adını yazın. Sonra haritayı açın ve Excel'deki "Kaynak" ve "Araç önerisi" sütunları ile önerileri ölçün.
+- Dil filtresi `html lang` değerine güvenir. Yeni site bu değeri yanlış yazarsa (Türkçe sitede `lang="en"`) filtre yanlış siteye sınırlar. Testte bunu kontrol edin. Gerekirse sonraki adım: sayfa metninden dil tahmini veya site ayarı ile dil seçimi.
+- Eski sitede `hreflang` varsa dil eşleri doğrudan bulunabilir (AI gerekmez). Kullanıcıya soruldu, cevap bekleniyor.
+- Gerekçede bölüm kelimesi bazen görünür ("Slug ortak: prosedur, botoks"): bölüm kelimesi sadece ilk yol parçası sayılır (/tr/prosedur/ içinde `tr`). Küçük kozmetik hata.
+- Render'da aynı anda 1 tarama çalışır (`rules.json` → `yayin`). İkinci tarama hata verir. Sıra (kuyruk) özelliği gerekirse sonra küçük bir sürüm olarak yapılır. Şimdilik değişiklik yok.
+
 Açık noktalar (v0.8.0):
 - 301 haritası gerçek sitede denenmedi. Şamil Şahin projesinde haritayı açın. Önerilerin doğruluğunu ve güven etiketlerini kontrol edin. Eşikler `rules.json` → `redirectMap` (high 80, mid 55, low 35).
 - Farklı dilde eş anlam bulunmaz (göz kapağı ↔ blepharoplasty). Sadece aynı kelime, ortak önek ve yakın yazım (prosedur ↔ procedures) bulunur. İçerik benzerliği (simhash) sadece 50 kelimeden uzun sayfada vardır. Anlam benzerliği Sprint 4'te (AI) gelir.
@@ -136,7 +151,21 @@ Açık noktalar (Sprint 2'den):
 
 **Sprint 6 — JS render:** Playwright modu. Ham HTML ile render edilmiş HTML farkı, sadece JS ile gelen linkler.
 
+## Doğrulama planı (bekliyor)
+
+Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ederiz. Her kalem için: senaryo, beklenen sonuç, gerçek sonuç, bug kaydı. Yöntemi kullanıcı ile birlikte planlarız. Şimdilik sadece bu not var. Plan yapılmadan doğrulamaya başlama.
+
 ## Karar günlüğü
+
+- v0.8.1: Belge değişiklikleri. "İki kişi çalışma kuralları" ve "Doğrulama planı (bekliyor)" bölümleri eklendi. Render'daki tek tarama sınırı Durum'a not olarak yazıldı.
+- v0.8.1: Dil filtresi. Her sayfanın dili `html lang` ana etiketidir (tr-TR → tr). Öneri aramasında sıra: (1) eski sayfanın dili bir yeni sitede varsa sadece o dildeki sayfalar; (2) dil biliniyor ama hiçbir yeni sitede yoksa sadece geçecek site (Fransızca → İngilizce site, Türkçe siteye asla); aday yoksa öneri yok; (3) dil bilinmiyor ve bölüm kaldırıldıysa geçecek site (adayı varsa); (4) bölüm kararı (prefer) bu kümede adayı varsa. Dil, bölüm kararından önce gelir: yanlış bölüm kararı yanlış dilde öneri üretmez. AI gerekmez, ücretsizdir.
+- v0.8.1: Bölüm uyarısı (`sections[].alert`). Türler: `lang` (bölüm sayfalarının dili ile seçilen sitenin dili farklı ve bölüm dilinde site var), `zero` (kayıtlı karar taramada 0 sayfa buluyor, başka seçim buluyor), `lang-drop` (bölüm kaldırıldı, ama bölüm dilinde site sayfaları buluyor). Uyarı daha iyi seçimi söyler, "Bu seçimi kullan" düğmesi kararı kaydeder. Kendiliğinden uygulanmaz. Sıradaki iş kartı uyarıyı 301 haritasından önce gösterir (harita adımında göstermez). Bölüm ve site dili: dili bilinen sayfaların en az `compare.langMinShare` (0.6) oranı.
+- v0.8.1: Ana sayfa adayı. Son yol parçası `redirectMap.homeSlugs` içinde olan eski sayfa (home, anasayfa, page-daccueil…) veya dil bölümünün kökü (/tr, /en-gb) ana sayfa sayılır. Bu sayfaya doğru sitenin ana sayfası (aynı dil, yoksa geçecek site) `homeScore` (85, Yüksek) ile ilk aday olur. Ana sayfa başka hiçbir sayfa için aday olmaz (soft 404 kuralı korunur).
+- v0.8.1: Excel "301 haritası" sayfası her satırda Kaynak (Bölüm kuralı, Araç önerisi, İlk öneri onaylandı, Listeden başka öneri, Elle yazıldı, 410, 410 (araç öneri vermişti)) ve aracın en iyi önerisini (adres, güven, puan, neden) gösterir. Öneri her eşleştirmede tekrar hesaplanır: sütun o anki öneriyi gösterir, onay anındaki öneriyi değil.
+- v0.8.1: Yeni bağımlılık yok.
+- v0.8.1: Sıra değişmedi (kullanıcı onayladı). Önce v0.8.0 301 haritası gerçek sitede denenir. Sonra yapılacaklar listesi, sonra Parça 3. Sprint 4 (AI) sonra konuşulur. Neden: AI'ın faydasını ölçmek için haritanın gerçek sitede neyi kaçırdığını bilmek gerekir.
+- v0.8.1: Sprint 4 ön görüşmesi (11 Ekim 2026, karar değil, not). Fiyat (1M token, girdi/çıktı): Haiku 5.5 $0.10/$0.50, Sonnet 5.5 $2/$10, Opus 5.5 $4/$20. Batch API %50 indirim. Tahmin: 2.000 sayfa title/meta Haiku ile yaklaşık $0.43, Sonnet ile $8.60. Öneri: ilk AI özelliği 301 eşleştirmede anlam benzerliği. Aylık üst sınır Console workspace sınırı ile olur (Render diski kalıcı değil, uygulama sayacı sıfırlanır). Render'daki anahtar Cihan'ındır, Render'dan yapılan AI işleri Cihan'a yazılır. SDK gerekmez (Node 20 fetch). Fiyatları Sprint 4 başında tekrar kontrol et.
+- v0.8.1: Arkadaş ayrı branch'te çalışır ve Pull Request açar. Kullanıcı kontrol eder ve merge eder. `main` dalına doğrudan yazılmaz.
 
 - v0.8.0: Adım sırası değişti (kullanıcı onayladı): Proje → Tarama → Eşleştirme → 301 haritası → Yapılacaklar → (sonra) Canlıya çıkış → Canlı doğrulama. Neden: Yapılacaklar haritaya bağlıdır ("301 kurun" mu, "sayfayı oluşturun" mu).
 - v0.8.0: Haritaya giren sayfalar: bölüm kuralı ile taşınan ve hedefi var olan sayfalar ("Kural", kendiliğinden), yeni adresi olmayan sayfalar (Kayboldu, Hedef yok, Bölüm kaldırıldı, hedefi kırık yönlendirme). Aynı yolda açılan veya doğru yönlenen sayfa haritaya girmez.
@@ -250,3 +279,26 @@ Sohbette (claude.ai):
 Claude Code ile (masaüstü): Claude yerel depo klasöründe doğrudan çalışır, commit yapar. Zip ve 6-7. adımlar gerekmez. Push kullanıcı onayı ile yapılır.
 
 8. Kullanıcı gerçek bir sitede dener ve geri bildirim verir. Eşikler `rules.json` ile kalibre edilir.
+
+## İki kişi çalışma kuralları
+
+Depoda iki kişi çalışır: kullanıcı (Cihan) ve bir arkadaş. Arkadaş Claude kullanmaz.
+
+Arkadaş:
+1. Her iş için `main` dalından yeni bir branch açar. `main` dalına doğrudan yazmaz.
+2. İş sonunda bu dosyadaki Durum ve Karar günlüğü bölümlerini günceller.
+3. `npm test` çalıştırır. Testler geçmeden Pull Request açmaz.
+4. Pull Request açar. Açıklamaya ne değiştiğini ve nasıl denediğini yazar.
+5. Bu dosyadaki bütün kurallara uyar (eşikler `rules.json` içinde, yeni kural için test sayfası ve beklenti, yeni bağımlılık için gerekçe, Türkçe kısa metin).
+
+Kullanıcı (Cihan):
+1. Pull Request kontrolünü Claude ile yapar.
+2. Claude branch'i klonlar: `git clone -b <branch> https://github.com/Cihanpehlivan/seo-audit.git`.
+3. Claude `npm install` ve `npm test` çalıştırır.
+4. Claude değişikliği bu dosyadaki kurallara göre inceler: testler, `/temiz` sayfası, eşikler, bağımlılık, XSS (`esc()`), gizli bilgi, Durum ve Karar günlüğü güncel mi. Arayüz değiştiyse ekran görüntüsü alır (1440 px ve 390 px).
+5. Claude bulguları listeler. Kullanıcı merge eder veya değişiklik ister.
+
+Ortak kurallar:
+- Aynı anda iki kişi aynı dosyada büyük değişiklik yapmaz. İş başlamadan kim neyi yapıyor, kısaca konuşulur.
+- `package.json` sürümünü merge sırasında kullanıcı belirler. İki branch aynı sürüm numarasını almaz.
+- Depoya gizli bilgi girmez. Her kişi kendi `.env` dosyasını kullanır.

@@ -187,10 +187,12 @@ async function projectMatch(p) {
   const rules = parseRules([...userRules.map(({ from, host, to, drop }) => ({ from, host, to, drop })), ...auto], cc.maxRules + cc.maxSuggestions);
   const cmp = await compareWithProbe(status[old.key].crawlId, ids, oldRes, newList, rules, cc, live);
   const autoFrom = new Set(auto.map((a) => a.from));
-  const sections = sectionTable(cmp, { minPages: cc.suggestMinPages, pageLimit: cc.sectionPageLimit }).map((sec) => ({
+  const sections = sectionTable(cmp, { minPages: cc.suggestMinPages, pageLimit: cc.sectionPageLimit, langMinShare: cc.langMinShare }).map((sec) => ({
     ...sec, auto: autoFrom.has(sec.from),
     current: sec.current.drop ? sec.current : { site: keyOfHost(sec.current.host), to: sec.current.to },
-    options: sec.options.map((o) => ({ site: keyOfHost(o.host), to: o.to, hits: o.hits })).filter((o) => o.site),
+    options: sec.options.map((o) => ({ site: keyOfHost(o.host), to: o.to, hits: o.hits, lang: o.lang })).filter((o) => o.site),
+    // v0.8.1: the decision is probably wrong (language or no page found). better: the choice to use instead.
+    alert: sec.alert && keyOfHost(sec.alert.better.host) ? { ...sec.alert, better: { site: keyOfHost(sec.alert.better.host), to: sec.alert.better.to, hits: sec.alert.better.hits } } : null,
     // notFound: no move finds the pages. A weak hint (site, to, hits) may come with it. It is never applied by itself.
     suggestion: sec.suggestion && (sec.suggestion.notFound
       ? { notFound: true, hits: sec.suggestion.hits, why: sec.suggestion.why, ...(sec.suggestion.to ? { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to } : {}) }

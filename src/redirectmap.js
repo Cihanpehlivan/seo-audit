@@ -7,7 +7,7 @@
 //   approved the user approved a suggestion or wrote an address.      gone: the user chose 410.
 //   pending  a suggestion waits for approval.                          none: no suggestion (score too low).
 // Only user decisions are saved in the project (project.map). Suggestions are computed again on every match.
-import { pathKey } from './compare.js';
+import { pathKey, langCode } from './compare.js';
 import { isOk, isNoindex } from './rules/helpers.js';
 
 const TR = { ğ: 'g', ü: 'u', ş: 's', ı: 'i', ö: 'o', ç: 'c', İ: 'i' };
@@ -85,32 +85,61 @@ function hamming(a, b) {
   return d;
 }
 
-// The new pages a suggestion may point to: answered HTML pages, not noindex, not the home page.
+// The new pages a suggestion may point to: answered HTML pages, not noindex. The home page of a site is not in the
+// pool: a mass 301 to the home page is a soft 404. v0.8.1: it is a candidate only for an old home page (homes).
 // sites: [{ key, host, origin, liveOrigin, pages }]
 function candidatePool(sites, stop) {
-  const pool = [];
+  const pool = [], homes = [];
   for (const s of sites) {
     const seen = new Set();
     for (const p of s.pages) {
       if (!isOk(p) || isNoindex(p) || p.redirectChain?.length) continue;
       const key = pathKey(p.url);
-      if (key === '/' || seen.has(key)) continue;
+      if (seen.has(key)) continue;
       seen.add(key);
-      pool.push({ site: s.key, path: key, url: p.url, title: p.title || '', seg: firstSeg(key),
+      const lang = langCode(p.htmlLang);
+      if (key === '/') { homes.push({ site: s.key, path: key, url: p.url, title: p.title || '', lang }); continue; }
+      pool.push({ site: s.key, path: key, url: p.url, title: p.title || '', seg: firstSeg(key), lang,
         slug: slugWords(key, stop), titleW: words(p.title, stop), h1W: words(first(p.h1), stop), simhash: p.simhash || null });
     }
   }
-  return pool;
+  return { pool, homes };
+}
+
+// v0.8.1: an old page is a home page when its last path segment is a home word (home, anasayfa, page-daccueil)
+// or when it is the root of a language section (/tr, /fr, /en-gb).
+export function isHomeLike(path, cfg) {
+  const segs = path.split('?')[0].split('/').filter(Boolean);
+  if (!segs.length) return false;
+  let last = segs[segs.length - 1];
+  try { last = decodeURIComponent(last); } catch {}
+  last = last.toLowerCase();
+  return (cfg.homeSlugs || []).includes(last) || (segs.length === 1 && /^[a-z]{2}(-[a-z]{2})?$/.test(last));
 }
 
 export const confOf = (score, t) => (score >= t.high ? 'high' : score >= t.mid ? 'mid' : score >= t.low ? 'low' : null);
 const CONF_TEXT = { high: 'Yüksek', mid: 'Orta', low: 'Düşük' };
 
-// Scores old pages against the pool. olds: [{ path, title, h1, simhash, prefer (site key or null) }].
+// Scores old pages against the pool. olds: [{ path, title, h1, simhash, prefer (site key or null), lang, dropped, home }].
+// v0.8.1: the search is narrowed before scoring, in this order:
+//   1. Language: when the old page has a language and a new page has the same language, only those pages.
+//   2. Else, when the old page has a language that no new site has: the heir only (the site on the old domain).
+//      A French page goes to the English site, never to the Turkish site. No heir candidate: no suggestion.
+//      When the languages are unknown and the section is removed: the heir, if it has candidates.
+//   3. Section decision (prefer): only that site, if it still has candidates.
 // Returns Map path → candidates (best first, score ≥ low, at most cfg.maxCandidates).
 export function suggestTargets(olds, sites, cfg) {
   const stop = new Set(cfg.stopWords || []);
-  const pool = candidatePool(sites, stop);
+  const { pool, homes } = candidatePool(sites, stop);
+  const poolLangs = new Set(pool.map((c) => c.lang).filter(Boolean));
+  const heirKey = sites[0]?.key;
+  const narrow = (o, list) => {
+    if (o.lang && poolLangs.has(o.lang)) list = list.filter((c) => c.lang === o.lang);
+    else if (o.lang && poolLangs.size) list = list.filter((c) => c.site === heirKey); // no site in this language: heir only
+    else if (o.dropped && list.some((c) => c.site === heirKey)) list = list.filter((c) => c.site === heirKey);
+    if (o.prefer && list.some((c) => c.site === o.prefer)) list = list.filter((c) => c.site === o.prefer);
+    return list;
+  };
   const N = pool.length;
   const out = new Map();
   if (!N || !olds.length) { for (const o of olds) out.set(o.path, []); return out; }
@@ -174,10 +203,8 @@ export function suggestTargets(olds, sites, cfg) {
         if (pl && pl.length <= maxDf) for (const i of pl) pre.set(i, (pre.get(i) || 0) + wi / 2);
       }
     }
-    let list = [...pre].sort((a, b) => b[1] - a[1]).map(([i]) => pool[i]);
-    if (o.prefer && list.some((c) => c.site === o.prefer)) list = list.filter((c) => c.site === o.prefer);
+    let list = narrow(o, [...pre].sort((a, b) => b[1] - a[1]).map(([i]) => pool[i]));
     list = list.slice(0, cfg.maxScored);
-    // (A section decision, a rule to a site, limits the search to that site, if the site has candidates.)
     const cands = list.map((c) => ({ c, ...scoreOne(ow, c) })).filter((x) => x.score > 0);
     return { o, seg: firstSeg(o.path), cands };
   });
@@ -206,8 +233,14 @@ export function suggestTargets(olds, sites, cfg) {
       const score = hit ? Math.min(100, x.score + cfg.sectionBonus) : x.score;
       const why = hit ? [...x.why, `Aynı bölüm (/${r.seg}/ → /${x.c.seg}/)`] : x.why;
       return { site: x.c.site, path: x.c.path, url: x.c.url, title: x.c.title, score, conf: confOf(score, cfg), why: why.join(' · ') };
-    }).filter((x) => x.conf).sort((a, b) => (b.score - a.score) || a.path.localeCompare(b.path)).slice(0, cfg.maxCandidates);
-    out.set(r.o.path, list);
+    }).filter((x) => x.conf).sort((a, b) => (b.score - a.score) || a.path.localeCompare(b.path));
+    // An old home page: the home page of the right site comes first (same language, else the heir).
+    const home = r.o.home && (narrow(r.o, homes)[0] || homes.find((h) => h.site === heirKey));
+    if (home) {
+      const score = cfg.homeScore;
+      list.unshift({ site: home.site, path: '/', url: home.url, title: home.title, score, conf: confOf(score, cfg), why: 'Eski sayfa bir ana sayfa' });
+    }
+    out.set(r.o.path, list.slice(0, cfg.maxCandidates));
   }
   return out;
 }
@@ -238,7 +271,8 @@ export function buildRedirectMap(cmp, oldRes, sites, decisions = {}, cfg) {
   const olds = need.map((r) => {
     const p = oldPage.get(r.path) || {};
     const prefer = r.rule && !r.dropped ? siteOfHost(r.site)?.key || null : null;
-    return { path: r.path, title: r.oldTitle || p.title || '', h1: first(p.h1), simhash: p.simhash || null, prefer };
+    return { path: r.path, title: r.oldTitle || p.title || '', h1: first(p.h1), simhash: p.simhash || null, prefer,
+      lang: langCode(p.htmlLang), dropped: !!r.dropped, home: isHomeLike(r.path, cfg) };
   });
   const sug = suggestTargets(olds, sites, cfg);
   for (const r of need) {

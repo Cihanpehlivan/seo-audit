@@ -239,14 +239,20 @@ export async function exportCompareExcel(cmp, file, { map } = {}) {
     ], [...cmp.rules, { text: 'Kural yok (aynı yol, eski alan adına geçecek site)', ...cmp.noRule }]);
   }
   // 301 map (v0.8.0): every row with its state. The CSV download has only the final rows (301 and 410).
+  // v0.8.1: every row also shows the source of the decision and the tool's best suggestion (address, confidence,
+  // score, reason), also after approval or 410. So the quality of the suggestions can be measured.
   if (map?.rows.length) {
     const ST = { rule: 'Kural (301)', approved: 'Onaylandı (301)', gone: '410', pending: 'Onay bekliyor', none: 'Öneri yok' };
     const CONF = { high: 'Yüksek', mid: 'Orta', low: 'Düşük' };
     sheet(wb, '301 haritası', [
       { header: 'Eski URL', key: 'oldUrl', width: 60 }, { header: 'Yeni URL', key: 'to', width: 60 }, { header: 'Durum', key: 'st', width: 18 },
+      { header: 'Kaynak', key: 'src', width: 24 }, { header: 'Araç önerisi', key: 'sug', width: 60 },
       { header: 'Güven', key: 'conf', width: 10 }, { header: 'Puan', key: 'score', width: 8 }, { header: 'Neden', key: 'why', width: 70 }, { header: 'Uyarı', key: 'warn', width: 40 },
-    ], map.rows.map((r) => ({ oldUrl: r.oldUrl, to: r.target?.url || '', st: ST[r.status], conf: r.status === 'pending' ? CONF[r.conf] : '',
-      score: r.status === 'pending' ? r.score : null, why: r.why || '', warn: r.warn || '' })));
+    ], map.rows.map((r) => {
+      const best = r.candidates?.[0];
+      return { oldUrl: r.oldUrl, to: r.target?.url || '', st: ST[r.status], src: mapSource(r), sug: best?.url || '',
+        conf: best ? CONF[best.conf] : '', score: best ? best.score : null, why: best?.why || r.why || '', warn: r.warn || '' };
+    }));
   }
   if (cmp.suggestions?.length) {
     sheet(wb, 'Öneriler', [
@@ -254,4 +260,16 @@ export async function exportCompareExcel(cmp, file, { map } = {}) {
     ], cmp.suggestions);
   }
   await wb.xlsx.writeFile(file);
+}
+
+// Where a 301 map decision comes from (v0.8.1).
+export function mapSource(r) {
+  const best = r.candidates?.[0];
+  if (r.status === 'rule') return 'Bölüm kuralı';
+  if (r.status === 'pending') return 'Araç önerisi';
+  if (r.status === 'none') return '';
+  if (r.status === 'gone') return best ? '410 (araç öneri vermişti)' : '410';
+  if (r.decision?.src === 'elle') return 'Elle yazıldı';
+  if (best && r.target && best.site === r.target.site && best.path === r.target.path) return 'İlk öneri onaylandı';
+  return 'Listeden başka öneri';
 }

@@ -1,8 +1,9 @@
 // Tests for the 301 map (v0.8.0): words, scores, confidence, decisions, CSV. No network.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { compareCrawls, probeLost } from '../src/compare.js';
-import { words, suggestTargets, buildRedirectMap, mapCsv, cleanDecision } from '../src/redirectmap.js';
+import { compareCrawls, probeLost, sectionTable } from '../src/compare.js';
+import { mapSource } from '../src/export.js';
+import { words, suggestTargets, buildRedirectMap, mapCsv, cleanDecision, isHomeLike } from '../src/redirectmap.js';
 
 let passed = 0, failed = 0;
 async function check(name, fn) {
@@ -119,6 +120,96 @@ await check('kural satırı: bölüm kuralı ile taşınan sayfa haritaya kendil
   const s = row('/tr/burun-estetigi-nedir', m);
   assert.deepEqual([s.status, s.target.site, s.target.path], ['pending', 'tr', '/burun-estetigi']);
   assert.equal(m.summary.rule, 2);
+});
+// v0.8.1: real-site test (11 Oct 2026). Old site: English at the root, Turkish under /tr/, French under /fr/.
+// New: English heir, Turkish on its own site. The user sent /tr/ to the heir by mistake and removed /fr/.
+const L = (lang) => ({ htmlLang: lang });
+const ML_OLD = crawl('www.eski.com', [
+  O('/', 'Klinik', L('en-US')), O('/prosedur/botox-2', 'Botox', L('en-US')), O('/prosedur/blepharoplasty', 'Blepharoplasty', L('en-US')),
+  O('/tr/home', 'Klinik', L('tr-TR')), O('/tr/hakkimda', 'Hakkımda', L('tr-TR')), O('/tr/iletisim', 'İletişim', L('tr-TR')),
+  O('/tr/prosedur/botoks', 'Botoks', L('tr-TR')), O('/tr/prosedur/blefaroplasti', 'Blefaroplasti', L('tr-TR')),
+  O('/fr/page-daccueil', 'Accueil', L('fr-FR')), O('/fr/prosedur/blepharoplastie', 'Blépharoplastie', L('fr-FR')),
+  O('/fr/prosedur/botox', 'Botox', L('fr-FR')), O('/fr/a-propos', 'À propos', L('fr-FR')),
+]);
+const ML_HEIR = crawl('staging.ornek.com', [
+  N('/', 'Facial surgery clinic', L('en')), N('/about', 'About the doctor', L('en')), N('/contact', 'Contact', L('en')),
+  N('/procedures/medical-aesthetics/botox', 'Botox in Istanbul', L('en')), N('/procedures/facial-aesthetics/blepharoplasty', 'Blepharoplasty | Eyelid surgery', L('en')),
+]);
+const ML_TR = crawl('tr.ornek.com', [
+  T('/', 'Yüz estetiği kliniği', L('tr')), T('/hakkimda', 'Hakkımda', L('tr')), T('/iletisim', 'İletişim', L('tr')),
+  T('/prosedurler/medikal-estetik/botoks', 'Botoks', L('tr')), T('/prosedurler/yuz-estetigi/blefaroplasti', 'Blefaroplasti | Göz kapağı estetiği', L('tr')),
+]);
+const ML_SITES = [{ key: 'heir', host: 'staging.ornek.com', origin: 'https://staging.ornek.com', liveOrigin: 'https://www.eski.com', pages: ML_HEIR.pages },
+  { key: 'tr', host: 'tr.ornek.com', origin: 'https://tr.ornek.com', liveOrigin: 'https://tr.eski.com', pages: ML_TR.pages }];
+const mlMatch = async (rules) => {
+  const c = compareCrawls(ML_OLD, [ML_HEIR, ML_TR], { rules });
+  await probeLost(c, async () => ({ status: 404, location: null, contentType: 'text/html' }));
+  return c;
+};
+const WRONG = [{ from: '/tr/*', host: '', to: '/tr/*' }, { from: '/fr/*', drop: true }];
+
+await check('dil: Türkçe sayfaya Türkçe site önerilir, bölüm kararı İngilizce siteye gitse bile', async () => {
+  const m = buildRedirectMap(await mlMatch(WRONG), ML_OLD, ML_SITES, {}, cfg);
+  for (const [from, to] of [['/tr/hakkimda', '/hakkimda'], ['/tr/iletisim', '/iletisim'], ['/tr/prosedur/botoks', '/prosedurler/medikal-estetik/botoks'],
+    ['/tr/prosedur/blefaroplasti', '/prosedurler/yuz-estetigi/blefaroplasti']]) {
+    const r = row(from, m);
+    assert.deepEqual([r.target?.site, r.target?.path], ['tr', to], from);
+    assert.ok(r.candidates.every((c) => c.site === 'tr'), `${from}: İngilizce aday yok`);
+  }
+  // English pages stay on the English site.
+  assert.deepEqual([row('/prosedur/botox-2', m).target.site, row('/prosedur/botox-2', m).target.path], ['heir', '/procedures/medical-aesthetics/botox']);
+});
+await check('dil: kaldırılan Fransızca bölüm geçecek siteye gider, Türkçe siteye gitmez', async () => {
+  const m = buildRedirectMap(await mlMatch(WRONG), ML_OLD, ML_SITES, {}, cfg);
+  const r = row('/fr/prosedur/blepharoplastie', m);
+  assert.deepEqual([r.target.site, r.target.path], ['heir', '/procedures/facial-aesthetics/blepharoplasty']);
+  assert.equal(row('/fr/prosedur/botox', m).target.path, '/procedures/medical-aesthetics/botox');
+  assert.ok(m.rows.filter((x) => x.path.startsWith('/fr/')).every((x) => (x.candidates || []).every((c) => c.site === 'heir')));
+  // No language on any page: a removed section goes to the heir too.
+  const strip = (res) => ({ ...res, pages: res.pages.map(({ htmlLang, ...p }) => p) });
+  const one = { path: '/fr/prosedur/blepharoplastie', title: 'Blepharoplastie blefaroplasti', h1: '', simhash: null, prefer: null, lang: '', home: false };
+  const bare = ML_SITES.map((s) => ({ ...s, pages: strip({ pages: s.pages }).pages }));
+  assert.ok(suggestTargets([{ ...one, dropped: false }], bare, cfg).get(one.path).some((c) => c.site === 'tr')); // both sites match
+  assert.ok(suggestTargets([{ ...one, dropped: true }], bare, cfg).get(one.path).every((c) => c.site === 'heir'));
+});
+await check('ana sayfa: eski ana sayfaya doğru dilin ana sayfası önerilir, başka sayfaya önerilmez', async () => {
+  assert.ok(isHomeLike('/tr/home', cfg) && isHomeLike('/fr/page-daccueil/', cfg) && isHomeLike('/tr', cfg) && isHomeLike('/en-gb', cfg));
+  assert.ok(!isHomeLike('/', cfg) && !isHomeLike('/tr/hakkimda', cfg) && !isHomeLike('/blog', cfg) && !isHomeLike('/homes/x', cfg));
+  const m = buildRedirectMap(await mlMatch(WRONG), ML_OLD, ML_SITES, {}, cfg);
+  const tr = row('/tr/home', m), fr = row('/fr/page-daccueil', m);
+  assert.deepEqual([tr.target.site, tr.target.path, tr.conf, tr.why], ['tr', '/', 'high', 'Eski sayfa bir ana sayfa']);
+  assert.deepEqual([fr.target.site, fr.target.path], ['heir', '/']);
+  assert.ok(m.rows.filter((x) => !['/tr/home', '/fr/page-daccueil'].includes(x.path)).every((x) => (x.candidates || []).every((c) => c.path !== '/')));
+});
+await check('bölüm uyarısı: yanlış dil ve hiç sayfa bulmayan seçim daha iyi seçimi söyler', async () => {
+  const secs = sectionTable(await mlMatch(WRONG), { minPages: 3 });
+  const tr = secs.find((x) => x.from === '/tr/*');
+  assert.equal(tr.lang, 'tr');
+  assert.deepEqual([tr.alert.kind, tr.alert.lang, tr.alert.curLang], ['lang', 'tr', 'en']);
+  assert.deepEqual([tr.alert.better.host, tr.alert.better.to, tr.alert.better.hits], ['tr.ornek.com', '/*', 2]);
+  assert.equal(secs.find((x) => x.from === '/fr/*').alert, null); // no French site: removing is a valid choice
+  // Right decision: no alert.
+  const ok = sectionTable(await mlMatch([{ from: '/tr/*', host: 'tr.ornek.com', to: '/*' }, { from: '/fr/*', drop: true }]), { minPages: 3 });
+  assert.equal(ok.find((x) => x.from === '/tr/*').alert, null);
+  // Same language, but the choice finds no page: kind 'zero'.
+  const z = sectionTable(await mlMatch([{ from: '/tr/*', host: 'tr.ornek.com', to: '/tr/*' }]), { minPages: 3 }).find((x) => x.from === '/tr/*');
+  assert.deepEqual([z.alert.kind, z.alert.hits, z.alert.better.to], ['zero', 0, '/*']);
+  // Turkish section removed while a Turkish site has its pages: kind 'lang-drop'.
+  const d = sectionTable(await mlMatch([{ from: '/tr/*', drop: true }]), { minPages: 3 }).find((x) => x.from === '/tr/*');
+  assert.deepEqual([d.alert.kind, d.alert.better.host], ['lang-drop', 'tr.ornek.com']);
+});
+await check('Excel kaynağı: onaydan sonra da araç önerisi ve kaynak görünür', async () => {
+  const c = await mlMatch(WRONG);
+  const m = buildRedirectMap(c, ML_OLD, ML_SITES, {
+    '/tr/hakkimda': { site: 'tr', path: '/hakkimda', src: 'oneri' }, '/tr/iletisim': { site: 'heir', path: '/contact', src: 'oneri' },
+    '/prosedur/botox-2': { gone: true, src: 'elle' }, '/tr/prosedur/botoks': { url: 'https://x.test/b', src: 'elle' },
+  }, cfg);
+  assert.equal(mapSource(row('/tr/hakkimda', m)), 'İlk öneri onaylandı');
+  assert.equal(mapSource(row('/tr/iletisim', m)), 'Listeden başka öneri');
+  assert.equal(mapSource(row('/prosedur/botox-2', m)), '410 (araç öneri vermişti)');
+  assert.equal(mapSource(row('/tr/prosedur/botoks', m)), 'Elle yazıldı');
+  assert.equal(mapSource(row('/fr/prosedur/botox', m)), 'Araç önerisi');
+  assert.equal(row('/prosedur/botox-2', m).candidates[0].path, '/procedures/medical-aesthetics/botox');
 });
 await check('karar temizliği: geçersiz kararlar düşer', () => {
   const keys = new Set(['heir', 'tr']);

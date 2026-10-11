@@ -635,6 +635,9 @@ function nextTask() {
   if (prj.loading) return { text: 'Eşleştiriliyor. Araç eski adresleri yeni sitelerde istiyor.', btn: null };
   if (prj.matchErr) return { text: prj.matchErr, btn: 'Tekrar dene', act: { reload: true } };
   if (!prj.match) return { text: 'Siteler tarandı. Eski bölümleri yeni sitelerle eşleştirin.', btn: 'Eşleştirmeyi aç', act: { step: 'eslestirme' } };
+  // v0.8.1: a probably wrong section decision comes first. The 301 map depends on it.
+  const bad = prj.match.sections.find((x) => x.alert);
+  if (bad && prj.step !== 'harita') return { text: `${sectionName(bad)} bölümünün kararı yanlış olabilir. ${alertShort(bad)} Bölümü açın ve önerilen seçimi kullanın.`, btn: 'Bölümü gösterin', act: { step: 'eslestirme', focusSection: bad.from } };
   const dec = prj.match.sections.filter((x) => x.needsDecision);
   if (dec.length && prj.step === 'eslestirme') {
     const what = dec.every((x) => !x.found) ? 'sayfalar' : 'sayfaların çoğu';
@@ -883,6 +886,23 @@ function optionLabel(sec, o) {
   return `${siteName(s, true)} · ${how}`;
 }
 const optVal = (o) => (o.drop ? 'drop' : `${o.site}|${o.to}`);
+// v0.8.1: html lang codes for the section alert.
+const LANG = { tr: 'Türkçe', en: 'İngilizce', fr: 'Fransızca', de: 'Almanca', es: 'İspanyolca', it: 'İtalyanca', ar: 'Arapça', ru: 'Rusça', nl: 'Felemenkçe', pt: 'Portekizce' };
+const langName = (l) => LANG[l] || `"${l}" dili`;
+function alertShort(x) {
+  const a = x.alert;
+  if (a.kind === 'lang') return `Sayfalar ${langName(a.lang)}, seçilen site ${langName(a.curLang)}.`;
+  if (a.kind === 'lang-drop') return `Bölüm kaldırıldı seçili, ama ${langName(a.lang)} site bu sayfaları buluyor.`;
+  return 'Seçim taramada hiçbir sayfa bulmuyor.';
+}
+function alertText(x) {
+  const a = x.alert;
+  if (!a) return '';
+  const better = `${optionLabel(x, a.better)} (taramada ${a.better.hits} / ${x.pages})`;
+  if (a.kind === 'lang') return `Bu bölümün sayfaları ${langName(a.lang)}. Seçilen site ${langName(a.curLang)}. ${langName(a.lang)} site var: ${better}. 301 haritası ${langName(a.lang)} sayfalar için ${langName(a.lang)} sayfa önerir.`;
+  if (a.kind === 'lang-drop') return `Bölüm kaldırıldı seçili. Ama ${langName(a.lang)} site bu bölümün sayfalarını buluyor: ${better}.`;
+  return `Bu seçim taramada hiçbir sayfa bulmuyor. Daha iyi seçim: ${better}.`;
+}
 function renderSections() {
   const busy = prj.loading;
   $('#matchBusy').hidden = !busy;
@@ -911,22 +931,32 @@ function renderSections() {
       : x.current.drop ? ['301 veya 410 gerekli', 'idle', ''] : [`${x.found} / ${x.pages} bulundu`, ratio >= 0.999 && !extra ? 'ok' : 'warn', extra];
     const hint = x.needsDecision && x.suggestion?.site ? `<span class="tag-s warn">Öneri: ${esc(optionLabel(x, x.suggestion))}</span>` : '';
     const why = x.needsDecision && x.suggestion?.why ? `<p class="small sec-why">${esc(x.suggestion.why)}</p>` : '';
+    const alert = x.alert ? `<p class="small sec-why warn-t">${esc(alertText(x))}</p><button type="button" class="ghost small" data-use="${esc(optVal(x.alert.better))}" data-use-from="${esc(x.from)}">Bu seçimi kullan</button>` : '';
     const open = prj.openSecs.has(x.from);
-    return `<div class="sec${x.needsDecision ? ' decide' : ''}" data-sec="${esc(x.from)}">
+    return `<div class="sec${x.needsDecision || x.alert ? ' decide' : ''}" data-sec="${esc(x.from)}">
       <div class="sec-from"><code>${esc(x.from === '/*' ? '/' : x.from.slice(0, -1))}</code>
         <span class="small">${x.from === '/*' ? `Kök ve küçük bölümler ${help(HELP.root)} · ` : ''}${x.pages} sayfa</span>
         <button type="button" class="sec-open" data-open="${esc(x.from)}" aria-expanded="${open}" aria-controls="pages-${esc(x.from)}">${open ? 'Sayfaları gizle' : 'Sayfaları göster'}</button></div>
       <span class="cmp-arrow" aria-hidden="true">→</span>
       <div class="sec-to"><label class="sr" for="sec-${esc(x.from)}">${esc(sectionName(x))} nereye gidiyor?</label>
         <select id="sec-${esc(x.from)}" data-from="${esc(x.from)}">${optsHtml}</select>
-        ${x.auto ? `<span class="tag-s idle" title="${esc(x.suggestion?.why || 'Araç bu taşımayı önerdi. Değiştirmek için listeden seçin.')}">Öneri</span>` : ''}${hint}${why}</div>
+        ${x.auto ? `<span class="tag-s idle" title="${esc(x.suggestion?.why || 'Araç bu taşımayı önerdi. Değiştirmek için listeden seçin.')}">Öneri</span>` : ''}${hint}${why}${alert}</div>
       <div class="sec-res"><span class="tag-s ${res[1]}">${esc(res[0])}</span>${res[2] ? `<span class="small">${esc(res[2])}</span>` : ''}</div>
       ${open ? sectionPages(x) : ''}
     </div>`;
   }).join('') + `<p class="small sec-note">"Taramada" sayısı: seçimin taramalarda bulduğu sayfa. "Bulundu" sayısı: araç her adresi tek tek istedikten sonra bulunan sayfa. "Öneri" etiketi: araç bu taşımayı kendisi seçti. Değiştirmek için listeden seçin.</p>`;
   renderRuleEditor();
 }
+async function setSection(from, value) {
+  const rules = prj.project.rules.filter((r) => r.from !== from);
+  if (value === 'drop') rules.push({ from, drop: true });
+  else { const [site, to] = value.split('|'); rules.push({ from, site, to }); }
+  prj.project.rules = rules;
+  if (await saveProject('Karar kaydedildi.')) loadMatch();
+}
 $('#prjSections').addEventListener('click', (e) => {
+  const u = e.target.closest('[data-use]');
+  if (u) { setSection(u.dataset.useFrom, u.dataset.use); return; }
   const b = e.target.closest('[data-open]');
   if (!b) return;
   const from = b.dataset.open;
@@ -937,12 +967,7 @@ $('#prjSections').addEventListener('click', (e) => {
 $('#prjSections').addEventListener('change', async (e) => {
   const sel = e.target.closest('[data-from]');
   if (!sel || sel.value === 'decide') return;
-  const from = sel.dataset.from;
-  const rules = prj.project.rules.filter((r) => r.from !== from);
-  if (sel.value === 'drop') rules.push({ from, drop: true });
-  else { const [site, to] = sel.value.split('|'); rules.push({ from, site, to }); }
-  prj.project.rules = rules;
-  if (await saveProject('Karar kaydedildi.')) loadMatch();
+  setSection(sel.dataset.from, sel.value);
 });
 
 // v0.6.1 kept path rules in the browser per old host. Offer them to the project once.
