@@ -182,15 +182,18 @@ async function projectMatch(p) {
   const userRules = parseRules(engineRules(p, hostOf), cc.maxRules);
   // First pass without requests: which sections have a suggested move?
   const first = compareCrawls(oldRes, newList, { rules: userRules, live, suggest });
-  const auto = first.suggestions.filter((x) => !x.drop).map(({ from, host, to }) => ({ from, host, to }));
+  const auto = first.suggestions.filter((x) => !x.notFound).map(({ from, host, to }) => ({ from, host, to }));
   const rules = parseRules([...userRules.map(({ from, host, to, drop }) => ({ from, host, to, drop })), ...auto], cc.maxRules + cc.maxSuggestions);
   const cmp = await compareWithProbe(status[old.key].crawlId, ids, oldRes, newList, rules, cc, live);
   const autoFrom = new Set(auto.map((a) => a.from));
-  const sections = sectionTable(cmp, { minPages: cc.suggestMinPages }).map((sec) => ({
+  const sections = sectionTable(cmp, { minPages: cc.suggestMinPages, pageLimit: cc.sectionPageLimit }).map((sec) => ({
     ...sec, auto: autoFrom.has(sec.from),
     current: sec.current.drop ? sec.current : { site: keyOfHost(sec.current.host), to: sec.current.to },
     options: sec.options.map((o) => ({ site: keyOfHost(o.host), to: o.to, hits: o.hits })).filter((o) => o.site),
-    suggestion: sec.suggestion && (sec.suggestion.drop ? { drop: true, why: sec.suggestion.why } : { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to, why: sec.suggestion.why }),
+    // notFound: no move finds the pages. A weak hint (site, to, hits) may come with it. It is never applied by itself.
+    suggestion: sec.suggestion && (sec.suggestion.notFound
+      ? { notFound: true, hits: sec.suggestion.hits, why: sec.suggestion.why, ...(sec.suggestion.to ? { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to } : {}) }
+      : { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to, why: sec.suggestion.why }),
   }));
   return { cmp, sections, targets: targets.map((s) => s.key), status };
 }

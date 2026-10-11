@@ -308,7 +308,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 /* ---------- Project: header, step bar, next task ---------- */
 .back { display: inline-block; margin-top: 8px; font-size: 13px; color: var(--graphite); text-decoration: none; }
 .back:hover { color: var(--ink); }
-.steps { margin: 0 0 18px; overflow-x: auto; scrollbar-width: thin; }
+.steps { position: relative; margin: 0 0 18px; overflow-x: auto; scrollbar-width: thin; } /* relative: absolute .sr labels stay inside the scroll box (no page overflow on mobile) */
 .steps ol { list-style: none; margin: 0; padding: 0 0 4px; display: flex; flex-wrap: wrap; gap: 6px; }
 .step { display: flex; align-items: center; gap: 7px; background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px 7px 7px; font-size: 14px; font-weight: 600; color: var(--graphite); cursor: pointer; white-space: nowrap; }
 .step i { font-style: normal; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; background: var(--panel-2); color: var(--graphite); }
@@ -385,6 +385,19 @@ details.q p { position: absolute; z-index: 5; top: 24px; left: -8px; width: 280p
 .sec-to select { flex: 1 1 240px; width: auto; }
 .sec-res { display: grid; gap: 3px; justify-items: start; }
 .sec-note { padding: 10px 16px 12px; margin: 0; border-top: 1px solid #30353A; }
+.sec.decide { box-shadow: inset 3px 0 0 var(--amber); }
+.sec-open { justify-self: start; background: none; border: 0; padding: 2px 0; margin-top: 2px; font-size: 13px; color: var(--graphite); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.sec-open:hover { color: var(--ink); }
+.sec-why { flex: 1 1 100%; margin: 2px 0 0; line-height: 1.45; }
+.sec-pages { grid-column: 1 / -1; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.sec-pages > p { margin: 0 0 8px; }
+.sec-pages ul { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+.pg { display: grid; grid-template-columns: minmax(0, 1fr) 190px minmax(0, 1.4fr); gap: 4px 12px; align-items: center; padding: 6px 0; border-top: 1px solid #2C3136; }
+.pg:first-child { border-top: 0; }
+.pg code { justify-self: start; font-size: 13px; overflow-wrap: anywhere; }
+.pg .tag-s { justify-self: start; }
+.pg-to { overflow-wrap: anywhere; }
+.pg-to a { color: var(--graphite); }
 #ruleAdv .cmp-actions { margin-top: 12px; }
 #cmpRules { display: grid; gap: 8px; margin-top: 10px; }
 #cmpRules select, #cmpRules input { padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 13px; width: 100%; min-width: 0; }
@@ -438,5 +451,7 @@ details.q p { position: absolute; z-index: 5; top: 24px; left: -8px; width: 280p
   .sec-res { grid-column: 2; grid-row: 1; justify-self: end; }
   .sec .cmp-arrow { display: none; }
   .sec-to { grid-column: 1 / -1; }
+  .pg { grid-template-columns: minmax(0, 1fr) auto; }
+  .pg-to { grid-column: 1 / -1; }
   details.q p { width: 240px; }
 }

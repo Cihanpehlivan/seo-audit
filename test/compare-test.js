@@ -210,14 +210,25 @@ await check('kural istatistiği: sayfa ve bulunan sayısı', () => {
   assert.deepEqual(st, { '/tr/*': [5, 4], '/fr/*': [4, 1] });
   assert.deepEqual([ml.noRule.pages, ml.noRule.found], [5, 5]);
 });
-await check('öneri: kuralsız çoklu hedefte /tr/* → tr sitesi ve /fr/* kaldırıldı', () => {
+await check('öneri: kuralsız çoklu hedefte /tr/* → tr sitesi, /fr/* bulunamadı (kaldırıldı önerilmez)', () => {
   const c = compareCrawls(ML_OLD, [ML_EN, ML_TR]);
   const tr = c.suggestions.find((x) => x.from === '/tr/*');
   assert.deepEqual([tr.host, tr.to, tr.hits, tr.total], ['tr.ornek.com', '/*', 4, 5]);
   assert.match(tr.why, /\/tr\/ altındaki 5 sayfanın 4 tanesi tr\.ornek\.com taramasında \/tr\/ öneki olmadan var/);
   const fr = c.suggestions.find((x) => x.from === '/fr/*');
-  assert.equal(fr.drop, true);
+  assert.deepEqual([fr.notFound, fr.drop, fr.hits, fr.host], [true, undefined, 0, undefined]);
+  assert.match(fr.why, /Adresler \(slug\) değişmiş olabilir/);
+  assert.ok(!c.suggestions.some((x) => x.drop), 'bölüm kaldırıldı hiç önerilmez');
   assert.equal(c.suggestions.length, 2); // the English root needs no rule
+});
+await check('öneri: slug değişince az sayfa bulan taşıma sadece ipucu olur, uygulanmaz', () => {
+  // Old /tr/ has 6 pages. The Turkish site keeps 2 of them without the prefix; 4 slugs changed.
+  const old = crawl('www.eski.com', ['/', '/tr', '/tr/a', '/tr/b', '/tr/eski-c', '/tr/eski-d', '/tr/eski-e'].map((p) => E(p)));
+  const tr = crawl('tr.ornek.com', ['/', '/a', '/yeni-c', '/yeni-d', '/yeni-e'].map((p) => TR(p)));
+  const c = compareCrawls(old, [crawl('staging.ornek.com', [EN('/')]), tr]);
+  const s = c.suggestions.find((x) => x.from === '/tr/*');
+  assert.deepEqual([s.notFound, s.host, s.to, s.hits, s.total], [true, 'tr.ornek.com', '/*', 2, 6]);
+  assert.match(s.why, /6 sayfanın sadece 2 tanesi tr\.ornek\.com taramasında var\. Diğer adresler değişmiş olabilir/);
 });
 await check('öneri: eklenen kural tekrar önerilmez', () => {
   const c = compareCrawls(ML_OLD, [ML_EN, ML_TR], { rules: ML_RULES });

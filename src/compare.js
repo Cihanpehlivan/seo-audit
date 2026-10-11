@@ -317,7 +317,10 @@ function summarize(cmp) {
 // ---------- Pattern suggestions ----------
 // Groups old pages by first path segment (/tr, /fr, /blog). For each group, tries simple path moves on each
 // target crawl: same path, drop the segment, swap it for a segment of the target. A move is suggested when it
-// finds more pages than the current state. A group that no move can find gets a "bölüm kaldırıldı" suggestion.
+// finds more pages than the current state.
+// v0.7.1: A group that no move can find is NOT suggested as "bölüm kaldırıldı". "Not found" is not "removed":
+// the slugs may have changed. The group gets notFound: true (a decision is needed). If the best move finds some
+// pages, it stays as a weak hint (host, to, hits) and is never applied by itself.
 export function suggestRules(ctx, rules, { minPages = 3, minRatio = 0.5, max = 8 } = {}) {
   const { targets, kindByKey, oldKeys } = ctx;
   const ruled = new Set(rules.map((r) => r.from));
@@ -340,14 +343,19 @@ export function suggestRules(ctx, rules, { minPages = 3, minRatio = 0.5, max = 8
     if (ruled.has(from)) return;
     const current = members.filter((k) => FOUND.has(kindByKey.get(k))).length;
     const seg = from === '/*' ? '' : from.slice(1, -2);
-    let best = null;
+    let best = null, hintBest = null;
+    // The section's own index page (/fr) maps to the root (/) of a target when the prefix drops. The root exists on
+    // every site, so it is no evidence for a hint. A hint needs at least one other page.
+    const index = seg ? keyOf(seg) : null;
     targets.forEach((t, i) => {
       const moves = seg ? ['/' + seg + '/*', '/*', ...tSegs[i].filter((q) => q !== seg).map((q) => `/${q}/*`)] : ['/*', ...tSegs[i].map((q) => `/${q}/*`)];
       for (const to of moves) {
         if (i === 0 && to === from) continue; // this is the state without a rule
         const rule = parseRule({ from, host: hostOf(t, i), to });
-        const hits = members.filter((k) => has(t, applyRule(rule, k))).length;
+        const found = members.filter((k) => has(t, applyRule(rule, k)));
+        const hits = found.length, ev = found.filter((k) => k !== index).length;
         if (!best || hits > best.hits) best = { rule, hits, t, to };
+        if (ev && (!hintBest || ev > hintBest.ev)) hintBest = { rule, hits, ev, t, to };
       }
     });
     const total = members.length;
@@ -357,8 +365,12 @@ export function suggestRules(ctx, rules, { minPages = 3, minRatio = 0.5, max = 8
       out.push({ from: rule.from, host: rule.host, to: rule.to, text: rule.text, hits, total,
         why: `${seg ? `${label} altındaki` : 'Öneksiz'} ${total} sayfanın ${hits} tanesi ${t.host} taramasında ${how} var.` });
     } else if (seg && total >= minPages && current / total < minRatio && (!best || best.hits / total < minRatio)) {
-      out.push({ from, drop: true, text: `${from} → bölüm kaldırıldı`, hits: 0, total,
-        why: `${label} altındaki ${total} sayfa yeni taramalarda yok. Bölüm bilerek kaldırıldıysa bu kuralı ekleyin. Sayfalar "Kayboldu" yerine "Bölüm kaldırıldı" grubuna girer. 301 yine gerekir.` });
+      const hint = hintBest && hintBest.hits > current ? hintBest : null;
+      const why = hint
+        ? `${label} altındaki ${total} sayfanın sadece ${hint.hits} tanesi ${hint.t.host} taramasında var. Diğer adresler değişmiş olabilir. Bölümün nereye gittiğini seçin.`
+        : `${label} altındaki ${total} sayfa yeni taramalarda yok. Araç aynı yolu, öneksiz yolu ve başka önekleri denedi. Adresler (slug) değişmiş olabilir. Bölümün nereye gittiğini seçin.`;
+      out.push({ from, notFound: true, hits: hint ? hint.hits : 0, total, text: `${from} → bulunamadı, karar gerekli`, why,
+        ...(hint ? { host: hint.rule.host, to: hint.rule.to } : {}) });
     }
   };
   for (const s of groups) consider(`/${s}/*`, keys.filter((k) => firstSeg(k) === s), `/${s}/`);
@@ -466,8 +478,23 @@ export async function probeLost(cmp, request, { concurrency = 5, maxHops = 5 } =
 // ---------- Sections (v0.7.0, matching screen) ----------
 // Old pages grouped by first path segment. Every section shows where it goes now and the other choices.
 // Every choice shows how many pages of the section it finds in the crawls (no requests).
-export function sectionTable(cmp, { minPages = 3, maxSegs = 3 } = {}) {
+// v0.7.1: every section also lists its old pages: where the page is now, or why it is not found.
+// Not-found pages come first. The list stops at pageLimit (the Excel file has all pages).
+export function sectionTable(cmp, { minPages = 3, maxSegs = 3, pageLimit = 200 } = {}) {
   const { targets, kindByKey, oldKeys } = CTX.get(cmp);
+  const rowByKey = new Map();
+  for (const [k, list] of Object.entries(cmp.rows)) {
+    if (Array.isArray(list) && k !== 'added') for (const r of list) rowByKey.set(r.path, r);
+  }
+  const pageOf = (key) => {
+    const kind = kindByKey.get(key) || 'lost';
+    const r = rowByKey.get(key);
+    const found = FOUND.has(kind);
+    // Found: the address of the page on the new site. Not found: the address the tool checked.
+    const url = kind === 'same' ? new URL(key, targets[0].origin).href
+      : found ? (kind === 'redirected' ? r?.target : r?.newUrl) || r?.checkUrl || '' : r?.checkUrl || r?.newUrl || '';
+    return { path: key, kind, found, url, reason: kind === 'same' ? '' : r?.reason || '' };
+  };
   const count = new Map();
   for (const k of oldKeys) { const s = firstSeg(k); if (s) count.set(s, (count.get(s) || 0) + 1); }
   const groups = [...count].filter(([, n]) => n >= minPages).sort((a, b) => b[1] - a[1]).map(([s]) => s);
@@ -493,12 +520,15 @@ export function sectionTable(cmp, { minPages = 3, maxSegs = 3 } = {}) {
         options.push({ host: r.host, to: r.to, hits: keys.filter((k) => has(t, applyRule(r, k))).length });
       }
     });
+    const list = keys.map(pageOf).sort((a, b) => (a.found - b.found) || a.path.localeCompare(b.path));
+    const found = list.filter((x) => x.found).length;
+    const suggestion = cmp.suggestions.find((s) => s.from === from) || null;
     return {
-      from, pages: keys.length, found: keys.filter((k) => FOUND.has(kindByKey.get(k))).length,
+      from, pages: keys.length, found, pageList: list.slice(0, pageLimit), more: Math.max(0, list.length - pageLimit),
       no301: keys.filter((k) => kindByKey.get(k) === 'no301').length, notarget: keys.filter((k) => kindByKey.get(k) === 'notarget').length,
       rule: !!rule, current: rule ? (rule.drop ? { drop: true } : { host: rule.host || '', to: rule.to }) : { host: '', to: from },
-      options, suggestion: cmp.suggestions.find((s) => s.from === from) || null,
-      needsDecision: !rule && !!cmp.suggestions.find((s) => s.from === from && s.drop),
+      options, suggestion,
+      needsDecision: !rule && !!suggestion?.notFound,
     };
   });
 }

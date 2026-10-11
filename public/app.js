@@ -494,8 +494,10 @@ const HELP = {
   heir: 'Canlıdan sonra eski alan adını bu site kullanır. Bütün 301\'ler bu sitede kurulur. Staging adresini yazın.',
   extra: 'Eski sitenin bir bölümü bu siteye taşınır. Örnek: Türkçe sayfalar ayrı alan adına gider.',
   live: 'Bu site canlıda hangi alan adını kullanacak? 301\'ler bu alan adına gider. Bilmiyorsanız boş bırakın.',
+  result: 'Araç her eski adresi yeni sitede tek tek ister. Bu sayı o kontrolden sonra gelir. Listedeki "taramada" sayısı sadece taramaya bakar. Yönlendirmeler taramada her zaman görünmez. Bu yüzden iki sayı farklı olabilir.',
+  root: 'Ana sayfa, kökteki sayfalar ve az sayfalı bölümler. Satırı açın ve sayfaları görün.',
 };
-const prj = { id: null, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, loading: false, step: 'proje', poll: null, saveTimer: null };
+const prj = { id: null, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, loading: false, step: 'proje', poll: null, saveTimer: null, openSecs: new Set() };
 let projectList = [];
 const help = (text) => `<details class="q"><summary aria-label="Açıklama">?</summary><p>${esc(text)}</p></details>`;
 const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
@@ -550,7 +552,7 @@ $('#prjUpload2').addEventListener('change', (e) => { if (e.target.files[0]) uplo
 async function openProject(id, step) {
   currentId = null; es?.close();
   show('projectView');
-  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null });
+  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, openSecs: new Set() });
   prj.step = PANES[step] ? step : prj.step && prj.id === id ? prj.step : null;
   loadHistory();
   try { Object.assign(prj, await api(`/api/projects/${encodeURIComponent(id)}`)); }
@@ -628,7 +630,11 @@ function nextTask() {
   if (prj.matchErr) return { text: prj.matchErr, btn: 'Tekrar dene', act: { reload: true } };
   if (!prj.match) return { text: 'Siteler tarandı. Eski bölümleri yeni sitelerle eşleştirin.', btn: 'Eşleştirmeyi aç', act: { step: 'eslestirme' } };
   const dec = prj.match.sections.filter((x) => x.needsDecision);
-  if (dec.length) return { text: `${dec.map((x) => sectionName(x)).join(', ')} bölümü için karar gerekli.`, btn: 'Kararı seçin', act: { step: 'eslestirme', focusSection: dec[0].from } };
+  if (dec.length) {
+    const what = dec.every((x) => !x.found) ? 'sayfalar' : 'sayfaların çoğu';
+    return { text: `${dec.map((x) => sectionName(x)).join(', ')} ${dec.length > 1 ? 'bölümlerinde' : 'bölümünde'} ${what} yeni sitelerde bulunamadı. Adresler değişmiş olabilir. Sayfalara bakın ve bölümün nereye gittiğini seçin.`,
+      btn: 'Bölümü açın', act: { step: 'eslestirme', focusSection: dec[0].from } };
+  }
   const n = workCount();
   if (!n) return { text: 'Bütün sayfalar yerinde. Yapılacak iş yok.', btn: 'Excel indir', act: { excel: true } };
   if (prj.step !== 'yapilacaklar') return { text: `Eşleştirme tamam. ${n} sayfada iş var.`, btn: 'Yapılacakları açın', act: { step: 'yapilacaklar' } };
@@ -659,7 +665,13 @@ $('#prjNext').addEventListener('click', async (e) => {
   if (a.step && a.step !== prj.step) goStep(a.step);
   setTimeout(() => {
     if (a.focus) document.querySelector(`[data-site="${a.focus}"] [name=url]`)?.focus();
-    if (a.focusSection) document.querySelector(`[data-sec="${CSS.escape(a.focusSection)}"] select`)?.focus();
+    if (a.focusSection) {
+      prj.openSecs.add(a.focusSection);
+      renderSections();
+      const row = document.querySelector(`[data-sec="${CSS.escape(a.focusSection)}"]`);
+      row?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      row?.querySelector('select')?.focus({ preventScroll: true });
+    }
   }, 50);
 });
 
@@ -814,7 +826,27 @@ async function loadMatch() {
   finally { prj.loading = false; }
   renderProject();
 }
-const sectionName = (x) => (x.from === '/*' ? 'Diğer sayfalar' : x.from.slice(0, -1));
+const sectionName = (x) => (x.from === '/*' ? 'Kök ve küçük bölümler' : x.from.slice(0, -1));
+// Short state of one old page in the section list. Green: the page is in place. Amber: work is needed.
+const PAGE_OK = new Set(['same', 'changed', 'redirected', 'moved']);
+const PAGE_KIND = {
+  same: 'Aynı yolda', changed: 'Aynı yolda, içerik değişti', redirected: 'Yönleniyor', unlinked: 'Açılıyor, link yok',
+  moved: 'Taşındı, 301 kurulu', no301: 'Taşındı, 301 eksik', notarget: 'Hedef yok', lost: 'Bulunamadı',
+  removed: 'Bölüm kaldırıldı', unknown: 'Kontrol edilemedi',
+};
+function sectionPages(x) {
+  const rows = x.pageList.map((g) => {
+    const url = /^https?:\/\//.test(g.url) ? g.url : '';
+    const addr = url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>` : '';
+    const note = g.found ? addr : [url ? `Aranan: ${addr}` : '', g.reason ? esc(g.reason) : ''].filter(Boolean).join(' · ');
+    return `<li class="pg${g.found ? '' : ' miss'}"><code>${esc(g.path)}</code>
+      <span class="tag-s ${PAGE_OK.has(g.kind) ? 'ok' : 'warn'}">${esc(PAGE_KIND[g.kind] || g.kind)}</span>
+      <span class="pg-to small">${note}</span></li>`;
+  }).join('');
+  const missing = x.pages - x.found;
+  const head = !missing ? 'Bütün sayfalar bulundu.' : missing === x.pages ? 'Hiçbir sayfa bulunamadı.' : `${missing} sayfa bulunamadı. Bunlar listenin başında.`;
+  return `<div class="sec-pages" id="pages-${esc(x.from)}"><p class="small">${head}${x.more ? ` İlk ${x.pageList.length} sayfa görünüyor. Bütün liste Excel'de.` : ''}</p><ul>${rows}</ul></div>`;
+}
 function optionLabel(sec, o) {
   if (o.drop) return 'Bölüm kaldırıldı';
   const s = siteByKey(o.site);
@@ -837,29 +869,43 @@ function renderSections() {
     return;
   }
   $('#matchWarn').innerHTML = m.warnings.map((w) => `<p class="warn">${esc(w)}</p>`).join('');
-  $('#prjSections').innerHTML = `<div class="sec-head" aria-hidden="true"><span>Eski bölüm</span><span></span><span>Nereye gidiyor?</span><span>Sonuç</span></div>` + m.sections.map((x) => {
+  $('#prjSections').innerHTML = `<div class="sec-head"><span>Eski bölüm</span><span></span><span>Nereye gidiyor?</span><span class="lbl">Sonuç ${help(HELP.result)}</span></div>` + m.sections.map((x) => {
     const cur = x.needsDecision ? 'decide' : optVal(x.current);
     const opts = [...x.options];
     if (!x.current.drop && !opts.some((o) => optVal(o) === cur) && cur !== 'decide') opts.unshift({ ...x.current, hits: null });
     const optsHtml = (x.needsDecision ? '<option value="decide" selected>Karar verin…</option>' : '')
-      + opts.map((o) => `<option value="${esc(optVal(o))}"${optVal(o) === cur ? ' selected' : ''}>${esc(optionLabel(x, o))}${o.hits != null ? ` (${o.hits} / ${x.pages})` : ''}</option>`).join('')
+      + opts.map((o) => `<option value="${esc(optVal(o))}"${optVal(o) === cur ? ' selected' : ''}>${esc(optionLabel(x, o))}${o.hits != null ? ` · taramada ${o.hits} / ${x.pages}` : ''}</option>`).join('')
       + `<option value="drop"${cur === 'drop' ? ' selected' : ''}>Bölüm kaldırıldı</option>`;
     const ratio = x.found / x.pages;
     const extra = [x.no301 && `${x.no301} sayfada 301 eksik`, x.notarget && `${x.notarget} hedef yok`].filter(Boolean).join(' · ');
-    const res = x.needsDecision ? ['Karar gerekli', 'warn'] : x.current.drop ? ['301 veya 410 gerekli', 'idle']
-      : [`${x.found} / ${x.pages} bulundu`, ratio >= 0.999 && !extra ? 'ok' : 'warn'];
-    const sug = x.needsDecision && x.suggestion ? `<span class="tag-s warn" title="${esc(x.suggestion.why)}">Öneri: ${esc(x.suggestion.drop ? 'Bölüm kaldırıldı' : optionLabel(x, x.suggestion))}</span>` : '';
-    return `<div class="sec" data-sec="${esc(x.from)}">
-      <div class="sec-from"><code>${esc(x.from === '/*' ? '/' : x.from.slice(0, -1))}</code><span class="small">${x.from === '/*' ? 'Diğer sayfalar · ' : ''}${x.pages} sayfa</span></div>
+    // Not found is not removed: the row says "Bulunamadı" and asks for a choice. It never suggests "Bölüm kaldırıldı".
+    const res = x.needsDecision ? [x.found ? `${x.found} / ${x.pages} bulundu` : 'Bulunamadı', 'warn', 'Adresler değişmiş olabilir.']
+      : x.current.drop ? ['301 veya 410 gerekli', 'idle', ''] : [`${x.found} / ${x.pages} bulundu`, ratio >= 0.999 && !extra ? 'ok' : 'warn', extra];
+    const hint = x.needsDecision && x.suggestion?.site ? `<span class="tag-s warn">Öneri: ${esc(optionLabel(x, x.suggestion))}</span>` : '';
+    const why = x.needsDecision && x.suggestion?.why ? `<p class="small sec-why">${esc(x.suggestion.why)}</p>` : '';
+    const open = prj.openSecs.has(x.from);
+    return `<div class="sec${x.needsDecision ? ' decide' : ''}" data-sec="${esc(x.from)}">
+      <div class="sec-from"><code>${esc(x.from === '/*' ? '/' : x.from.slice(0, -1))}</code>
+        <span class="small">${x.from === '/*' ? `Kök ve küçük bölümler ${help(HELP.root)} · ` : ''}${x.pages} sayfa</span>
+        <button type="button" class="sec-open" data-open="${esc(x.from)}" aria-expanded="${open}" aria-controls="pages-${esc(x.from)}">${open ? 'Sayfaları gizle' : 'Sayfaları göster'}</button></div>
       <span class="cmp-arrow" aria-hidden="true">→</span>
       <div class="sec-to"><label class="sr" for="sec-${esc(x.from)}">${esc(sectionName(x))} nereye gidiyor?</label>
         <select id="sec-${esc(x.from)}" data-from="${esc(x.from)}">${optsHtml}</select>
-        ${x.auto ? `<span class="tag-s idle" title="${esc(x.suggestion?.why || 'Araç bu taşımayı önerdi. Değiştirmek için listeden seçin.')}">Öneri</span>` : ''}${sug}</div>
-      <div class="sec-res"><span class="tag-s ${res[1]}">${esc(res[0])}</span>${extra && !x.needsDecision ? `<span class="small">${esc(extra)}</span>` : ''}</div>
+        ${x.auto ? `<span class="tag-s idle" title="${esc(x.suggestion?.why || 'Araç bu taşımayı önerdi. Değiştirmek için listeden seçin.')}">Öneri</span>` : ''}${hint}${why}</div>
+      <div class="sec-res"><span class="tag-s ${res[1]}">${esc(res[0])}</span>${res[2] ? `<span class="small">${esc(res[2])}</span>` : ''}</div>
+      ${open ? sectionPages(x) : ''}
     </div>`;
-  }).join('') + `<p class="small sec-note">Parantez içindeki sayı: seçimin taramalarda bulduğu sayfa. "Öneri" etiketi: araç bu taşımayı kendisi seçti. Değiştirmek için listeden seçin.</p>`;
+  }).join('') + `<p class="small sec-note">"Taramada" sayısı: seçimin taramalarda bulduğu sayfa. "Bulundu" sayısı: araç her adresi tek tek istedikten sonra bulunan sayfa. "Öneri" etiketi: araç bu taşımayı kendisi seçti. Değiştirmek için listeden seçin.</p>`;
   renderRuleEditor();
 }
+$('#prjSections').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-open]');
+  if (!b) return;
+  const from = b.dataset.open;
+  if (prj.openSecs.has(from)) prj.openSecs.delete(from); else prj.openSecs.add(from);
+  renderSections();
+  document.querySelector(`[data-open="${CSS.escape(from)}"]`)?.focus();
+});
 $('#prjSections').addEventListener('change', async (e) => {
   const sel = e.target.closest('[data-from]');
   if (!sel || sel.value === 'decide') return;

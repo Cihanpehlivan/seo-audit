@@ -20,7 +20,7 @@ Kullanıcı: proje sahibi (Cihan). Sorunlar iş alanına göre gruplanır (Front
 ```
 bin/crawl.js            CLI
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
-src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu. Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0)
+src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu (v0.7.1: her bölümün sayfa listesi). Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0)
 src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma)
 src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
 src/checks.js           Ek kontroller (tarama sonrası): site sürümleri, SSL, HSTS, llms.txt, dış link, görsel
@@ -62,16 +62,32 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, zorunlu şifre, yayın limitleri | Tamam (v0.5.0) |
-| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0). Sırada v0.7.1: yapılacaklar listesi (işin yapıldığı yere göre) ve kavram açıklamaları. Sonra Parça 2: 301 haritası önerisi | Devam ediyor |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1). Sırada v0.8.0: Parça 2, 301 haritası önerisi. Sonra yapılacaklar listesi | Devam ediyor |
 | Sprint 4 | AI özellikleri | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 48, proje 13 kontrol (toplam yaklaşık 10 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, proje 14 kontrol (toplam yaklaşık 10 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
 
-Açık noktalar (v0.7.0):
-- Taşıma projesi gerçek bir sitede denenmedi (örnek: Şamil Şahin taşıması). İlk denemede bölüm önerilerini, 301 sonuçlarını ve süreyi kontrol et.
-- Yapılacaklar adımı şimdilik grup görünümünü ("Bütün sayfalar") gösterir. İşin yapıldığı yere göre liste v0.7.1'de gelir.
+Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
+- Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
+- `/tr/` için "Bölüm kaldırıldı" kayıtlı kural olarak seçili. Türkçe sayfalar kaldırılmadı, ayrı alan adına taşındı. Büyük olasılıkla Türkçe sitede de slug değişti, bu yüzden "Türkçe · /tr/ kalkar" seçeneği az sayfa buldu. Kullanıcıya soruldu (v0.7.1), cevap bekleniyor: Türkçe sitede adresler eski `/tr/` adresleri ile aynı mı (önek hariç), yoksa slug da değişti mi? v0.7.1 ile `/tr/` satırı açılır ve cevap sayfa listesinde görünür. Kayıtlı "Bölüm kaldırıldı" kararını kullanıcı Türkçe site olarak değiştirmeli.
+- Listedeki sayı (2 / 7) sadece taramaya bakar. Sonuçtaki sayı (3 / 7) istekten sonra gelir. Fark açıklanmıyor.
+- "Diğer sayfalar" etiketi belirsiz. Bölüm satırı açılmıyor: hangi sayfanın bulunduğu görünmüyor.
+
+v0.7.1 planı (gerçek site denemesinden sonra güncellendi). 1-4 tamam (v0.7.1). Sıra:
+1. Hiçbir seçenek sayfa bulmazsa "Bölüm kaldırıldı" önerme. Satır "Bulunamadı: adresler değişmiş olabilir" der. Seçim olarak hedef siteler ve "Bölüm kaldırıldı" kalır. Sıradaki iş kartı nedeni açıklar.
+2. Bölüm satırı açılır: eski sayfa → bulunan yeni adres veya "bulunamadı".
+3. Sayılar tek ve açık etiket alır ("taramada bulundu" ile "kontrol sonrası bulundu" ayrımı ya da tek sayı).
+4. "Diğer sayfalar" yerine açık ad (örnek: "Kök ve küçük bölümler").
+5. Sonra asıl v0.7.1 işi: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları.
+Öncelik kararı (11 Ekim 2026, kullanıcı onayladı): Çok alan adlı taşıma nadirdir. Yaygın iş tek eski site → tek yeni sitedir. İki durumda da asıl zorluk slug değişimidir. Gerçek projede SEO ajansı 301 listesi göndermedi: listeyi araç üretmeli. 301 kontrolü ancak 301'ler kurulduktan sonra işe yarar. Yeni sıra:
+1. v0.7.1: Eşleştirme ekranı düzeltmesi (yukarıdaki plan 1-4). Tamam.
+2. v0.8.0: Parça 2, 301 haritası önerisi. Araç slug ve title benzerliği ile her bulunamayan eski sayfaya yeni sayfa önerir. Kullanıcı onaylar veya değiştirir. Harita CSV/Excel olarak iner (geliştiriciye veya ajansa verilir). Harita projede saklanır. Tek site taşıması (aynı alan adı) en basit akış olmalı.
+3. Sonra: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları.
+Açık noktalar (v0.7.1):
+- v0.7.1 gerçek sitede denenmedi. Şamil Şahin projesinde eşleştirmeyi tekrar açın. `/prosedur/` ve `/fr/` "Bulunamadı" demeli, "Bölüm kaldırıldı" önermemeli. Satırları açın ve sayfa listesini kontrol edin.
+- Yapılacaklar adımı şimdilik grup görünümünü ("Bütün sayfalar") gösterir. İşin yapıldığı yere göre liste v0.8.0'dan sonra gelir.
 - İstekler staging şifresini göndermez. Şifreli geçecek sitede 301 kontrolü "Kontrol edilemedi" olur.
 - Otomatik öneri kaydedilmez. Tarama değişirse öneri de değişebilir. Kullanıcı seçerse kural olur.
 
@@ -113,6 +129,14 @@ Açık noktalar (Sprint 2'den):
 **Sprint 6 — JS render:** Playwright modu. Ham HTML ile render edilmiş HTML farkı, sadece JS ile gelen linkler.
 
 ## Karar günlüğü
+
+- v0.7.1: "Bulunamadı" ile "kaldırıldı" ayrıdır. Öneri motoru "Bölüm kaldırıldı" önermez. Hiçbir taşıma bölümü bulamazsa öneri `notFound: true` alır, bölüm "Karar verin" der, satır "Bulunamadı · Adresler değişmiş olabilir" yazar. "Bölüm kaldırıldı" seçeneği listede kalır, kullanıcı seçer.
+- v0.7.1: Bazı sayfaları bulan en iyi taşıma ipucu olur ("Öneri: Türkçe · /tr/ kalkar"). İpucu kendiliğinden uygulanmaz. Bölümün kendi ana sayfası (`/fr` → `/`) kanıt sayılmaz, çünkü her sitede kök sayfa vardır. İpucu için en az bir başka sayfa bulunmalı.
+- v0.7.1: Bölüm satırı açılır ("Sayfaları göster"). Her eski sayfa durumu ve adresi ile listelenir. Bulunan sayfa yeni adresini, bulunamayan sayfa aranan adresi ve nedenini gösterir. Bulunamayanlar önce gelir. Liste sınırı `compare.sectionPageLimit` (200), bütün liste Excel'de. API: `sections[].pageList`, `sections[].more`.
+- v0.7.1: Etiket rengi: yeşil = sayfa yerinde (aynı, içerik değişti, yönleniyor, 301 kurulu). Amber = iş gerekli (301 eksik, hedef yok, bulunamadı, linksiz, kontrol edilemedi, bölüm kaldırıldı).
+- v0.7.1: İki sayı, iki etiket. Seçim listesinde "taramada 3 / 7" (sadece tarama, istek yok). Sonuç sütununda "3 / 7 bulundu" (araç her adresi tek tek istedikten sonra). "Sonuç ?" açıklaması farkı anlatır. Tek sayıya indirilmedi: seçenek sayıları istek atmadan hesaplanır.
+- v0.7.1: "Diğer sayfalar" yerine "Kök ve küçük bölümler" (yanında "?" açıklaması).
+- v0.7.1: Mobil taşma düzeltmesi: adım çubuğundaki gizli `.sr` etiketleri (position: absolute) sayfayı 909 px genişletiyordu (v0.7.0 hatası). `.steps` artık `position: relative`.
 
 - v0.7.0: Model düzeltmesi. Başka yola veya başka siteye taşınan sayfa artık "Aynı kaldı" sayılmaz. İki kontrol: hedef sayfa var mı, eski yol "eski alan adına geçecek site" üzerinde hedefe 301 veriyor mu. Sonuç: "Hedef hazır, 301 kurulu" (`moved`), "Hedef hazır, 301 eksik" (`no301`), "Hedef yok" (`notarget`). Korunan oran `moved` sayfaları da sayar. Kural istatistiğinde `no301` "bulundu" sayılır (hedef var).
 - v0.7.0: 301 kontrolü Location başlığına göre yapılır. Geçecek sitede sadece aynı hosttaki adımlar izlenir. Başka hosta giden ilk adımda durulur, çünkü hedef site canlıda olmayabilir. Kabul edilen 301 hedefi: hedef sitenin tarama alan adı, projede yazılan "canlı alan adı" veya (hedef geçecek site ise) eski alan adı. Yol eşleşir ama alan adı bilinmiyorsa "301 eksik" olur ve "canlı alan adını projeye yazın" der. İstekler sadece taranan sitelere gider (SSRF yüzeyi büyümez).

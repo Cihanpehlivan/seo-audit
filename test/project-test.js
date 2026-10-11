@@ -109,16 +109,33 @@ await check('API: "Tara" düğmesi taramayı başlatır, bitince tarama projeye 
   assert.ok(data.project.sites.every((s) => s.crawlId));
 });
 let m;
-await check('eşleştirme: önerilen taşıma kendiliğinden uygulanır, kaldırılan bölüm karar ister', async () => {
+await check('eşleştirme: önerilen taşıma kendiliğinden uygulanır, bulunamayan bölüm karar ister', async () => {
   const r = await api(`/api/projects/${pid}/match`);
   assert.equal(r.status, 200, JSON.stringify(r.data)); m = r.data;
   const sec = Object.fromEntries(m.sections.map((x) => [x.from, x]));
   assert.deepEqual(Object.keys(sec), ['/*', '/tr/*', '/fr/*']);
   assert.deepEqual([sec['/tr/*'].auto, sec['/tr/*'].current, sec['/tr/*'].pages], [true, { site: 'tr', to: '/*' }, 4]);
-  assert.deepEqual([sec['/fr/*'].needsDecision, sec['/fr/*'].suggestion.drop], [true, true]);
+  // v0.7.1: not found is not removed. No "bölüm kaldırıldı" suggestion, no hint (no option finds a page).
+  assert.deepEqual([sec['/fr/*'].needsDecision, sec['/fr/*'].suggestion.notFound, sec['/fr/*'].suggestion.drop, sec['/fr/*'].suggestion.site], [true, true, undefined, undefined]);
+  assert.equal(sec['/fr/*'].found, 0);
   assert.ok(sec['/tr/*'].options.some((o) => o.site === 'tr' && o.to === '/*' && o.hits === 4));
   assert.deepEqual([sec['/*'].pages, sec['/*'].found], [2, 2]);
   assert.deepEqual([sec['/tr/*'].found, sec['/tr/*'].no301, sec['/tr/*'].notarget], [4, 1, 0]);
+});
+await check('eşleştirme: bölüm satırı sayfaları listeler, bulunamayan önce gelir', () => {
+  const sec = Object.fromEntries(m.sections.map((x) => [x.from, x]));
+  const tr = sec['/tr/*'];
+  assert.equal(tr.pageList.length, 4);
+  assert.equal(tr.more, 0);
+  const c = tr.pageList.find((g) => g.path === '/tr/c');
+  assert.deepEqual([c.kind, c.found, c.url], ['no301', true, `https://${TR_HOST}/c`]);
+  const fr = sec['/fr/*'];
+  assert.deepEqual(fr.pageList.map((g) => [g.path, g.kind, g.found]), [['/fr/x', 'lost', false], ['/fr/y', 'lost', false], ['/fr/z', 'lost', false]]);
+  assert.match(fr.pageList[0].url, /\/fr\/x$/); // the address the tool checked
+  assert.match(fr.pageList[0].reason, /404/);
+  const root = sec['/*'];
+  assert.deepEqual(root.pageList.map((g) => [g.path, g.kind]), [['/', 'same'], ['/about', 'same']]);
+  assert.match(root.pageList[1].url, /\/about$/);
 });
 await check('eşleştirme: 301 eski alan adına geçecek sitede kontrol edilir', () => {
   const path_ = (k) => m.rows[k].map((r) => r.path).sort();
