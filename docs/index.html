@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SEO Audit: teknik SEO denetimi ve site taşıma kontrolü</title>
+<meta name="description" content="SEO Audit siteyi tarar, 88 kuralla denetler ve sorunları ekibe göre gruplar. Site yenilemede eski ve yeni siteyi karşılaştırır, 301 listesini hazırlar.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23E6EDE3'/%3E%3Cpath d='M2 3h7l1 6H3z' fill='none' stroke='%232F5D8C'/%3E%3Cpath d='M5 7h9v7H6z' fill='none' stroke='%23B3261E' stroke-dasharray='2 1'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --pafta: #E6EDE3; --murekkep: #2B2E2A; --olcu: #2F5D8C; --sinir: #B3261E; --izgara: #D3DECF;
+  --font: 'Overpass', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body { margin: 0; background: var(--pafta); color: var(--murekkep); font: 400 1.0625rem/1.6 var(--font); font-variant-numeric: tabular-nums lining-nums; -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+a:focus-visible { outline: 2px solid var(--sinir); outline-offset: 3px; }
+img { max-width: 100%; height: auto; display: block; }
+[hidden] { display: none !important; }
+
+.sheet { max-width: 1180px; margin: clamp(12px, 3vw, 40px) auto; padding: 0 clamp(12px, 3vw, 32px); }
+.frame { border: 1.5px solid var(--murekkep); outline: 0.5px solid var(--murekkep); outline-offset: 5px; padding: clamp(20px, 4vw, 56px);
+  background-image: linear-gradient(var(--izgara) 1px, transparent 1px), linear-gradient(90deg, var(--izgara) 1px, transparent 1px);
+  background-size: 32px 32px; background-position: -1px -1px; }
+
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: clamp(32px, 6vw, 72px); }
+.mark { font-weight: 800; font-size: 1.125rem; letter-spacing: -0.01em; text-decoration: none; }
+.top nav { display: flex; gap: 20px; font-size: 0.9375rem; }
+.top nav a { text-decoration-thickness: 1px; text-underline-offset: 4px; }
+
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
+h1 { font-weight: 800; font-size: clamp(2.4rem, 5.2vw, 4.25rem); line-height: 1.02; letter-spacing: -0.025em; margin: 0 0 20px; max-width: 13ch; }
+.lead { font-size: 1.1875rem; max-width: 40ch; margin: 0 0 28px; }
+.cta { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn { display: inline-block; font-weight: 600; font-size: 1rem; padding: 12px 20px 10px; border: 1.5px solid var(--murekkep); text-decoration: none; }
+.btn.main { background: var(--murekkep); color: var(--pafta); }
+.btn:hover { background: var(--olcu); border-color: var(--olcu); color: var(--pafta); }
+.plot { width: 100%; height: auto; }
+.plot text { font: 600 13px var(--font); paint-order: stroke; stroke: var(--pafta); stroke-width: 5px; stroke-linejoin: round; }
+.plot .lbl { font-size: 12px; font-weight: 400; }
+
+.legend { margin-top: clamp(40px, 7vw, 88px); border: 1.5px solid var(--murekkep); background: var(--pafta); padding: 20px 24px; }
+.legend h2 { font-size: 1.25rem; font-weight: 800; margin: 0 0 14px; }
+.legend dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 28px; margin: 0; }
+.legend dt { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.legend dd { margin: 4px 0 0; font-size: 0.9375rem; max-width: 36ch; }
+.sym { flex: none; width: 30px; height: 12px; display: inline-block; }
+.sym.old { border-top: 2px solid var(--olcu); height: 0; }
+.sym.new { border-top: 2px dashed var(--sinir); height: 0; }
+.sym.issue { width: 11px; height: 11px; border-radius: 50%; background: var(--sinir); margin: 0 9px 0 10px; }
+.sym.team { width: 13px; height: 13px; border: 2px solid var(--murekkep); margin: 0 8px 0 9px; }
+
+.sheets { display: grid; gap: clamp(28px, 5vw, 48px); margin-top: clamp(40px, 7vw, 88px); }
+.pafta { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: clamp(20px, 3vw, 36px); align-items: start;
+  border: 1.5px solid var(--murekkep); background: var(--pafta); padding: clamp(16px, 2.5vw, 28px); }
+.pafta.flip { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); }
+.pafta.flip figure { order: 2; }
+.pafta figure { margin: 0; border: 1px solid var(--murekkep); }
+.pafta figcaption { font-size: 0.8125rem; padding: 6px 10px; border-top: 1px solid var(--murekkep); }
+.pafta h2 { font-weight: 800; font-size: clamp(1.5rem, 2.6vw, 2rem); line-height: 1.1; letter-spacing: -0.015em; margin: 0 0 6px; }
+.pafta .no { font-size: 0.875rem; margin: 0 0 14px; color: var(--olcu); font-weight: 600; }
+.pafta p { margin: 0 0 14px; max-width: 42ch; }
+.pafta ul, .pafta ol { margin: 0; padding: 0; list-style: none; }
+.pafta li { padding: 8px 0; border-top: 1px solid var(--izgara); }
+.pafta ol { counter-reset: s; }
+.pafta ol li { counter-increment: s; display: grid; grid-template-columns: 1.75rem 1fr; }
+.pafta ol li::before { content: counter(s); font-weight: 800; color: var(--olcu); }
+.pafta li small { display: block; font-size: 0.8125rem; color: var(--olcu); }
+.later { color: #5d6159; }
+
+.end { display: flex; justify-content: space-between; align-items: end; gap: 24px; flex-wrap: wrap; margin-top: clamp(40px, 7vw, 88px); }
+.end p { margin: 0; max-width: 46ch; font-size: 0.9375rem; }
+.antet { border: 1.5px solid var(--murekkep); background: var(--pafta); border-collapse: collapse; font-size: 0.875rem; min-width: 280px; }
+.antet th, .antet td { border: 1px solid var(--murekkep); padding: 6px 12px; text-align: left; vertical-align: top; }
+.antet th { font-weight: 400; width: 1%; white-space: nowrap; }
+.antet td { font-weight: 600; }
+
+@media (max-width: 760px) {
+  .hero, .pafta, .pafta.flip { grid-template-columns: 1fr; }
+  .pafta.flip figure { order: 0; }
+  .plot { max-width: 520px; }
+  .antet { width: 100%; min-width: 0; }
+}
+
+/* One moment: the old parcels are drawn, the new boundaries follow, then two issues drop on the map. */
+@media (prefers-reduced-motion: no-preference) {
+  .draw .o { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 1.1s ease-out forwards; }
+  .draw .o:nth-child(2) { animation-delay: .12s; } .draw .o:nth-child(3) { animation-delay: .24s; }
+  .draw .o:nth-child(4) { animation-delay: .36s; } .draw .o:nth-child(5) { animation-delay: .48s; } .draw .o:nth-child(6) { animation-delay: .6s; }
+  .draw .n { opacity: 0; animation: show .7s ease-out 1.3s forwards; }
+  .draw .pin { opacity: 0; transform: translateY(-10px); animation: pin .45s cubic-bezier(.3, 1.4, .5, 1) forwards; }
+  .draw .pin.a { animation-delay: 2s; } .draw .pin.b { animation-delay: 2.25s; }
+}
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes show { to { opacity: 1; } }
+@keyframes pin { to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+<div class="sheet">
+<div class="frame">
+
+<header class="top">
+  <a class="mark" href="#">SEO Audit</a>
+  <nav aria-label="Sayfa bölümleri"><a href="#p1">Site denetimi</a><a href="#p2">Taşıma projesi</a></nav>
+</header>
+
+<main>
+<section class="hero">
+  <div>
+    <h1>Sitenizi ölçün. Taşırken hiçbir sayfayı kaybetmeyin.</h1>
+    <p class="lead">SEO Audit siteyi tarar ve 88 kuralla denetler. Sorunları işi yapacak ekibe göre gruplar. Site yenilemede eski siteyi yeni site ile karşılaştırır ve 301 listesini hazırlar.</p>
+    <div class="cta">
+      <a class="btn main" href="#p1">Nasıl çalıştığını görün</a>
+      <a class="btn" id="appLink" href="" hidden>Uygulamaya girin</a>
+    </div>
+  </div>
+  <svg class="plot draw" viewBox="0 0 520 380" role="img" aria-labelledby="plotT plotD">
+    <title id="plotT">Eski ve yeni sitenin parselleri</title>
+    <desc id="plotD">Mavi çizgiler eski sitenin sayfalarını, kırmızı kesik çizgiler yeni sitenin sınırlarını gösterir. İki kırmızı nokta bulunan sorunları işaretler: 301 eksik ve title yok.</desc>
+    <g fill="none" stroke="#2F5D8C" stroke-width="1.6" stroke-linejoin="round">
+      <path class="o" pathLength="1" d="M30 60 L190 44 L204 160 L40 176Z"/>
+      <path class="o" pathLength="1" d="M190 44 L340 34 L356 150 L204 160Z"/>
+      <path class="o" pathLength="1" d="M340 34 L492 28 L500 142 L356 150Z"/>
+      <path class="o" pathLength="1" d="M40 176 L204 160 L216 286 L48 300Z"/>
+      <path class="o" pathLength="1" d="M204 160 L356 150 L370 276 L216 286Z"/>
+      <path class="o" pathLength="1" d="M356 150 L500 142 L506 266 L370 276Z"/>
+    </g>
+    <g class="n" fill="none" stroke="#B3261E" stroke-width="2.2" stroke-dasharray="9 5" stroke-linejoin="round">
+      <path d="M36 112 L276 92 L290 222 L44 240Z"/>
+      <path d="M276 92 L498 80 L504 210 L290 222Z"/>
+      <path d="M44 240 L290 222 L298 346 L52 356Z"/>
+      <path d="M290 222 L504 210 L508 334 L298 346Z"/>
+    </g>
+    <g class="lbl" fill="#2F5D8C">
+      <text class="lbl" x="56" y="84">/urun</text><text class="lbl" x="214" y="68">/blog</text><text class="lbl" x="364" y="58">/en</text>
+      <text class="lbl" x="64" y="200">/hakkimizda</text><text class="lbl" x="228" y="186">/iletisim</text><text class="lbl" x="378" y="176">/kampanya</text>
+    </g>
+    <g class="n lbl" fill="#B3261E">
+      <text class="lbl" x="150" y="210">/kahveler</text><text class="lbl" x="400" y="196">/blog</text>
+      <text class="lbl" x="150" y="334">/hakkimizda</text><text class="lbl" x="420" y="322">en.site</text>
+    </g>
+    <g class="pin a"><circle cx="152" cy="132" r="7" fill="#B3261E"/><text x="166" y="128" fill="#B3261E">301 eksik</text></g>
+    <g class="pin b"><circle cx="410" cy="248" r="7" fill="#B3261E"/><text x="424" y="244" fill="#B3261E">Title yok</text></g>
+  </svg>
+</section>
+
+<section class="legend" aria-labelledby="lejant">
+  <h2 id="lejant">Lejant</h2>
+  <dl>
+    <div><dt><span class="sym old" aria-hidden="true"></span>Eski site</dt><dd>Araç her sayfayı tarar. Her yönlendirme adımını kaydeder. Sitemap ve robots.txt kurallarını okur.</dd></div>
+    <div><dt><span class="sym new" aria-hidden="true"></span>Yeni site</dt><dd>Staging veya yeni alan adı. Dil siteleri ayrı alan adında olabilir.</dd></div>
+    <div><dt><span class="sym issue" aria-hidden="true"></span>Sorun</dt><dd>88 kural: title, meta, H1, kırık link, canonical, hreflang, SSL, HSTS ve daha fazlası.</dd></div>
+    <div><dt><span class="sym team" aria-hidden="true"></span>Ekip</dt><dd>Her sorun bir ekibe gider: Frontend, Backend, İçerik veya SEO. Liste doğru kişiye ulaşır.</dd></div>
+  </dl>
+</section>
+
+<div class="sheets">
+<section class="pafta" aria-labelledby="p1">
+  <figure>
+    <img src="img/denetim.webp" width="1600" height="857" loading="lazy" alt="Sorunlar ekranı: sağlık skoru 82, kritik, uyarı ve bilgi filtreleri, ekip filtreleri ve sorun listesi.">
+    <figcaption>Sorunlar ekranı. Örnek site: www.kavrulmus.example</figcaption>
+  </figure>
+  <div>
+    <h2 id="p1">Site denetimi</h2>
+    <p class="no">Pafta 1. Tek site</p>
+    <p>Bir adres yazın. Araç siteyi tarar ve her sayfayı kurallarla kontrol eder.</p>
+    <ul>
+      <li>Sağlık skoru<small>Kritik sorunu olmayan sayfaların oranı</small></li>
+      <li>Önem ve ekip filtresi<small>Kritik, uyarı, bilgi. Frontend, Backend, İçerik, SEO</small></li>
+      <li>Site kartı<small>Site sürümleri, SSL, HSTS, sıkıştırma, llms.txt</small></li>
+      <li>Excel<small>Bütün sayfalar ve sorunlar tek dosyada</small></li>
+    </ul>
+  </div>
+</section>
+
+<section class="pafta flip" aria-labelledby="p2">
+  <figure>
+    <img src="img/tasima.webp" width="1600" height="857" loading="lazy" alt="301 haritası ekranı: eski adresler, önerilen yeni adresler, puan ve güven etiketleri, onay düğmeleri.">
+    <figcaption>301 haritası. Örnek taşıma: eski site, yeni site ve İngilizce site</figcaption>
+  </figure>
+  <div>
+    <h2 id="p2">Taşıma projesi</h2>
+    <p class="no">Pafta 2. Site yenileme</p>
+    <p>Eski siteyi ve yeni siteyi tarayın. Araç her eski sayfanın yeni yerini bulur.</p>
+    <ol>
+      <li><span>Proje<small>Eski site, staging ve dil siteleri</small></span></li>
+      <li><span>Tarama<small>Her site tek düğme ile</small></span></li>
+      <li><span>Eşleştirme<small>Bölümler yeni yerine. Yanlış dil seçimi uyarı verir</small></span></li>
+      <li><span>301 haritası<small>Slug, title ve içerik benzerliği ile öneri. CSV çıktısı</small></span></li>
+      <li><span>Yapılacaklar<small>Kalan işler ekibe göre</small></span></li>
+      <li class="later"><span>Canlıya çıkış<small>Sonraki sürüm</small></span></li>
+    </ol>
+  </div>
+</section>
+</div>
+
+<section class="end" aria-labelledby="durum">
+  <div>
+    <h2 id="durum" style="font-weight:800;font-size:1.25rem;margin:0 0 8px">Durum</h2>
+    <p>Kişisel proje. Geliştirme devam ediyor. Sıradaki işler: canlıya çıkış kontrolü ve canlıda 301 doğrulama. Tarama sunucuda çalışır, taranan veri dışarı gönderilmez.</p>
+  </div>
+  <table class="antet">
+    <caption class="sr" style="position:absolute;left:-9999px">Proje künyesi</caption>
+    <tr><th scope="row">Proje</th><td>SEO Audit</td></tr>
+    <tr><th scope="row">Altyapı</th><td>Node.js, 4 bağımlılık</td></tr>
+    <tr><th scope="row">Durum</th><td>Kişisel proje, geliştiriliyor</td></tr>
+  </table>
+</section>
+</main>
+
+</div>
+</div>
+<script>
+// The app link: write the address of the published app here. Empty: the button stays hidden.
+const APP_URL = '';
+if (APP_URL) { const a = document.getElementById('appLink'); a.href = APP_URL; a.hidden = false; }
+</script>
+</body>
+</html>
