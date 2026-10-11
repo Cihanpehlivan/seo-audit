@@ -482,12 +482,13 @@ async function loadInfo() {
 loadInfo();
 
 // ---------- Migration project (v0.7.0) ----------
-// Steps: Proje → Tarama → Eşleştirme → Yapılacaklar. One "next task" card on every step.
+// Steps: Proje → Tarama → Eşleştirme → 301 haritası → Yapılacaklar. One "next task" card on every step.
+// v0.8.0: the 301 map comes before Yapılacaklar, because the work list depends on the map.
 const STEPS = [
-  ['proje', 'Proje'], ['tarama', 'Tarama'], ['eslestirme', 'Eşleştirme'], ['yapilacaklar', 'Yapılacaklar'],
-  ['harita', '301 haritası', true], ['canliya', 'Canlıya çıkış', true], ['dogrulama', 'Canlı doğrulama', true],
+  ['proje', 'Proje'], ['tarama', 'Tarama'], ['eslestirme', 'Eşleştirme'], ['harita', '301 haritası'], ['yapilacaklar', 'Yapılacaklar'],
+  ['canliya', 'Canlıya çıkış', true], ['dogrulama', 'Canlı doğrulama', true],
 ];
-const PANES = { proje: 'stepProje', tarama: 'stepTarama', eslestirme: 'stepEslestirme', yapilacaklar: 'stepYapilacaklar' };
+const PANES = { proje: 'stepProje', tarama: 'stepTarama', eslestirme: 'stepEslestirme', harita: 'stepHarita', yapilacaklar: 'stepYapilacaklar' };
 const ROLE = { old: 'Eski site', heir: 'Eski alan adına geçecek site', extra: 'Ek site' };
 const HELP = {
   old: 'Bugün canlıda olan site. Araç bütün sayfalarını listeler.',
@@ -497,7 +498,8 @@ const HELP = {
   result: 'Araç her eski adresi yeni sitede tek tek ister. Bu sayı o kontrolden sonra gelir. Listedeki "taramada" sayısı sadece taramaya bakar. Yönlendirmeler taramada her zaman görünmez. Bu yüzden iki sayı farklı olabilir.',
   root: 'Ana sayfa, kökteki sayfalar ve az sayfalı bölümler. Satırı açın ve sayfaları görün.',
 };
-const prj = { id: null, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, loading: false, step: 'proje', poll: null, saveTimer: null, openSecs: new Set() };
+const prj = { id: null, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, loading: false, step: 'proje', poll: null, saveTimer: null, openSecs: new Set(),
+  mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100, mapSaving: false };
 let projectList = [];
 const help = (text) => `<details class="q"><summary aria-label="Açıklama">?</summary><p>${esc(text)}</p></details>`;
 const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
@@ -552,7 +554,7 @@ $('#prjUpload2').addEventListener('change', (e) => { if (e.target.files[0]) uplo
 async function openProject(id, step) {
   currentId = null; es?.close();
   show('projectView');
-  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, openSecs: new Set() });
+  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, openSecs: new Set(), mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100 });
   prj.step = PANES[step] ? step : prj.step && prj.id === id ? prj.step : null;
   loadHistory();
   try { Object.assign(prj, await api(`/api/projects/${encodeURIComponent(id)}`)); }
@@ -566,7 +568,7 @@ async function openProject(id, step) {
   if (!prj.step) prj.step = firstStep();
   renderProject();
   watchCrawls();
-  if (['eslestirme', 'yapilacaklar'].includes(prj.step)) loadMatch();
+  if (['eslestirme', 'harita', 'yapilacaklar'].includes(prj.step)) loadMatch();
 }
 // A new project opens on "Proje". A project with crawls opens where the work is.
 function firstStep() {
@@ -591,6 +593,7 @@ function renderProject() {
   if (prj.step === 'proje') renderSites();
   if (prj.step === 'tarama') renderCrawls();
   if (prj.step === 'eslestirme') renderSections();
+  if (prj.step === 'harita') renderMap();
   if (prj.step === 'yapilacaklar') renderTodo();
   $('#prjSteps').querySelector('[aria-current="step"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
@@ -603,7 +606,10 @@ function stepStates() {
   out.proje = sitesOk ? 'done' : 'todo';
   out.tarama = p.sites.every((s) => !s.url || isReady(s.key)) && isReady('old') && isReady('heir') ? 'done' : sitesOk ? 'todo' : '';
   if (prj.match) {
-    out.eslestirme = prj.match.sections.some((x) => x.needsDecision) ? 'todo' : 'done';
+    // v0.8.0: a "not found" section no longer blocks: the 301 map suggests a new page for every page.
+    out.eslestirme = 'done';
+    const mp = prj.match.map?.summary;
+    if (mp) out.harita = mp.pending || mp.none ? 'todo' : 'done';
     out.yapilacaklar = workCount() ? 'todo' : 'done';
   }
   return out;
@@ -630,10 +636,23 @@ function nextTask() {
   if (prj.matchErr) return { text: prj.matchErr, btn: 'Tekrar dene', act: { reload: true } };
   if (!prj.match) return { text: 'Siteler tarandı. Eski bölümleri yeni sitelerle eşleştirin.', btn: 'Eşleştirmeyi aç', act: { step: 'eslestirme' } };
   const dec = prj.match.sections.filter((x) => x.needsDecision);
-  if (dec.length) {
+  if (dec.length && prj.step === 'eslestirme') {
     const what = dec.every((x) => !x.found) ? 'sayfalar' : 'sayfaların çoğu';
-    return { text: `${dec.map((x) => sectionName(x)).join(', ')} ${dec.length > 1 ? 'bölümlerinde' : 'bölümünde'} ${what} yeni sitelerde bulunamadı. Adresler değişmiş olabilir. Sayfalara bakın ve bölümün nereye gittiğini seçin.`,
-      btn: 'Bölümü açın', act: { step: 'eslestirme', focusSection: dec[0].from } };
+    return { text: `${dec.map((x) => sectionName(x)).join(', ')} ${dec.length > 1 ? 'bölümlerinde' : 'bölümünde'} ${what} yeni sitelerde bulunamadı. Adresler değişmiş olabilir. 301 haritası her sayfa için yeni sayfa önerir. Bölüm başka siteye gidiyorsa önce siteyi seçin.`,
+      btn: 'Haritayı açın', act: { step: 'harita' } };
+  }
+  // 301 map (v0.8.0): suggestions wait for approval, pages without a suggestion wait for a choice.
+  const mp = prj.match.map?.summary;
+  if (mp && (mp.pending || mp.none)) {
+    const noneText = mp.none ? ` ${mp.none} sayfa için öneri yok: adresi siz seçin.` : '';
+    if (prj.step !== 'harita') return { text: `Eşleştirme tamam. ${mp.pending + mp.none} sayfa için yeni adres gerekli. Araç ${mp.pending} sayfa için öneri buldu.`, btn: 'Haritayı açın', act: { step: 'harita' } };
+    if (mp.high) return { text: `${mp.pending} sayfa için öneri onay bekliyor. ${mp.high} öneri yüksek güvenli.${noneText}`, btn: `Yüksek güvenlileri onayla (${mp.high})`, act: { approveHigh: true } };
+    if (mp.pending) return { text: `${mp.pending} sayfa için öneri onay bekliyor. Önerileri tek tek kontrol edin.${noneText}`, btn: 'İlk satırı açın', act: { mapTab: 'pending' } };
+    return { text: `${mp.none} sayfa için öneri yok. En yakın sayfayı seçin veya 410 verin.`, btn: 'Listeyi açın', act: { mapTab: 'none' } };
+  }
+  if (prj.step === 'harita') {
+    if (mp?.warn) return { text: `${mp.warn} onaylı satırda hedef sayfa son taramada yok. Satırları kontrol edin.`, btn: 'Satırları gösterin', act: { mapTab: 'approved' } };
+    return { text: `Harita hazır. ${mp ? mp.rule + mp.approved + mp.gone : 0} satır 301 listesinde. Listeyi indirin ve geliştiriciye verin.`, btn: 'CSV indir', act: { csv: true } };
   }
   const n = workCount();
   if (!n) return { text: 'Bütün sayfalar yerinde. Yapılacak iş yok.', btn: 'Excel indir', act: { excel: true } };
@@ -659,6 +678,15 @@ $('#prjNext').addEventListener('click', async (e) => {
   if (a.live) { location.hash = `#/live/${a.live}`; return; }
   if (a.crawl) { goStep('tarama'); await startSiteCrawl(a.crawl); return; }
   if (a.excel) { location.href = `/api/projects/${prj.id}/excel`; return; }
+  if (a.csv) { location.href = `/api/projects/${prj.id}/map?format=csv`; return; }
+  if (a.approveHigh) { approveHigh(); return; }
+  if (a.mapTab) {
+    prj.mapTab = a.mapTab;
+    if (prj.step !== 'harita') { goStep('harita'); return; }
+    renderMap();
+    setTimeout(() => document.querySelector('#mapRows .mrow select, #mapRows .mrow button')?.focus(), 30);
+    return;
+  }
   if (a.reload) { prj.matchKey = ''; loadMatch(); return; }
   if (a.addSite) addSite();
   if (a.settings) setTimeout(() => { document.querySelector('#stepTarama details').open = true; $('#crawlAuth').focus(); });
@@ -988,7 +1016,149 @@ $('#ruleSave').addEventListener('click', async () => {
   if (ok) loadMatch(); else $('#matchErr').textContent = $('#prjSaved').textContent;
 });
 
-// ---------- Step 4: Yapılacaklar (all pages view; the work list by place comes next) ----------
+// ---------- Step 4: 301 haritası (v0.8.0) ----------
+// Every old page that needs a new address: suggestion (pending), no suggestion (none), approved or 410, rule.
+// Only decisions are saved (POST /map). Suggestions come again with every match.
+const MAP_TABS = [['pending', 'Onay bekliyor'], ['none', 'Öneri yok'], ['approved', 'Onaylandı'], ['rule', 'Kuraldan']];
+const CONF = { high: ['Yüksek', 'ok'], mid: ['Orta', 'warn'], low: ['Düşük', 'warn low'] };
+const mapTabOf = (r) => (r.status === 'gone' ? 'approved' : r.status);
+const mapRowByPath = (p) => prj.match?.map?.rows.find((r) => r.path === p);
+// Address of a target, short: site name + path (the full live URL is in the title).
+function mapTarget(t) {
+  if (!t) return '';
+  if (!t.site) return esc(t.url);
+  const s = siteByKey(t.site);
+  return `<span class="small">${esc(siteName(s, true))}</span> <code>${esc(t.path)}</code>`;
+}
+// Value of the select: a candidate (site|path), __other (written address), __410, or '' (nothing chosen).
+const candVal = (c) => `${c.site}|${c.path}`;
+function mapChoice(r) {
+  return prj.mapChoice[r.path] ?? (r.candidates?.length ? candVal(r.candidates[0]) : '');
+}
+// A written address: a path (/a/b) goes to the site of the best suggestion (else the heir). A full address
+// goes to the project site with that host (crawl host or live host), else it stays a plain URL.
+function manualDecision(v, r) {
+  v = String(v || '').trim();
+  if (!v) return { error: 'Adres yazın. Örnek: /hizmetler/web veya https://www.ornek.com/hizmetler/web' };
+  if (v.startsWith('/')) return { site: r.candidates?.[0]?.site || 'heir', path: v, src: 'elle' };
+  let u;
+  try { u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`); } catch { return { error: 'Adres okunamadı. Tam adres veya / ile başlayan yol yazın.' }; }
+  const h = bare(u.hostname);
+  const old = prj.project.sites.find((s) => s.role === 'old');
+  const site = prj.project.sites.find((s) => s.role !== 'old' && (bare(siteHost(s)) === h || (s.live && bare(s.live) === h)))
+    || (bare(siteHost(old)) === h ? siteByKey('heir') : null);
+  return site ? { site: site.key, path: u.pathname + u.search, src: 'elle' } : { url: u.href, src: 'elle' };
+}
+async function saveMap(set, msg) {
+  prj.mapSaving = true;
+  renderMap();
+  try {
+    await api(`/api/projects/${prj.id}/map`, { method: 'POST', body: JSON.stringify({ set }) });
+    for (const k of Object.keys(set)) { delete prj.mapChoice[k]; delete prj.mapManual[k]; }
+    prj.mapMsg = msg || '';
+    prj.matchKey = '';
+    await loadMatch();
+  } catch (e) { $('#mapErr').textContent = e.message; }
+  finally { prj.mapSaving = false; renderMap(); }
+}
+function approveHigh() {
+  const rows = (prj.match?.map?.rows || []).filter((r) => r.status === 'pending' && r.conf === 'high');
+  if (!rows.length) return;
+  const set = {};
+  for (const r of rows) set[r.path] = { site: r.target.site, path: r.target.path, src: 'oneri' };
+  if (prj.step !== 'harita') goStep('harita');
+  saveMap(set, `${rows.length} öneri onaylandı.`);
+}
+function renderMap() {
+  const m = prj.match?.map;
+  $('#mapBusy').hidden = !(prj.loading && !m);
+  $('#mapErr').textContent = !prj.loading && prj.matchErr ? prj.matchErr : '';
+  $('#mapBox').hidden = !m;
+  if (!m) { $('#mapTiles').innerHTML = ''; $('#mapWarn').innerHTML = ''; return; }
+  const s = m.summary;
+  const noLive = (m.noLive || []).map((k) => siteName(siteByKey(k), true));
+  $('#mapWarn').innerHTML = [
+    noLive.length ? `${noLive.join(', ')} için canlı alan adı yok. Listede bu sitenin tarama adresi yazar. Canlı alan adını Proje adımında yazın.` : '',
+    s.stale ? `${s.stale} karar artık gerekli değil: eski sayfa taramada yok veya yeni sitede bulundu. Bu kararlar listeye girmez.` : '',
+  ].filter(Boolean).map((w) => `<p class="warn">${esc(w)}</p>`).join('') + (prj.mapMsg ? `<p class="small map-msg" role="status">${esc(prj.mapMsg)}</p>` : '');
+  const tiles = [[s.total, '301 gerekli', ''], [s.rule, 'Bölüm kuralından (hazır)', ''], [s.approved + s.gone, 'Onaylandı', 'ok'], [s.pending, 'Onay bekliyor', 'warn'], [s.none, 'Öneri yok', 'warn']];
+  $('#mapTiles').innerHTML = tiles.map(([n, label, cls]) => `<div class="map-tile ${n && cls ? cls : ''}"><b>${n}</b><span>${esc(label)}</span></div>`).join('');
+  const counts = { pending: s.pending, none: s.none, approved: s.approved + s.gone, rule: s.rule };
+  if (!prj.mapTab || (!counts[prj.mapTab] && prj.mapTab !== 'approved')) prj.mapTab = MAP_TABS.find(([k]) => counts[k])?.[0] || 'approved';
+  $('#mapTabs').innerHTML = MAP_TABS.map(([k, label]) => `<button type="button" role="tab" data-mtab="${k}" aria-selected="${prj.mapTab === k}">${esc(label)} · ${counts[k]}</button>`).join('');
+  const list = m.rows.filter((r) => mapTabOf(r) === prj.mapTab);
+  const shown = list.slice(0, prj.mapShow);
+  $('#mapRows').innerHTML = (shown.map(mapRowHtml).join('') || '<p class="map-empty">Bu listede satır yok.</p>')
+    + (list.length > shown.length ? `<div class="map-more"><button type="button" class="ghost small" data-mmore>Daha fazla göster (${list.length - shown.length})</button></div>` : '');
+  $('#mapCsv').href = `/api/projects/${prj.id}/map?format=csv`;
+  $('#mapExcel').href = `/api/projects/${prj.id}/excel`;
+  for (const b of document.querySelectorAll('#mapRows button')) b.disabled = prj.mapSaving;
+}
+function mapRowHtml(r) {
+  const p = esc(r.path);
+  const head = `<div class="mrow-old"><code>${p}</code>${r.oldTitle ? `<span class="small">Eski title: ${esc(r.oldTitle)}</span>` : ''}</div><span class="cmp-arrow" aria-hidden="true">→</span>`;
+  if (r.status === 'rule') {
+    return `<div class="mrow" data-mpath="${p}">${head}<div class="mrow-to"><span title="${esc(r.target.url)}">${mapTarget(r.target)}</span>
+      <span class="small">${esc(r.why)} · ${r.installed ? '301 kurulu' : '301 henüz kurulmadı'}</span></div>
+      <div class="mrow-act"><span class="tag-s idle">Kural</span></div></div>`;
+  }
+  if (r.status === 'approved' || r.status === 'gone') {
+    const to = r.status === 'gone' ? '<span>410 · sayfa kalıcı olarak kaldırıldı</span>' : `<span title="${esc(r.target.url)}">${mapTarget(r.target)}</span>`;
+    return `<div class="mrow" data-mpath="${p}">${head}<div class="mrow-to">${to}
+      <span class="small">${r.status === 'gone' ? 'Siz 410 seçtiniz. Sunucu bu adres için 410 verir.' : r.decision?.src === 'elle' ? 'Adresi siz yazdınız.' : 'Öneriyi onayladınız.'}</span>${r.warn ? `<span class="small warn-t">${esc(r.warn)}</span>` : ''}</div>
+      <div class="mrow-act"><span class="tag-s ${r.warn ? 'warn' : 'ok'}">${r.status === 'gone' ? '410' : 'Onaylandı'}</span><button type="button" class="linkbtn" data-mundo="${p}">Geri al</button></div></div>`;
+  }
+  const ch = mapChoice(r);
+  const cands = r.candidates || [];
+  const opts = (r.status === 'none' || !cands.length ? `<option value=""${ch === '' ? ' selected' : ''}>Yeni adres seçin…</option>` : '')
+    + cands.map((c) => `<option value="${esc(candVal(c))}"${ch === candVal(c) ? ' selected' : ''}>${esc(siteName(siteByKey(c.site), true))} · ${esc(c.path)} · puan ${c.score}</option>`).join('')
+    + `<option value="__other"${ch === '__other' ? ' selected' : ''}>Başka adres yazın…</option><option value="__410"${ch === '__410' ? ' selected' : ''}>410 ver (sayfa kalıcı olarak kaldırıldı)</option>`;
+  const pick = cands.find((c) => candVal(c) === ch);
+  const why = pick ? pick.why : ch === '__410' ? 'Sayfa yeni sitede olmayacak ve yakın bir karşılığı yok. Sunucu 410 verir.' : ch === '__other' ? 'Yol (/ornek) veya tam adres yazın. Yol yazarsanız araç önerilen siteyi kullanır.' : r.why;
+  const conf = r.status === 'pending' && pick ? CONF[pick.conf] : null;
+  const manual = ch === '__other' ? `<label class="mrow-manual"><span class="sr">${p} için yeni adres</span><input name="manual" value="${esc(prj.mapManual[r.path] || '')}" placeholder="/yeni-yol veya https://…" spellcheck="false" autocomplete="off"></label>` : '';
+  return `<div class="mrow" data-mpath="${p}">${head}<div class="mrow-to">
+      <label><span class="sr">${p} için yeni adres</span><select data-mchoice="${p}">${opts}</select></label>${manual}
+      <span class="small">${esc(why || '')}</span><span class="small warn-t" data-merr></span></div>
+    <div class="mrow-act">${conf ? `<span class="tag-s ${conf[1]}">${conf[0]}</span>` : r.status === 'none' ? '<span class="tag-s warn">Öneri yok</span>' : ''}
+      <button type="button" class="ghost small strong" data-mok="${p}"${ch === '' ? ' disabled' : ''}>Onayla</button></div></div>`;
+}
+$('#mapTabs').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mtab]');
+  if (!b) return;
+  prj.mapTab = b.dataset.mtab; prj.mapShow = 100; prj.mapMsg = '';
+  renderMap();
+});
+$('#mapRows').addEventListener('change', (e) => {
+  const sel = e.target.closest('[data-mchoice]');
+  if (sel) { prj.mapChoice[sel.dataset.mchoice] = sel.value; renderMap(); if (sel.value === '__other') document.querySelector(`[data-mpath="${CSS.escape(sel.dataset.mchoice)}"] [name=manual]`)?.focus(); }
+});
+$('#mapRows').addEventListener('input', (e) => {
+  if (e.target.name === 'manual') prj.mapManual[e.target.closest('[data-mpath]').dataset.mpath] = e.target.value;
+});
+$('#mapRows').addEventListener('click', (e) => {
+  if (e.target.closest('[data-mmore]')) { prj.mapShow += 100; renderMap(); return; }
+  const undo = e.target.closest('[data-mundo]');
+  if (undo) { saveMap({ [undo.dataset.mundo]: null }, 'Karar geri alındı.'); return; }
+  const ok = e.target.closest('[data-mok]');
+  if (!ok) return;
+  const r = mapRowByPath(ok.dataset.mok);
+  if (!r) return;
+  const ch = mapChoice(r);
+  let d;
+  if (ch === '__410') d = { gone: true, src: 'elle' };
+  else if (ch === '__other') {
+    d = manualDecision(prj.mapManual[r.path], r);
+    if (d.error) { ok.closest('.mrow').querySelector('[data-merr]').textContent = d.error; return; }
+  } else {
+    const c = r.candidates.find((x) => candVal(x) === ch);
+    if (!c) return;
+    d = { site: c.site, path: c.path, src: 'oneri' };
+  }
+  saveMap({ [r.path]: d }, '');
+});
+
+// ---------- Step 5: Yapılacaklar (all pages view; the work list by place comes next) ----------
 const CMP_KINDS = [
   { k: 'same', label: 'Aynı kaldı', cls: 'ok' },
   { k: 'changed', label: 'İçerik değişti', cls: 'warning' },

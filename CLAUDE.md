@@ -21,7 +21,8 @@ Kullanıcı: proje sahibi (Cihan). Sorunlar iş alanına göre gruplanır (Front
 bin/crawl.js            CLI
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
 src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu (v0.7.1: her bölümün sayfa listesi). Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0)
-src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma)
+src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma), 301 haritası kararlarının temizliği
+src/redirectmap.js      301 haritası (v0.8.0): bulunamayan eski sayfaya yeni sayfa önerisi (slug, title, H1, içerik; IDF ağırlığı), güven, kullanıcı kararları, CSV
 src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
 src/checks.js           Ek kontroller (tarama sonrası): site sürümleri, SSL, HSTS, llms.txt, dış link, görsel
 src/parser.js           HTML → SEO alanları (başlık ağacı, JSON-LD, görseller, linkler, parmak izi)
@@ -34,6 +35,7 @@ src/rules/index.js      Denetim motoru, sağlık skoru
 src/export.js           Excel çıktısı
 src/store.js            Dosya tabanlı kayıt
 src/server.js           Web sunucusu + API (/api/crawls, /api/projects, /api/compare, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur
+                        /api/projects/:id/map → GET (harita, ?format=csv son liste), POST { set: { "/eski/yol": karar | null } }
                         /api/projects/:id → crawl (POST), match, excel, export. GET/PUT/DELETE tanım
 render.yaml             Render Blueprint (ücretsiz plan, Docker)
 public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page (Site denetimi / Taşıma projesi). Proje ekranı: adım çubuğu + Sıradaki iş kartı
@@ -62,12 +64,12 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, zorunlu şifre, yayın limitleri | Tamam (v0.5.0) |
-| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1). Sırada v0.8.0: Parça 2, 301 haritası önerisi. Sonra yapılacaklar listesi | Devam ediyor |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0). Sırada: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları. Sonra Parça 3: canlıya çıkış kontrolü | Devam ediyor |
 | Sprint 4 | AI özellikleri | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, proje 14 kontrol (toplam yaklaşık 10 sn). 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 12, proje 17 kontrol (toplam yaklaşık 12 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
 - Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
@@ -83,8 +85,14 @@ v0.7.1 planı (gerçek site denemesinden sonra güncellendi). 1-4 tamam (v0.7.1)
 5. Sonra asıl v0.7.1 işi: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları.
 Öncelik kararı (11 Ekim 2026, kullanıcı onayladı): Çok alan adlı taşıma nadirdir. Yaygın iş tek eski site → tek yeni sitedir. İki durumda da asıl zorluk slug değişimidir. Gerçek projede SEO ajansı 301 listesi göndermedi: listeyi araç üretmeli. 301 kontrolü ancak 301'ler kurulduktan sonra işe yarar. Yeni sıra:
 1. v0.7.1: Eşleştirme ekranı düzeltmesi (yukarıdaki plan 1-4). Tamam.
-2. v0.8.0: Parça 2, 301 haritası önerisi. Araç slug ve title benzerliği ile her bulunamayan eski sayfaya yeni sayfa önerir. Kullanıcı onaylar veya değiştirir. Harita CSV/Excel olarak iner (geliştiriciye veya ajansa verilir). Harita projede saklanır. Tek site taşıması (aynı alan adı) en basit akış olmalı.
+2. v0.8.0: Parça 2, 301 haritası önerisi. Tamam (v0.8.0).
 3. Sonra: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları.
+Açık noktalar (v0.8.0):
+- 301 haritası gerçek sitede denenmedi. Şamil Şahin projesinde haritayı açın. Önerilerin doğruluğunu ve güven etiketlerini kontrol edin. Eşikler `rules.json` → `redirectMap` (high 80, mid 55, low 35).
+- Farklı dilde eş anlam bulunmaz (göz kapağı ↔ blepharoplasty). Sadece aynı kelime, ortak önek ve yakın yazım (prosedur ↔ procedures) bulunur. İçerik benzerliği (simhash) sadece 50 kelimeden uzun sayfada vardır. Anlam benzerliği Sprint 4'te (AI) gelir.
+- CSV biçimi: eski_url, yeni_url, durum (301/410), kaynak. Sunucu kuralı biçimleri (.htaccess, nginx, Shopify CSV) sonraki sürümde.
+- Bir yeni sayfa birden çok eski sayfanın hedefi olabilir. Araç bunu uyarmaz.
+
 Açık noktalar (v0.7.1):
 - v0.7.1 gerçek sitede denenmedi. Şamil Şahin projesinde eşleştirmeyi tekrar açın. `/prosedur/` ve `/fr/` "Bulunamadı" demeli, "Bölüm kaldırıldı" önermemeli. Satırları açın ve sayfa listesini kontrol edin.
 - Yapılacaklar adımı şimdilik grup görünümünü ("Bütün sayfalar") gösterir. İşin yapıldığı yere göre liste v0.8.0'dan sonra gelir.
@@ -129,6 +137,21 @@ Açık noktalar (Sprint 2'den):
 **Sprint 6 — JS render:** Playwright modu. Ham HTML ile render edilmiş HTML farkı, sadece JS ile gelen linkler.
 
 ## Karar günlüğü
+
+- v0.8.0: Adım sırası değişti (kullanıcı onayladı): Proje → Tarama → Eşleştirme → 301 haritası → Yapılacaklar → (sonra) Canlıya çıkış → Canlı doğrulama. Neden: Yapılacaklar haritaya bağlıdır ("301 kurun" mu, "sayfayı oluşturun" mu).
+- v0.8.0: Haritaya giren sayfalar: bölüm kuralı ile taşınan ve hedefi var olan sayfalar ("Kural", kendiliğinden), yeni adresi olmayan sayfalar (Kayboldu, Hedef yok, Bölüm kaldırıldı, hedefi kırık yönlendirme). Aynı yolda açılan veya doğru yönlenen sayfa haritaya girmez.
+- v0.8.0: Öneri puanı 0-100. İki parça: alan puanı (slug 0.4, title 0.3, H1 0.15, içerik 0.15; eksik alan hesaba girmez) ve bütün kelimelerin tek torba benzerliği (`bagWeight` 0.5). Kelime ağırlığı nadirliğe göredir (IDF): yeni sayfalarda ve eski sayfalarda çok geçen kelime (istanbul, prosedur) az sayar. Benzerlik: yarı Dice, yarı daha iyi kapsanan tarafın kapsama oranı (kısa yeni slug `/facelift` uzun eski slug `facelift-turkey` ile güçlü eşleşir).
+- v0.8.0: Kelime eşleşmesi: aynı kelime 1, ortak önek (en az 5 harf, kısa kelimenin %75'i) 0.8, yakın yazım (ilk harf aynı, düzenleme benzerliği en az %70) 0.7. Türkçe harfler ve aksanlar sadeleşir (ğ→g, ı→i, à→a). Sayılar ve `stopWords` puana girmez.
+- v0.8.0: Aynı bölüm bonusu: bir eski bölümün iyi eşleşmelerinin çoğu tek yeni bölüme gidiyorsa (en az 2 eşleşme, %60) o bölümdeki adaylar +10 puan alır (/prosedur/ → /procedures/).
+- v0.8.0: Bölüm kararı (kural bir siteye gidiyorsa) aramayı o siteye sınırlar. Türkçe sayfa için İngilizce sayfa önerilmez.
+- v0.8.0: Ana sayfa, noindex sayfa ve yönlendirme aday olmaz. Araç ana sayfaya toplu 301 önermez (soft 404). Öneri yoksa kullanıcı adres seçer veya 410 verir.
+- v0.8.0: Hız: aday arama kelime dizini ile yapılır. Aday sayfaların %30'undan fazlasında geçen kelime aramada kullanılmaz. Her eski sayfa için en fazla `maxScored` (40) aday tam puan alır.
+- v0.8.0: Projede sadece kullanıcı kararları saklanır (`project.map`: eski yol → `{ site, path }`, `{ url }` veya `{ gone }`, `src`: oneri/elle). Öneriler her eşleştirmede tekrar hesaplanır. Kararı değiştirmek için `POST /map` kullanılır. Proje `PUT` haritayı değiştirmez (tarayıcıdaki eski kopya yeni kararı silmez). Silinen sitenin kararları düşer. "Projeyi indir" ve "Proje yükle" kararları taşır.
+- v0.8.0: Yeni URL canlı alan adı ile yazılır: geçecek site için eski alan adı, ek site için projede yazılan "canlı alan adı". Canlı alan adı yoksa tarama adresi yazılır ve ekran uyarır.
+- v0.8.0: Onaylanan hedef son taramada yoksa satır uyarı verir. Artık gerekli olmayan karar (eski sayfa yok veya sayfa bulundu) listeye girmez; ekran sayısını yazar.
+- v0.8.0: CSV sadece son listeyi verir: Kural ve Onay satırları 301, 410 satırları boş yeni URL ile. UTF-8 BOM eklenir (Excel Türkçe harfleri doğru açar). `=`, `+`, `-`, `@` ile başlayan değerin önüne `'` eklenir (CSV formül koruması). Excel'deki "301 haritası" sayfası bütün satırları durumları ile verir.
+- v0.8.0: "Bulunamadı" bölümü artık sıradaki işi engellemez. 301 haritası her sayfa için öneri verir. Bölüm başka siteye gidiyorsa kullanıcı siteyi seçer, bu seçim aramayı o siteye sınırlar.
+- v0.8.0: Yeni bağımlılık yok. Benzerlik hesabı (IDF, Dice, düzenleme mesafesi) kendi kodumuzdur.
 
 - v0.7.1: "Bulunamadı" ile "kaldırıldı" ayrıdır. Öneri motoru "Bölüm kaldırıldı" önermez. Hiçbir taşıma bölümü bulamazsa öneri `notFound: true` alır, bölüm "Karar verin" der, satır "Bulunamadı · Adresler değişmiş olabilir" yazar. "Bölüm kaldırıldı" seçeneği listede kalır, kullanıcı seçer.
 - v0.7.1: Bazı sayfaları bulan en iyi taşıma ipucu olur ("Öneri: Türkçe · /tr/ kalkar"). İpucu kendiliğinden uygulanmaz. Bölümün kendi ana sayfası (`/fr` → `/`) kanıt sayılmaz, çünkü her sitede kök sayfa vardır. İpucu için en az bir başka sayfa bulunmalı.

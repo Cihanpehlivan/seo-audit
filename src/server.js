@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { crawl } from './crawler.js';
 import { exportExcel, exportCompareExcel } from './export.js';
 import { compareCrawls, probeLost, parseRules, sectionTable } from './compare.js';
-import { ProjectStore, PID_RE, validateProject, engineRules } from './projects.js';
+import { ProjectStore, PID_RE, validateProject, engineRules, cleanMap } from './projects.js';
+import { buildRedirectMap, mapCsv } from './redirectmap.js';
 import { Store, ID_RE } from './store.js';
 import { normalizeUrl } from './normalize.js';
 import { runAudit, loadConfig, RULES, CATEGORIES } from './rules/index.js';
@@ -120,7 +121,7 @@ async function getAudit(id, result) {
 
 // ---------- Projects (v0.7.0) ----------
 const bareHost = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
-const projectLimits = () => { const cc = loadConfig().compare; return { maxExtras: cc.maxTargets - 1, maxRules: cc.maxRules }; };
+const projectLimits = () => { const c = loadConfig(); return { maxExtras: c.compare.maxTargets - 1, maxRules: c.compare.maxRules, maxDecisions: c.redirectMap.maxDecisions }; };
 
 // State of every site: none (not crawled), running, done, deleted (crawl file gone), stale (address changed).
 async function projectStatus(p) {
@@ -195,7 +196,16 @@ async function projectMatch(p) {
       ? { notFound: true, hits: sec.suggestion.hits, why: sec.suggestion.why, ...(sec.suggestion.to ? { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to } : {}) }
       : { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to, why: sec.suggestion.why }),
   }));
-  return { cmp, sections, targets: targets.map((s) => s.key), status };
+  // 301 map (v0.8.0): heir first. The heir takes the old domain, so its live origin is the old origin.
+  const oldOrigin = new URL(oldRes.meta.startUrl);
+  const mapSites = targets.map((s, i) => {
+    const res = newList[i];
+    return { key: s.key, host: res.meta.host, origin: new URL(res.meta.startUrl).origin, pages: res.pages,
+      liveOrigin: s.role === 'heir' ? oldOrigin.origin : s.live ? `${oldOrigin.protocol}//${s.live}` : null };
+  });
+  const map = buildRedirectMap(cmp, oldRes, mapSites, p.map || {}, loadConfig().redirectMap);
+  map.noLive = mapSites.filter((s) => !s.liveOrigin).map((s) => s.key);
+  return { cmp, sections, targets: targets.map((s) => s.key), status, map };
 }
 
 async function startJob(body) {
@@ -351,7 +361,8 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'GET') { const p = await projects.get(pid); return send(res, 200, { project: p, status: await projectStatus(p) }); }
         if (req.method === 'PUT') {
           const def = validateProject(await readJson(req), projectLimits());
-          const p = await projects.update(pid, (old) => ({ ...old, ...def, sites: def.sites.map((s) => {
+          // The 301 map is not changed here (POST /map changes it). A removed site drops its decisions.
+          const p = await projects.update(pid, (old) => ({ ...old, ...def, map: cleanMap(old.map || {}, def.sites), sites: def.sites.map((s) => {
             const prev = old.sites.find((x) => x.key === s.key);
             return { ...s, pendingCrawlId: prev?.pendingCrawlId || null, lastError: prev?.lastError || null };
           }) }));
@@ -369,11 +380,11 @@ const server = http.createServer(async (req, res) => {
         try { m = await projectMatch(await projects.get(pid)); }
         catch (e) { if (e.code === 409) return send(res, 409, { error: e.message, need: e.need }); throw e; }
         if (action === 'match') {
-          const { cmp, sections, targets, status } = m;
-          return send(res, 200, { ...cmp, sections, targetSites: targets, status });
+          const { cmp, sections, targets, status, map } = m;
+          return send(res, 200, { ...cmp, sections, targetSites: targets, status, map });
         }
         const tmp = path.join(os.tmpdir(), `prj-${Date.now()}.xlsx`);
-        await exportCompareExcel(m.cmp, tmp);
+        await exportCompareExcel(m.cmp, tmp, { map: m.map });
         res.writeHead(200, {
           'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'content-disposition': `attachment; filename="tasima-${m.cmp.old.host}.xlsx"`,
@@ -382,10 +393,31 @@ const server = http.createServer(async (req, res) => {
         unlink(tmp).catch(() => {});
         return res.end(buf);
       }
+      // 301 map: POST { set: { "/old/path": decision | null } } saves decisions (null removes one).
+      // GET ?format=csv gives the final list for the developer (301 and 410 rows).
+      if (action === 'map' && req.method === 'POST') {
+        const body = await readJson(req);
+        if (!body?.set || typeof body.set !== 'object' || Array.isArray(body.set)) return send(res, 400, { error: 'Karar listesi okunamadı.' });
+        const { maxDecisions } = projectLimits();
+        const p = await projects.update(pid, (old) => {
+          const next = { ...(old.map || {}) };
+          for (const [k, v] of Object.entries(body.set)) { if (v === null) delete next[k]; else next[k] = v; }
+          return { ...old, map: cleanMap(next, old.sites, maxDecisions) };
+        });
+        return send(res, 200, { ok: true, decisions: Object.keys(p.map).length, updatedAt: p.updatedAt });
+      }
+      if (action === 'map' && req.method === 'GET') {
+        let m;
+        try { m = await projectMatch(await projects.get(pid)); }
+        catch (e) { if (e.code === 409) return send(res, 409, { error: e.message, need: e.need }); throw e; }
+        if (u.searchParams.get('format') !== 'csv') return send(res, 200, m.map);
+        res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="301-haritasi-${m.cmp.old.host}.csv"` });
+        return res.end(mapCsv(m.map));
+      }
       if (action === 'export' && req.method === 'GET') {
         const p = await projects.get(pid);
         const { id, name, structure, sites, rules, createdAt, updatedAt } = p;
-        const body = JSON.stringify({ format: 'seo-audit-proje', version: 1, id, name, structure, rules, createdAt, updatedAt,
+        const body = JSON.stringify({ format: 'seo-audit-proje', version: 1, id, name, structure, rules, map: p.map || {}, createdAt, updatedAt,
           sites: sites.map(({ key, role, name: n, url, live, crawlId }) => ({ key, role, name: n, url, live, crawlId })) }, null, 2);
         const tr = { ğ: 'g', ü: 'u', ş: 's', ı: 'i', ö: 'o', ç: 'c' };
         const file = name.toLocaleLowerCase('tr').replace(/[ğüşıöç]/g, (c) => tr[c]).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'proje';

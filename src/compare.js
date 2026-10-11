@@ -367,8 +367,8 @@ export function suggestRules(ctx, rules, { minPages = 3, minRatio = 0.5, max = 8
     } else if (seg && total >= minPages && current / total < minRatio && (!best || best.hits / total < minRatio)) {
       const hint = hintBest && hintBest.hits > current ? hintBest : null;
       const why = hint
-        ? `${label} altındaki ${total} sayfanın sadece ${hint.hits} tanesi ${hint.t.host} taramasında var. Diğer adresler değişmiş olabilir. Bölümün nereye gittiğini seçin.`
-        : `${label} altındaki ${total} sayfa yeni taramalarda yok. Araç aynı yolu, öneksiz yolu ve başka önekleri denedi. Adresler (slug) değişmiş olabilir. Bölümün nereye gittiğini seçin.`;
+        ? `${label} altındaki ${total} sayfanın sadece ${hint.hits} tanesi ${hint.t.host} taramasında var. Diğer adresler değişmiş olabilir. Bölüm bu siteye gidiyorsa siteyi seçin. 301 haritası diğer sayfalar için öneri verir.`
+        : `${label} altındaki ${total} sayfa yeni taramalarda yok. Araç aynı yolu, öneksiz yolu ve başka önekleri denedi. Adresler (slug) değişmiş olabilir. 301 haritası her sayfa için öneri verir. Bölüm başka siteye gidiyorsa siteyi seçin.`;
       out.push({ from, notFound: true, hits: hint ? hint.hits : 0, total, text: `${from} → bulunamadı, karar gerekli`, why,
         ...(hint ? { host: hint.rule.host, to: hint.rule.to } : {}) });
     }

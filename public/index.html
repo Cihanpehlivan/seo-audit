@@ -78,6 +78,7 @@
             <li><div><b>Proje oluşturun.</b> Eski siteyi ve eski alan adına geçecek siteyi yazın. Diller ayrı alan adlarına taşınıyorsa ek site ekleyin.</div></li>
             <li><div><b>Siteleri tarayın.</b> Her site için tek düğme. Staging şifresini tarama sırasında girin.</div></li>
             <li><div><b>Bölümleri eşleştirin.</b> Araç her eski bölüm için yeni yeri önerir. Hedef sayfayı ve 301'i kontrol eder.</div></li>
+            <li><div><b>301 haritasını onaylayın.</b> Adresi değişen her sayfa için araç yeni sayfa önerir. Onaylayın, listeyi CSV olarak indirin.</div></li>
             <li><div><b>Yapılacakları indirin.</b> Eksik sayfalar, eksik 301'ler ve içerik kayıpları Excel'de.</div></li>
           </ol>
         </section>
@@ -209,6 +210,22 @@
             <button type="button" class="ghost small strong" id="ruleSave">Kuralları kaydet</button>
           </div>
         </details>
+      </div>
+
+      <div id="stepHarita" class="step-pane" hidden>
+        <p class="meta">Eski adresi yeni sitede bulunmayan her sayfa için araç bir yeni sayfa önerir. Araç slug, title, H1 ve içeriği karşılaştırır. Öneriyi onaylayın veya başka sayfa seçin. Onaylanan satırlar 301 listesine girer.</p>
+        <p class="muted" id="mapBusy" hidden>Eşleştiriliyor. Araç eski adresleri yeni sitelerde istiyor ve öneri hesaplıyor.</p>
+        <p class="err" id="mapErr" role="alert"></p>
+        <div id="mapWarn"></div>
+        <div class="map-tiles" id="mapTiles"></div>
+        <div class="map-box" id="mapBox" hidden>
+          <div class="map-tabs" role="tablist" aria-label="Harita satırları" id="mapTabs"></div>
+          <div id="mapRows"></div>
+          <div class="map-foot">
+            <span class="small">Harita projede saklanır. CSV sadece kural, onay ve 410 satırlarını içerir. Listeyi geliştiriciye veya SEO ajansına verin.</span>
+            <span class="map-dl"><a class="ghost small strong" id="mapCsv" href="#">CSV indir</a><a class="ghost small" id="mapExcel" href="#">Excel indir</a></span>
+          </div>
+        </div>
       </div>
 
       <div id="stepYapilacaklar" class="step-pane" hidden>

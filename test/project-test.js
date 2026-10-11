@@ -155,6 +155,36 @@ await check('eşleştirme: karar kaydedilince bölüm kural olur', async () => {
   assert.deepEqual([fr.rule, fr.auto, fr.needsDecision, fr.current], [true, false, false, { drop: true }]);
   assert.equal(d.summary.removed, 3);
 });
+await check('301 haritası: kural satırları hazır, bulunamayan sayfa öneri ister', async () => {
+  const d = (await api(`/api/projects/${pid}/match`)).data;
+  const st = Object.fromEntries(d.map.rows.map((r) => [r.path, r.status]));
+  assert.deepEqual(st, { '/tr': 'rule', '/tr/a': 'rule', '/tr/b': 'rule', '/tr/c': 'rule', '/fr/x': 'none', '/fr/y': 'none', '/fr/z': 'none' });
+  const c = d.map.rows.find((r) => r.path === '/tr/c');
+  assert.deepEqual([c.installed, c.target.site, c.target.url], [false, 'tr', `https://${TR_HOST}/c`]);
+  assert.deepEqual(d.map.noLive, ['tr']); // the Turkish site has no live domain in the project
+});
+await check('301 haritası: kararlar kaydedilir, geçersiz karar düşer, PUT haritayı silmez', async () => {
+  const r = await api(`/api/projects/${pid}/map`, { method: 'POST', body: { set: {
+    '/fr/x': { site: 'heir', path: '/about', src: 'elle' }, '/fr/y': { gone: true }, '/fr/z': { site: 'yok', path: '/a' } } } });
+  assert.deepEqual([r.status, r.data.decisions], [200, 2]);
+  const p = (await api(`/api/projects/${pid}`)).data.project;
+  await api(`/api/projects/${pid}`, { method: 'PUT', body: { ...p, name: 'Test taşıma', map: {} } }); // the browser never changes the map with PUT
+  const d = (await api(`/api/projects/${pid}/match`)).data;
+  const x = d.map.rows.find((q) => q.path === '/fr/x');
+  assert.deepEqual([x.status, x.target.url, x.warn], ['approved', `${OLD}about`, '']);
+  assert.equal(d.map.rows.find((q) => q.path === '/fr/y').status, 'gone');
+  assert.deepEqual([d.map.summary.approved, d.map.summary.gone, d.map.summary.none], [1, 1, 1]);
+  assert.equal((await api(`/api/projects/${pid}/map`, { method: 'POST', body: { set: [] } })).status, 400);
+});
+await check('301 haritası: CSV sadece son listeyi verir', async () => {
+  const res = await fetch(`${base}/api/projects/${pid}/map?format=csv`);
+  assert.match(res.headers.get('content-type'), /text\/csv/);
+  assert.match(res.headers.get('content-disposition'), /301-haritasi-127\.0\.0\.1\.csv/);
+  const lines = (await res.text()).replace(/^\ufeff/, '').trim().split('\r\n');
+  assert.equal(lines.length, 7); // header + 4 rule + 1 approved + 1 gone
+  assert.ok(lines.includes(`${OLD}fr/x,${OLD}about,301,Elle`));
+  assert.ok(lines.includes(`${OLD}fr/y,,410,Onay`));
+});
 await check('API: Excel ve proje dosyası iner', async () => {
   const x = await fetch(`${base}/api/projects/${pid}/excel`);
   assert.equal(x.status, 200); assert.match(x.headers.get('content-type'), /spreadsheet/);
@@ -165,6 +195,7 @@ await check('API: Excel ve proje dosyası iner', async () => {
   assert.ok(!JSON.stringify(j).includes('pendingCrawlId'));
   const { status, data } = await api('/api/projects', { method: 'POST', body: j }); // "Proje yükle"
   assert.equal(status, 201); assert.notEqual(data.id, pid); assert.equal(data.rules.length, 1);
+  assert.deepEqual(data.map['/fr/y'], { gone: true, src: 'oneri' }); // 301 map decisions travel with the file
 });
 await check('API: silinen tarama "silinmiş" görünür, tanım kalır', async () => {
   const p = (await api(`/api/projects/${pid}`)).data.project;

@@ -170,7 +170,7 @@ function siteRows(ck) {
 }
 
 // Comparison of two crawls (old site vs new site) as an Excel file.
-export async function exportCompareExcel(cmp, file) {
+export async function exportCompareExcel(cmp, file, { map } = {}) {
   const wb = new ExcelJS.Workbook();
   const s = cmp.summary;
   const targets = cmp.targets || [cmp.new];
@@ -237,6 +237,16 @@ export async function exportCompareExcel(cmp, file) {
     sheet(wb, 'Kurallar', [
       { header: 'Kural', key: 'text', width: 50 }, { header: 'Eski sitede sayfa', key: 'pages', width: 18 }, { header: 'Yeni sitede bulundu', key: 'found', width: 20 },
     ], [...cmp.rules, { text: 'Kural yok (aynı yol, eski alan adına geçecek site)', ...cmp.noRule }]);
+  }
+  // 301 map (v0.8.0): every row with its state. The CSV download has only the final rows (301 and 410).
+  if (map?.rows.length) {
+    const ST = { rule: 'Kural (301)', approved: 'Onaylandı (301)', gone: '410', pending: 'Onay bekliyor', none: 'Öneri yok' };
+    const CONF = { high: 'Yüksek', mid: 'Orta', low: 'Düşük' };
+    sheet(wb, '301 haritası', [
+      { header: 'Eski URL', key: 'oldUrl', width: 60 }, { header: 'Yeni URL', key: 'to', width: 60 }, { header: 'Durum', key: 'st', width: 18 },
+      { header: 'Güven', key: 'conf', width: 10 }, { header: 'Puan', key: 'score', width: 8 }, { header: 'Neden', key: 'why', width: 70 }, { header: 'Uyarı', key: 'warn', width: 40 },
+    ], map.rows.map((r) => ({ oldUrl: r.oldUrl, to: r.target?.url || '', st: ST[r.status], conf: r.status === 'pending' ? CONF[r.conf] : '',
+      score: r.status === 'pending' ? r.score : null, why: r.why || '', warn: r.warn || '' })));
   }
   if (cmp.suggestions?.length) {
     sheet(wb, 'Öneriler', [
