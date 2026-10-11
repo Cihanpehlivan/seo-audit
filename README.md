@@ -1,4 +1,6 @@
-# SEO Audit — v0.6.1
+# SEO Audit
+
+Sürüm: `package.json` dosyasındaki `version` alanı. Değişiklikler: `CLAUDE.md` → Karar günlüğü.
 
 Teknik SEO denetim aracı. Kişisel proje. Bir siteyi tarar. Sonuçları web arayüzünde, JSON'da ve Excel'de gösterir.
 

@@ -157,6 +157,7 @@ Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ed
 
 ## Karar günlüğü
 
+- v0.8.2: README başlığındaki sürüm (v0.6.1'de kalmıştı) kaldırıldı. Sürümün tek kaynağı `package.json`. İş sonu kuralına README eklendi (Çalışma döngüsü, 5. adım).
 - v0.8.1: Belge değişiklikleri. "İki kişi çalışma kuralları" ve "Doğrulama planı (bekliyor)" bölümleri eklendi. Render'daki tek tarama sınırı Durum'a not olarak yazıldı.
 - v0.8.1: Dil filtresi. Her sayfanın dili `html lang` ana etiketidir (tr-TR → tr). Öneri aramasında sıra: (1) eski sayfanın dili bir yeni sitede varsa sadece o dildeki sayfalar; (2) dil biliniyor ama hiçbir yeni sitede yoksa sadece geçecek site (Fransızca → İngilizce site, Türkçe siteye asla); aday yoksa öneri yok; (3) dil bilinmiyor ve bölüm kaldırıldıysa geçecek site (adayı varsa); (4) bölüm kararı (prefer) bu kümede adayı varsa. Dil, bölüm kararından önce gelir: yanlış bölüm kararı yanlış dilde öneri üretmez. AI gerekmez, ücretsizdir.
 - v0.8.1: Bölüm uyarısı (`sections[].alert`). Türler: `lang` (bölüm sayfalarının dili ile seçilen sitenin dili farklı ve bölüm dilinde site var), `zero` (kayıtlı karar taramada 0 sayfa buluyor, başka seçim buluyor), `lang-drop` (bölüm kaldırıldı, ama bölüm dilinde site sayfaları buluyor). Uyarı daha iyi seçimi söyler, "Bu seçimi kullan" düğmesi kararı kaydeder. Kendiliğinden uygulanmaz. Sıradaki iş kartı uyarıyı 301 haritasından önce gösterir (harita adımında göstermez). Bölüm ve site dili: dili bilinen sayfaların en az `compare.langMinShare` (0.6) oranı.
@@ -272,7 +273,7 @@ Sohbette (claude.ai):
 2. Claude depoyu klonlar: `git clone https://github.com/Cihanpehlivan/seo-audit.git`. Sonra `npm install` ve `npm test` çalıştırır. Testler geçmeden geliştirmeye başlama. Klonlama çalışmazsa kullanıcıdan depoyu zip olarak ister (GitHub → Code → Download ZIP).
 3. Görevi bu dosyadan ve kullanıcıdan al. Kodu yaz, test sitesine yeni sayfalar ekle, `npm test` çalıştır.
 4. Arayüz değiştiyse ekran görüntüsü ile kontrol et (masaüstü 1440 px ve mobil 390 px).
-5. İş sonunda: bu dosyadaki Durum ve Karar günlüğü bölümlerini güncelle, `package.json` sürümünü artır.
+5. İş sonunda: bu dosyadaki Durum ve Karar günlüğü bölümlerini güncelle, `package.json` sürümünü artır. Kullanıcıya görünen özellik değiştiyse `README.md` içindeki ilgili bölümü de güncelle. README başlığına sürüm yazma.
 6. Kullanıcıya bir zip ver. Zip sadece değişen ve yeni dosyaları, depodaki klasör yapısı ile içerir. Silinmesi gereken dosya varsa adlarını ayrıca yaz. Kısa bir commit mesajı öner.
 7. Kullanıcı GitHub'da Add file → Upload files ile zip içeriğini sürükler ve commit yapar. Gizli dosyalar (nokta ile başlayan) değiştiyse Claude içeriklerini metin olarak da verir; kullanıcı bunları web'de düzenler.
 
