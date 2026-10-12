@@ -13,77 +13,81 @@
 :root {
   --pafta: #E6EDE3; --murekkep: #2B2E2A; --olcu: #2F5D8C; --sinir: #B3261E; --izgara: #D3DECF;
   --font: 'Overpass', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --pad: clamp(20px, 5vw, 88px);
   box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 *, *::before, *::after { box-sizing: inherit; }
-html { scroll-padding-top: env(safe-area-inset-top, 0px); }
-body { margin: 0; background: var(--pafta); color: var(--murekkep); font: 400 1.0625rem/1.6 var(--font); font-variant-numeric: tabular-nums lining-nums; -webkit-font-smoothing: antialiased; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); scroll-behavior: smooth; }
+body { margin: 0; background-color: var(--pafta); color: var(--murekkep); font: 400 1.0625rem/1.6 var(--font);
+  font-variant-numeric: tabular-nums lining-nums; -webkit-font-smoothing: antialiased;
+  background-image: linear-gradient(var(--izgara) 1px, transparent 1px), linear-gradient(90deg, var(--izgara) 1px, transparent 1px);
+  background-size: 40px 40px; background-position: -1px -1px; }
 a { color: inherit; }
 a:focus-visible { outline: 2px solid var(--sinir); outline-offset: 3px; }
 img { max-width: 100%; height: auto; display: block; }
 [hidden] { display: none !important; }
 
-.sheet { max-width: 1180px; margin: clamp(12px, 3vw, 40px) auto; padding: 0 clamp(12px, 3vw, 32px); }
-.frame { border: 1.5px solid var(--murekkep); outline: 0.5px solid var(--murekkep); outline-offset: 5px; padding: clamp(20px, 4vw, 56px);
-  background-image: linear-gradient(var(--izgara) 1px, transparent 1px), linear-gradient(90deg, var(--izgara) 1px, transparent 1px);
-  background-size: 32px 32px; background-position: -1px -1px; }
+/* Full-width bands. Lines between bands are the sheet lines; text keeps a short measure inside. */
+.band { border-top: 1.5px solid var(--murekkep); padding: clamp(40px, 7vw, 104px) var(--pad); }
+.inner { max-width: 1600px; margin: 0 auto; }
 
-.top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: clamp(32px, 6vw, 72px); }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; padding: 22px var(--pad); }
 .mark { font-weight: 800; font-size: 1.125rem; letter-spacing: -0.01em; text-decoration: none; }
-.top nav { display: flex; gap: 20px; font-size: 0.9375rem; }
+.top nav { display: flex; gap: 24px; font-size: 0.9375rem; }
 .top nav a { text-decoration-thickness: 1px; text-underline-offset: 4px; }
 
-.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
-h1 { font-weight: 800; font-size: clamp(2.4rem, 5.2vw, 4.25rem); line-height: 1.02; letter-spacing: -0.025em; margin: 0 0 20px; max-width: 13ch; }
-.lead { font-size: 1.1875rem; max-width: 40ch; margin: 0 0 28px; }
+.hero { border-top: 1.5px solid var(--murekkep); min-height: calc(100svh - 72px); display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  align-items: center; gap: clamp(24px, 4vw, 64px); padding: clamp(40px, 6vw, 80px) 0 clamp(40px, 6vw, 80px) var(--pad); }
+h1 { font-weight: 800; font-size: clamp(2.6rem, 6vw, 5.75rem); line-height: 1; letter-spacing: -0.03em; margin: 0 0 24px; max-width: 12ch; }
+.lead { font-size: clamp(1.125rem, 1.4vw, 1.3125rem); max-width: 40ch; margin: 0 0 32px; }
 .cta { display: flex; gap: 12px; flex-wrap: wrap; }
-.btn { display: inline-block; font-weight: 600; font-size: 1rem; padding: 12px 20px 10px; border: 1.5px solid var(--murekkep); text-decoration: none; }
+.btn { display: inline-block; font-weight: 600; font-size: 1rem; padding: 13px 22px 11px; border: 1.5px solid var(--murekkep); text-decoration: none; }
 .btn.main { background: var(--murekkep); color: var(--pafta); }
 .btn:hover { background: var(--olcu); border-color: var(--olcu); color: var(--pafta); }
-.plot { width: 100%; height: auto; }
+.plot { width: 100%; height: auto; display: block; }
 .plot text { font: 600 13px var(--font); paint-order: stroke; stroke: var(--pafta); stroke-width: 5px; stroke-linejoin: round; }
 .plot .lbl { font-size: 12px; font-weight: 400; }
 
-.legend { margin-top: clamp(40px, 7vw, 88px); border: 1.5px solid var(--murekkep); background: var(--pafta); padding: 20px 24px; }
-.legend h2 { font-size: 1.25rem; font-weight: 800; margin: 0 0 14px; }
-.legend dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 28px; margin: 0; }
+h2 { font-weight: 800; font-size: clamp(1.75rem, 3.2vw, 2.75rem); line-height: 1.05; letter-spacing: -0.02em; margin: 0 0 8px; }
+.legend .inner { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 4fr); gap: 24px clamp(24px, 4vw, 64px); }
+.legend dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 20px 40px; margin: 0; }
 .legend dt { display: flex; align-items: center; gap: 10px; font-weight: 600; }
-.legend dd { margin: 4px 0 0; font-size: 0.9375rem; max-width: 36ch; }
+.legend dd { margin: 6px 0 0; font-size: 0.9375rem; max-width: 34ch; }
 .sym { flex: none; width: 30px; height: 12px; display: inline-block; }
 .sym.old { border-top: 2px solid var(--olcu); height: 0; }
 .sym.new { border-top: 2px dashed var(--sinir); height: 0; }
 .sym.issue { width: 11px; height: 11px; border-radius: 50%; background: var(--sinir); margin: 0 9px 0 10px; }
 .sym.team { width: 13px; height: 13px; border: 2px solid var(--murekkep); margin: 0 8px 0 9px; }
 
-.sheets { display: grid; gap: clamp(28px, 5vw, 48px); margin-top: clamp(40px, 7vw, 88px); }
-.pafta { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: clamp(20px, 3vw, 36px); align-items: start;
-  border: 1.5px solid var(--murekkep); background: var(--pafta); padding: clamp(16px, 2.5vw, 28px); }
-.pafta.flip { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); }
+.pafta .inner { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: clamp(28px, 4vw, 72px); align-items: start; }
+.pafta.flip .inner { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
 .pafta.flip figure { order: 2; }
-.pafta figure { margin: 0; border: 1px solid var(--murekkep); }
-.pafta figcaption { font-size: 0.8125rem; padding: 6px 10px; border-top: 1px solid var(--murekkep); }
-.pafta h2 { font-weight: 800; font-size: clamp(1.5rem, 2.6vw, 2rem); line-height: 1.1; letter-spacing: -0.015em; margin: 0 0 6px; }
-.pafta .no { font-size: 0.875rem; margin: 0 0 14px; color: var(--olcu); font-weight: 600; }
-.pafta p { margin: 0 0 14px; max-width: 42ch; }
-.pafta ul, .pafta ol { margin: 0; padding: 0; list-style: none; }
-.pafta li { padding: 8px 0; border-top: 1px solid var(--izgara); }
+.pafta figure { margin: 0; border: 1.5px solid var(--murekkep); background: var(--pafta); }
+.pafta figcaption { font-size: 0.8125rem; padding: 8px 12px; border-top: 1px solid var(--murekkep); }
+.pafta .no { font-size: 0.875rem; margin: 0 0 18px; color: var(--olcu); font-weight: 600; }
+.pafta p { margin: 0 0 18px; max-width: 40ch; }
+.pafta ul, .pafta ol { margin: 0; padding: 0; list-style: none; max-width: 44ch; }
+.pafta li { padding: 9px 0; border-top: 1px solid var(--murekkep); }
+.pafta li:last-child { border-bottom: 1px solid var(--murekkep); }
 .pafta ol { counter-reset: s; }
 .pafta ol li { counter-increment: s; display: grid; grid-template-columns: 1.75rem 1fr; }
 .pafta ol li::before { content: counter(s); font-weight: 800; color: var(--olcu); }
 .pafta li small { display: block; font-size: 0.8125rem; color: var(--olcu); }
 .later { color: #5d6159; }
 
-.end { display: flex; justify-content: space-between; align-items: end; gap: 24px; flex-wrap: wrap; margin-top: clamp(40px, 7vw, 88px); }
-.end p { margin: 0; max-width: 46ch; font-size: 0.9375rem; }
-.antet { border: 1.5px solid var(--murekkep); background: var(--pafta); border-collapse: collapse; font-size: 0.875rem; min-width: 280px; }
-.antet th, .antet td { border: 1px solid var(--murekkep); padding: 6px 12px; text-align: left; vertical-align: top; }
+.end .inner { display: flex; justify-content: space-between; align-items: end; gap: 32px; flex-wrap: wrap; }
+.end h2 { font-size: 1.5rem; }
+.end p { margin: 0; max-width: 46ch; }
+.antet { border: 1.5px solid var(--murekkep); background: var(--pafta); border-collapse: collapse; font-size: 0.875rem; min-width: 300px; }
+.antet th, .antet td { border: 1px solid var(--murekkep); padding: 7px 14px; text-align: left; vertical-align: top; }
 .antet th { font-weight: 400; width: 1%; white-space: nowrap; }
 .antet td { font-weight: 600; }
+.sr { position: absolute; left: -9999px; }
 
-@media (max-width: 760px) {
-  .hero, .pafta, .pafta.flip { grid-template-columns: 1fr; }
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; min-height: 0; padding-right: var(--pad); }
+  .legend .inner, .pafta .inner, .pafta.flip .inner { grid-template-columns: 1fr; }
   .pafta.flip figure { order: 0; }
-  .plot { max-width: 520px; }
   .antet { width: 100%; min-width: 0; }
 }
 
@@ -96,27 +100,25 @@ h1 { font-weight: 800; font-size: clamp(2.4rem, 5.2vw, 4.25rem); line-height: 1.
   .draw .pin { opacity: 0; transform: translateY(-10px); animation: pin .45s cubic-bezier(.3, 1.4, .5, 1) forwards; }
   .draw .pin.a { animation-delay: 2s; } .draw .pin.b { animation-delay: 2.25s; }
 }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 @keyframes draw { to { stroke-dashoffset: 0; } }
 @keyframes show { to { opacity: 1; } }
 @keyframes pin { to { opacity: 1; transform: none; } }
 </style>
 </head>
 <body>
-<div class="sheet">
-<div class="frame">
-
 <header class="top">
   <a class="mark" href="#">SEO Audit</a>
-  <nav aria-label="Sayfa bölümleri"><a href="#p1">Site denetimi</a><a href="#p2">Taşıma projesi</a></nav>
+  <nav aria-label="Sayfa bölümleri"><a href="#denetim">Site denetimi</a><a href="#tasima">Taşıma projesi</a></nav>
 </header>
 
 <main>
-<section class="hero">
+<section class="hero" aria-labelledby="h">
   <div>
-    <h1>Sitenizi ölçün. Taşırken hiçbir sayfayı kaybetmeyin.</h1>
+    <h1 id="h">Sitenizi ölçün. Taşırken hiçbir sayfayı kaybetmeyin.</h1>
     <p class="lead">SEO Audit siteyi tarar ve 88 kuralla denetler. Sorunları işi yapacak ekibe göre gruplar. Site yenilemede eski siteyi yeni site ile karşılaştırır ve 301 listesini hazırlar.</p>
     <div class="cta">
-      <a class="btn main" href="#p1">Nasıl çalıştığını görün</a>
+      <a class="btn main" href="#denetim">Nasıl çalıştığını görün</a>
       <a class="btn" id="appLink" href="" hidden>Uygulamaya girin</a>
     </div>
   </div>
@@ -150,7 +152,7 @@ h1 { font-weight: 800; font-size: clamp(2.4rem, 5.2vw, 4.25rem); line-height: 1.
   </svg>
 </section>
 
-<section class="legend" aria-labelledby="lejant">
+<section class="band legend" aria-labelledby="lejant"><div class="inner">
   <h2 id="lejant">Lejant</h2>
   <dl>
     <div><dt><span class="sym old" aria-hidden="true"></span>Eski site</dt><dd>Araç her sayfayı tarar. Her yönlendirme adımını kaydeder. Sitemap ve robots.txt kurallarını okur.</dd></div>
@@ -158,10 +160,9 @@ h1 { font-weight: 800; font-size: clamp(2.4rem, 5.2vw, 4.25rem); line-height: 1.
     <div><dt><span class="sym issue" aria-hidden="true"></span>Sorun</dt><dd>88 kural: title, meta, H1, kırık link, canonical, hreflang, SSL, HSTS ve daha fazlası.</dd></div>
     <div><dt><span class="sym team" aria-hidden="true"></span>Ekip</dt><dd>Her sorun bir ekibe gider: Frontend, Backend, İçerik veya SEO. Liste doğru kişiye ulaşır.</dd></div>
   </dl>
-</section>
+</div></section>
 
-<div class="sheets">
-<section class="pafta" aria-labelledby="p1">
+<section class="band pafta" id="denetim" aria-labelledby="p1"><div class="inner">
   <figure>
     <img src="img/denetim.webp" width="1600" height="857" loading="lazy" alt="Sorunlar ekranı: sağlık skoru 82, kritik, uyarı ve bilgi filtreleri, ekip filtreleri ve sorun listesi.">
     <figcaption>Sorunlar ekranı. Örnek site: www.kavrulmus.example</figcaption>
@@ -177,9 +178,9 @@ h1 { font-weight: 800; font-size: clamp(2.4rem, 5.2vw, 4.25rem); line-height: 1.
       <li>Excel<small>Bütün sayfalar ve sorunlar tek dosyada</small></li>
     </ul>
   </div>
-</section>
+</div></section>
 
-<section class="pafta flip" aria-labelledby="p2">
+<section class="band pafta flip" id="tasima" aria-labelledby="p2"><div class="inner">
   <figure>
     <img src="img/tasima.webp" width="1600" height="857" loading="lazy" alt="301 haritası ekranı: eski adresler, önerilen yeni adresler, puan ve güven etiketleri, onay düğmeleri.">
     <figcaption>301 haritası. Örnek taşıma: eski site, yeni site ve İngilizce site</figcaption>
@@ -197,25 +198,21 @@ h1 { font-weight: 800; font-size: clamp(2.4rem, 5.2vw, 4.25rem); line-height: 1.
       <li class="later"><span>Canlıya çıkış<small>Sonraki sürüm</small></span></li>
     </ol>
   </div>
-</section>
-</div>
+</div></section>
 
-<section class="end" aria-labelledby="durum">
+<section class="band end" aria-labelledby="durum"><div class="inner">
   <div>
-    <h2 id="durum" style="font-weight:800;font-size:1.25rem;margin:0 0 8px">Durum</h2>
+    <h2 id="durum">Durum</h2>
     <p>Kişisel proje. Geliştirme devam ediyor. Sıradaki işler: canlıya çıkış kontrolü ve canlıda 301 doğrulama. Tarama sunucuda çalışır, taranan veri dışarı gönderilmez.</p>
   </div>
   <table class="antet">
-    <caption class="sr" style="position:absolute;left:-9999px">Proje künyesi</caption>
+    <caption class="sr">Proje künyesi</caption>
     <tr><th scope="row">Proje</th><td>SEO Audit</td></tr>
     <tr><th scope="row">Altyapı</th><td>Node.js, 4 bağımlılık</td></tr>
     <tr><th scope="row">Durum</th><td>Kişisel proje, geliştiriliyor</td></tr>
   </table>
-</section>
+</div></section>
 </main>
-
-</div>
-</div>
 <script>
 // The app link: write the address of the published app here. Empty: the button stays hidden.
 const APP_URL = '';
