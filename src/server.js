@@ -24,15 +24,17 @@ const MAX_JOBS = +(process.env.MAX_JOBS || 2);
 const APP_USER = process.env.APP_USER;
 const APP_PASS = process.env.APP_PASS;
 
-// PUBLIC_MODE=1: the server is open to the internet (Render). Password is required,
-// private addresses are blocked and limits from config/rules.json → yayin apply.
+// PUBLIC_MODE=1: the server is open to the internet (Render). Private addresses are blocked and limits from
+// config/rules.json → yayin apply. v0.8.4 (user decision): the password is optional. Without APP_PASS the server
+// starts open to everyone and writes a warning. With APP_PASS, APP_USER and the minimum length are still required.
 const PUBLIC_MODE = process.env.PUBLIC_MODE === '1';
 const EPHEMERAL = process.env.EPHEMERAL_STORAGE === '1';
 const YAYIN = loadConfig().yayin;
-if (PUBLIC_MODE && (!APP_USER || !APP_PASS || APP_PASS.length < YAYIN.minPassLength)) {
-  console.error(`HATA: PUBLIC_MODE=1 iken APP_USER ve en az ${YAYIN.minPassLength} karakterli APP_PASS gerekli. Sunucu başlamadı.`);
+if (PUBLIC_MODE && APP_PASS && (!APP_USER || APP_PASS.length < YAYIN.minPassLength)) {
+  console.error(`HATA: APP_PASS tanımlı ise APP_USER ve en az ${YAYIN.minPassLength} karakterli APP_PASS gerekli. Sunucu başlamadı.`);
   process.exit(1);
 }
+if (PUBLIC_MODE && !APP_PASS) console.log('UYARI: Yayın modu şifresiz. Herkes projeleri görür, indirir ve siler. Müşteri sitesi taramayın.');
 const JOB_LIMIT = PUBLIC_MODE ? YAYIN.maxJobs : MAX_JOBS;
 const URL_LIMIT = PUBLIC_MODE ? YAYIN.maxUrls : 50000;
 const startGuard = PUBLIC_MODE ? makeGuard() : null;

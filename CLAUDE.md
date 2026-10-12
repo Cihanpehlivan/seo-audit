@@ -64,7 +64,7 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Altyapı | CLAUDE.md, .env.example, GitHub deposu `seo-audit` (Public), Claude depoyu klonlar | Tamam (v0.4.3) |
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
-| Yayın | Render (ücretsiz), SSRF koruması, zorunlu şifre, yayın limitleri | Tamam (v0.5.0) |
+| Yayın | Render (ücretsiz), SSRF koruması, yayın limitleri. Şifre isteğe bağlı, Render şifresiz (v0.8.4) | Tamam (v0.5.0) |
 | Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1). Sırada: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları. Sonra Parça 3: canlıya çıkış kontrolü | Devam ediyor |
 | Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), GitHub Pages veya Netlify | Tamam (v0.8.3), yayın bekliyor |
 | Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
@@ -96,6 +96,10 @@ Gerçek site denemesi (v0.8.0, 11 Ekim 2026, çok dilli taşıma: İngilizce kö
 - Excel onaylanan satırda güven, puan ve nedeni silmişti. Önerinin doğruluğu ölçülemedi.
 - Bölüm kuralı doğru olan eski İngilizce /prosedur/ sayfaları çoğunlukla doğru eşleşti. Dolgu sayfaları genel /procedures sayfasına gitti (daha özel sayfa vardı); kaynağı belli değil.
 v0.8.1 bu dört sorunu düzeltti. Tekrar test bekliyor.
+
+Açık noktalar (v0.8.4):
+- Render şifresiz. Herkes tarama başlatabilir: aynı anda 1 tarama sınırı sizi bekletebilir. Kötüye kullanım görülürse Render → Environment bölümüne APP_USER ve APP_PASS eklemek yeterli (kod değişikliği gerekmez).
+- Silme düğmeleri şifresiz çalışır. Gerekirse sonraki sürüm: yayın modunda silmeyi kapatmak veya şifresiz demo modu.
 
 Açık noktalar (v0.8.1):
 - v0.8.1 gerçek sitede denenmedi. Aynı projede /tr/ satırında uyarı görünmeli. "Bu seçimi kullan" ile Türkçe siteyi seçin. Ek site için canlı alan adını yazın. Sonra haritayı açın ve Excel'deki "Kaynak" ve "Araç önerisi" sütunları ile önerileri ölçün.
@@ -158,6 +162,9 @@ Açık noktalar (Sprint 2'den):
 Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ederiz. Her kalem için: senaryo, beklenen sonuç, gerçek sonuç, bug kaydı. Yöntemi kullanıcı ile birlikte planlarız. Şimdilik sadece bu not var. Plan yapılmadan doğrulamaya başlama.
 
 ## Karar günlüğü
+
+- v0.8.4: Render şifresiz çalışır (kullanıcının son kararı, v0.5.0 ve v0.4.1 kararlarının şifre kısmının yerine geçer). Claude riskleri yazdı ve şifreli kalmayı ve şifresiz demo modunu önerdi; kullanıcı tam kaldırmayı seçti. Kod: yayın modunda APP_PASS yoksa sunucu açılır ve uyarı yazar. APP_PASS tanımlı ise eski kural geçerli (APP_USER ve en az 10 karakter). SSRF koruması ve yayın limitleri (2.000 URL, aynı anda 1 tarama) değişmedi. `render.yaml` artık APP_USER ve APP_PASS istemez.
+- v0.8.4: Şifresiz yayının kuralları: Render'da müşteri sitesi taranmaz, müşteri projesi tutulmaz. Herkes projeleri görür, Excel indirir ve siler. Müşteri işleri yerelde (`npm start`, 127.0.0.1) yapılır.
 
 - v0.8.3: Depo açık kalır (v0.4.3 kararı geçerli). Kullanıcı önce gizli depoyu seçti, sonra vazgeçti. Claude depoyu klonlamaya devam eder. Landing'de "Kodu inceleyin" düğmesi ve GitHub linki var.
 - v0.8.3: Landing page (kullanıcı onayladı). Proje iş listesinden ayrı bir görev, Sprint 3 sırasını değiştirmez. Yer: `docs/index.html`, yayın: GitHub Pages (Settings → Pages → main, /docs) veya Netlify (yayın klasörü `docs`). Uygulamanın içinde değil, çünkü: yayın modunda uygulama şifre ister, Render ücretsiz plan uyur (ilk açılış yavaş), portfolyo linki şifre denemesi çeker. v0.4.1 kararı (sunucuyu herkese açma) korunur.

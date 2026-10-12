@@ -58,10 +58,18 @@ function runServer(env) {
 }
 const dir = await mkdtemp(path.join(os.tmpdir(), 'seo-guard-'));
 
-await check('şifre yoksa yayın modu başlamaz', async () => {
-  const s = runServer({ PUBLIC_MODE: '1', APP_USER: '', APP_PASS: '', PORT: String(await freePort()), CRAWL_DIR: dir });
-  assert.equal(await s.exit, 1);
-  assert.match(s.out(), /APP_PASS/);
+await check('şifre yoksa yayın modu şifresiz başlar ve uyarı yazar (v0.8.4)', async () => {
+  const fp = await freePort();
+  const s = runServer({ PUBLIC_MODE: '1', EPHEMERAL_STORAGE: '1', APP_USER: '', APP_PASS: '', HOST: '127.0.0.1', PORT: String(fp), CRAWL_DIR: dir });
+  let r = null;
+  for (let i = 0; i < 50 && !r; i++) { try { r = await fetch(`http://127.0.0.1:${fp}/`); } catch { await new Promise((ok) => setTimeout(ok, 100)); } }
+  try {
+    assert.equal(r?.status, 200);
+    assert.match(s.out(), /UYARI: Yayın modu şifresiz/);
+    // The other public mode protections stay: private addresses are blocked.
+    const c = await fetch(`http://127.0.0.1:${fp}/api/crawls`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'http://127.0.0.1:1/' }) });
+    assert.equal(c.status, 400);
+  } finally { s.p.kill(); await s.exit; }
 });
 await check('kısa şifre ile yayın modu başlamaz', async () => {
   const s = runServer({ PUBLIC_MODE: '1', APP_USER: 'admin', APP_PASS: 'kisa', PORT: String(await freePort()), CRAWL_DIR: dir });

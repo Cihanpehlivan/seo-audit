@@ -104,13 +104,13 @@ Render kodu GitHub deposundan alır. Her commit sonrası yeni sürümü kendisi 
 
 1. render.com adresinde GitHub hesabınızla giriş yapın.
 2. New → Blueprint seçin. `seo-audit` deposunu seçin.
-3. Render iki değer ister: `APP_USER` ve `APP_PASS`. Şifre en az 10 karakter olmalı. Şifre yoksa veya kısaysa sunucu başlamaz.
+3. Şifre isteğe bağlıdır. Şifresiz yayında herkes projeleri görür, indirir ve siler: Render'da müşteri sitesi taramayın. Şifre isterseniz Render → Environment bölümüne `APP_USER` ve en az 10 karakterli `APP_PASS` ekleyin.
 4. Apply düğmesine basın. Birkaç dakika sonra adres hazır olur: `https://seo-audit-xxxx.onrender.com`.
 
 Yayın modu (`PUBLIC_MODE=1`) şunları yapar:
 
 - İç ağ adreslerini taramaz: `localhost`, `10.x`, `172.16-31.x`, `192.168.x`, `169.254.x` (bulut ayar servisi) ve IPv6 iç adresleri. Buna SSRF koruması denir. Yönlendirmenin her adımı da kontrol edilir.
-- Giriş şifresi zorunludur. `/healthz` adresi şifresizdir ve sadece "ok" döner.
+- Giriş şifresi isteğe bağlıdır (v0.8.4). Şifre yoksa sunucu açılışta uyarı yazar. `/healthz` adresi her zaman şifresizdir ve sadece "ok" döner.
 - Limitler: bir taramada en fazla 2.000 URL, aynı anda 1 tarama. Değerler `config/rules.json` → `yayin` bölümündedir.
 
 Ücretsiz planın sınırları:

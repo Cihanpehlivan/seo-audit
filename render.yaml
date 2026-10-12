@@ -12,7 +12,4 @@ services:
         value: "1"
       - key: EPHEMERAL_STORAGE
         value: "1"
-      - key: APP_USER
-        sync: false
-      - key: APP_PASS
-        sync: false
+    # v0.8.4: no password (user decision). To add one again: APP_USER and APP_PASS (10+ characters) in Render → Environment.
