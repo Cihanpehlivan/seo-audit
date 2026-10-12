@@ -443,6 +443,36 @@ details.q p { position: absolute; z-index: 5; top: 24px; left: -8px; width: 280p
 #matchWarn .warn { margin: 0 0 10px; }
 .cmp-bar .ok2, .cmp-tiles .ok2 { --c: #6E9C7E; }
 
+/* ---------- Step 5: work list by place (v0.9.0) ---------- */
+.places { display: grid; gap: 10px; margin-bottom: 28px; }
+.place { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+.place header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.place header .ptitle { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.place header .ptitle b { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.place header .role { color: var(--graphite); display: inline-flex; align-items: center; gap: 6px; }
+.place header .team { margin-left: auto; }
+.place .note { margin: 8px 0 0; color: var(--graphite); }
+.ptasks { list-style: none; margin: 10px 0 0; padding: 0; }
+.ptasks li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid #30353A; font-size: 14px; color: var(--graphite); }
+.ptasks li > span { display: inline-flex; align-items: center; gap: 6px; }
+.ptasks li b { color: var(--ink); font-weight: 600; }
+.ptasks li.dim, .ptasks li.dim b { color: var(--stone); }
+.pact { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.pact a.ghost { text-decoration: none; }
+.plist { margin-top: 12px; }
+.plist .table-wrap { max-height: 420px; overflow: auto; }
+.plist td { font-size: 13px; vertical-align: top; }
+.plist td.u { min-width: 150px; overflow-wrap: anywhere; }
+.ready-warn { background: var(--amber-soft); border: 1px solid #5C4A26; border-radius: 8px; padding: 12px 16px; margin: 0 0 12px; }
+.ready-warn p { margin: 0 0 4px; color: #F2D29A; }
+.ready-warn .rw-h { color: #F2D29A; margin: 0 0 4px; }
+.ready-warn .rw-h details.q { vertical-align: middle; margin-left: 4px; }
+.ready-warn p.small { color: #E6CFA3; }
+.ready-warn .pact { margin-top: 10px; }
+.all-pages { border-top: 1px solid var(--line); padding-top: 14px; }
+.all-pages > summary { cursor: pointer; font-size: 16px; font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 14px; }
+.all-pages > summary .small { font-weight: 400; color: var(--graphite); }
+
 @media (max-width: 1000px) {
   .below { grid-template-columns: 1fr; gap: 48px; }
 }
@@ -494,5 +524,11 @@ details.q p { position: absolute; z-index: 5; top: 24px; left: -8px; width: 280p
   .mrow-act { grid-column: 2; grid-row: 1; align-self: start; }
   .pg-to { grid-column: 1 / -1; }
   details.q p { width: 240px; }
+  .place header .team { margin-left: 0; }
+  .place header .ptitle { flex: 1 1 100%; }
+  .place, .ready-warn { position: relative; }
+  .place details.q, .ready-warn details.q { position: static; }
+  .place details.q p, .ready-warn details.q p { left: 12px; right: 12px; width: auto; top: auto; margin-top: 6px; }
+  .pact .ghost { flex: 1 1 auto; text-align: center; }
 }
 .mrow button:disabled { opacity: .45; cursor: default; }

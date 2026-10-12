@@ -11,7 +11,8 @@ import { buildRedirectMap, mapCsv } from './redirectmap.js';
 import { Store, ID_RE } from './store.js';
 import { normalizeUrl } from './normalize.js';
 import { runAudit, loadConfig, RULES, CATEGORIES } from './rules/index.js';
-import { isBroken } from './rules/helpers.js';
+import { isBroken, isOk } from './rules/helpers.js';
+import { buildTodo } from './todo.js';
 import os from 'node:os';
 import { makeGuard } from './netguard.js';
 import { readFileSync } from 'node:fs';
@@ -209,7 +210,10 @@ async function projectMatch(p) {
   });
   const map = buildRedirectMap(cmp, oldRes, mapSites, p.map || {}, loadConfig().redirectMap);
   map.noLive = mapSites.filter((s) => !s.liveOrigin).map((s) => s.key);
-  return { cmp, sections, targets: targets.map((s) => s.key), status, map };
+  // Work list by place (v0.9.0). A thin site (few pages) is "not ready" until the user accepts its crawl.
+  const todo = buildTodo({ cmp, map, sections, oldHost: oldRes.meta.host, readyOk: p.readyOk || {}, cfg: loadConfig().todo || {},
+    sites: targets.map((s, i) => ({ key: s.key, role: s.role, name: s.name, host: newList[i].meta.host, okPages: newList[i].pages.filter(isOk).length, crawlId: status[s.key].crawlId })) });
+  return { cmp, sections, targets: targets.map((s) => s.key), status, map, todo };
 }
 
 async function startJob(body) {
@@ -384,11 +388,11 @@ const server = http.createServer(async (req, res) => {
         try { m = await projectMatch(await projects.get(pid)); }
         catch (e) { if (e.code === 409) return send(res, 409, { error: e.message, need: e.need }); throw e; }
         if (action === 'match') {
-          const { cmp, sections, targets, status, map } = m;
-          return send(res, 200, { ...cmp, sections, targetSites: targets, status, map });
+          const { cmp, sections, targets, status, map, todo } = m;
+          return send(res, 200, { ...cmp, sections, targetSites: targets, status, map, todo });
         }
         const tmp = path.join(os.tmpdir(), `prj-${Date.now()}.xlsx`);
-        await exportCompareExcel(m.cmp, tmp, { map: m.map });
+        await exportCompareExcel(m.cmp, tmp, { map: m.map, todo: m.todo });
         res.writeHead(200, {
           'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'content-disposition': `attachment; filename="tasima-${m.cmp.old.host}.xlsx"`,
@@ -417,6 +421,19 @@ const server = http.createServer(async (req, res) => {
         if (u.searchParams.get('format') !== 'csv') return send(res, 200, m.map);
         res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="301-haritasi-${m.cmp.old.host}.csv"` });
         return res.end(mapCsv(m.map));
+      }
+      // v0.9.0: POST /ready { site, ok } accepts a thin site as ready (for its current crawl) or takes it back.
+      if (action === 'ready' && req.method === 'POST') {
+        const body = await readJson(req);
+        const key = String(body?.site || '');
+        const p = await projects.update(pid, (old) => {
+          const s = old.sites.find((x) => x.key === key && x.role !== 'old');
+          if (!s?.crawlId) throw Object.assign(new Error('Site taranmadı veya projede yok.'), { code: 400 });
+          const readyOk = { ...(old.readyOk || {}) };
+          if (body.ok) readyOk[key] = s.crawlId; else delete readyOk[key];
+          return { ...old, readyOk };
+        });
+        return send(res, 200, { ok: true, readyOk: p.readyOk });
       }
       if (action === 'export' && req.method === 'GET') {
         const p = await projects.get(pid);

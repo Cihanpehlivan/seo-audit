@@ -231,8 +231,11 @@
       <div id="stepYapilacaklar" class="step-pane" hidden>
         <p class="muted" id="todoBusy" hidden>Eşleştiriliyor…</p>
         <p class="err" id="todoErr" role="alert"></p>
+        <div id="todoReady"></div>
+        <div id="todoPlaces" class="places"></div>
         <div id="cmpResult" hidden>
-        <h2 class="sub-h">Bütün sayfalar</h2>
+        <details class="all-pages" id="allPages">
+        <summary>Bütün sayfalar <span class="small">Aynı kaldı, Yönleniyor, Kayboldu ve diğer gruplar</span></summary>
         <div class="cmp-head">
           <p class="cmp-kept"><b id="cmpKept"></b><span id="cmpKeptText"></span></p>
           <a class="ghost small" id="cmpExcel" href="#">Excel indir</a>
@@ -258,6 +261,7 @@
         </details>
         <div class="tools"><label class="sr" for="cmpQ">Ara</label><input id="cmpQ" type="search" placeholder="Yol veya title ara" autocomplete="off"><span class="muted" id="cmpCount"></span></div>
         <div class="table-wrap"><table id="cmpTable"></table></div>
+        </details>
         </div>
       </div>
     </section>

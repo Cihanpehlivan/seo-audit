@@ -638,6 +638,13 @@ function nextTask() {
   // v0.8.1: a probably wrong section decision comes first. The 301 map depends on it.
   const bad = prj.match.sections.find((x) => x.alert);
   if (bad && prj.step !== 'harita') return { text: `${sectionName(bad)} bölümünün kararı yanlış olabilir. ${alertShort(bad)} Bölümü açın ve önerilen seçimi kullanın.`, btn: 'Bölümü gösterin', act: { step: 'eslestirme', focusSection: bad.from } };
+  // v0.9.0: a thin new site (content not entered yet) makes its tasks unreal. Recrawl first, or accept the site.
+  const thin = prj.match.todo?.places.find((x) => x.ready?.state === 'thin');
+  if (thin) {
+    const ts = siteByKey(thin.site);
+    return { text: `${siteName(ts)} hazır değil gibi görünüyor. Bu sitenin işleri şimdilik ölçülemez. İçerik girişi bitince tekrar tarayın.`,
+      btn: `${siteName(ts, true)} tekrar tara`, act: { crawl: thin.site } };
+  }
   const dec = prj.match.sections.filter((x) => x.needsDecision);
   if (dec.length && prj.step === 'eslestirme') {
     const what = dec.every((x) => !x.found) ? 'sayfalar' : 'sayfaların çoğu';
@@ -646,6 +653,15 @@ function nextTask() {
   }
   // 301 map (v0.8.0): suggestions wait for approval, pages without a suggestion wait for a choice.
   const mp = prj.match.map?.summary;
+  // v0.9.0: on Yapılacaklar the card follows the work list. Pages with a missing target are site work there, not decisions.
+  if (prj.step === 'yapilacaklar' && prj.match.todo) {
+    const t = prj.match.todo;
+    if (!t.total) return { text: 'Bütün sayfalar yerinde. Yapılacak iş yok.', btn: 'Excel indir', act: { excel: true } };
+    const open = t.items.filter((i) => i.task === 'map' && !i.held).length;
+    if (open) return { text: `${t.total} iş var. ${open} sayfa 301 haritasında karar bekliyor. Karar verince iş doğru yere gider.`, btn: 'Haritayı açın', act: { step: 'harita' } };
+    const top = [...t.places].sort((a, b) => b.n - a.n)[0];
+    return { text: `${t.total} iş var. En çok iş: ${top.title} (${top.n}). Excel her işi yeri ve ekibi ile verir.`, btn: 'Excel indir', act: { excel: true } };
+  }
   if (mp && (mp.pending || mp.none)) {
     const noneText = mp.none ? ` ${mp.none} sayfa için öneri yok: adresi siz seçin.` : '';
     if (prj.step !== 'harita') return { text: `Eşleştirme tamam. ${mp.pending + mp.none} sayfa için yeni adres gerekli. Araç ${mp.pending} sayfa için öneri buldu.`, btn: 'Haritayı açın', act: { step: 'harita' } };
@@ -659,13 +675,13 @@ function nextTask() {
   }
   const n = workCount();
   if (!n) return { text: 'Bütün sayfalar yerinde. Yapılacak iş yok.', btn: 'Excel indir', act: { excel: true } };
-  if (prj.step !== 'yapilacaklar') return { text: `Eşleştirme tamam. ${n} sayfada iş var.`, btn: 'Yapılacakları açın', act: { step: 'yapilacaklar' } };
-  const s = prj.match.summary;
-  const heirWork = (s.no301 || 0) + s.lost + (s.redirectFix || 0) + (s.removed || 0);
-  return { text: `${n} sayfada iş var.${heirWork >= n / 2 ? ' En çok iş eski alan adına geçecek sitede: 301 yönlendirmeleri.' : ''}`, btn: 'Excel indir', act: { excel: true } };
+  if (prj.step !== 'yapilacaklar') return { text: `Eşleştirme tamam. ${n} iş var.`, btn: 'Yapılacakları açın', act: { step: 'yapilacaklar' } };
+  const top = [...(prj.match.todo?.places || [])].sort((a, b) => b.n - a.n)[0];
+  return { text: `${n} iş var.${top?.n ? ` En çok iş: ${top.title} (${top.n}).` : ''} Excel her işi yeri ve ekibi ile verir.`, btn: 'Excel indir', act: { excel: true } };
 }
 // Pages that need work: missing pages, missing or wrong 301s, content loss, decisions.
 function workCount() {
+  if (prj.match?.todo) return prj.match.todo.total; // v0.9.0: the work list by place
   const s = prj.match?.summary;
   if (!s) return 0;
   return s.lost + (s.no301 || 0) + (s.notarget || 0) + (s.redirectFix || 0) + (s.moveFix || 0) + s.contentLost - (prj.match.rows.moved || []).filter((r) => r.lostCount).length + (s.removed || 0) + s.unknown + s.unlinked;
@@ -1183,7 +1199,104 @@ $('#mapRows').addEventListener('click', (e) => {
   saveMap({ [r.path]: d }, '');
 });
 
-// ---------- Step 5: Yapılacaklar (all pages view; the work list by place comes next) ----------
+// ---------- Step 5: Yapılacaklar (v0.9.0): work list by place ----------
+// One card per place: the old domain's server, each new site, content, decisions. Every term has a "?" text.
+// All help texts live here, so the same term has the same text on every screen.
+const TERMS = {
+  server: 'Canlıdan sonra eski alan adını kullanan sunucu. Eski adreslerin bütün 301 ve 410 yanıtları burada kurulur. Ayrı alan adına taşınan sayfaların 301\'i de buradadır.',
+  heir: HELP.heir,
+  extra: HELP.extra,
+  content: 'Eski sayfada olan title, meta açıklama veya H1 yeni sayfada boş. Ya da yeni sayfaya noindex eklendi. Sayfa sıralama kaybedebilir.',
+  decide: 'Bu işler sizin kararınızı bekler. Karar verince iş doğru yere gider: 301 listesine veya bir sitenin listesine.',
+  notReady: 'Bu sitede, ona giden eski sayfalardan çok daha az sayfa var. İçerik girişi bitmemiş olabilir. Bu yüzden sitenin işleri şimdilik sayılmaz. Site gerçekten bu kadar küçükse uyarıyı kapatın.',
+  '301': 'Kalıcı yönlendirme. Eski adres yeni adrese gider. Google sıralamayı yeni adrese taşır. Liste "301 listesini indir" ile CSV olarak iner.',
+  fix: 'Yönlendirme var ama doğru değil. Zincir: eski adres birden çok adımda gider, tek adım yapın. 302: geçici yönlendirmedir, 301 kullanın.',
+  '410': 'Sayfa kalıcı olarak kaldırıldı. Google sayfayı dizinden 404\'ten daha hızlı çıkarır. Karşılığı olmayan sayfa için kullanın.',
+  create: 'Eski sayfanın hedef sayfası yeni sitede yok. Sayfayı oluşturun veya 301 haritasında başka sayfa seçin.',
+  link: 'Sayfa açılıyor ama menüde veya içerikte linki yok. Kullanıcı ve Google sayfayı zor bulur.',
+  map: 'Eski sayfa için yeni adres gerekli. Araç öneri buldu ve onay bekliyor, veya öneri bulamadı. Kararı 301 haritasında verin.',
+  section: 'Bölümün kararı sayfaların diline veya bulunan sayfa sayısına uymuyor. Eşleştirme ekranında önerilen seçimi kullanın.',
+  unknown: 'Araç adresi kontrol edemedi. Neden: staging şifresi, robots.txt engeli veya bağlantı hatası. Satırda çözüm yazılı.',
+  held: 'Site hazır olmadığı için bu işler sayılmaz. Site hazır olunca tekrar tarayın.',
+};
+const todoState = { open: null };
+const placeSite = (p) => (p.kind === 'site' ? siteByKey(p.site) : null);
+function renderReady() {
+  const t = prj.match?.todo;
+  const thin = (t?.places || []).filter((p) => p.ready?.state === 'thin');
+  $('#todoReady').innerHTML = thin.map((p) => `<div class="ready-warn" role="status">
+    <div class="rw-h"><b>${esc(siteName(placeSite(p)) || p.title)} (${esc(p.title)}) hazır değil gibi görünüyor.</b> ${help(TERMS.notReady)}</div>
+    <p class="small">Bu siteye ${p.ready.oldPages} eski sayfa gidiyor. Taramada ${p.ready.newPages} sayfa var. İçerik girişi bitince siteyi tekrar tarayın.</p>
+    <div class="pact"><button type="button" class="ghost small strong" data-recrawl="${esc(p.site)}">Tekrar tara</button>
+    <button type="button" class="ghost small" data-ready="${esc(p.site)}" data-ok="1">Site hazır, uyarıyı kapat</button></div></div>`).join('');
+}
+function renderPlaces() {
+  const t = prj.match?.todo;
+  if (!t) { $('#todoPlaces').innerHTML = ''; return; }
+  const mp = prj.match.map?.summary;
+  const csvRows = mp ? mp.rule + mp.approved + mp.gone : 0;
+  $('#todoPlaces').innerHTML = t.places.map((p) => {
+    const s = placeSite(p);
+    const thin = p.ready?.state === 'thin';
+    const role = p.kind === 'site' ? (p.role === 'heir' ? `${ROLE.heir} ${help(TERMS.heir)}` : `${esc(siteName(s) || p.name || 'Ek site')} ${help(TERMS.extra)}`) : '';
+    const tip = { server: TERMS.server, content: TERMS.content, decide: TERMS.decide }[p.kind];
+    const state = thin ? '<span class="tag-s idle">Hazır değil · ölçülmedi</span>'
+      : p.n ? `<span class="tag-s warn">${p.n} iş</span>` : '<span class="tag-s ok">Sorun yok</span>';
+    const lines = thin
+      ? `<li class="dim"><span>Bekleyen iş ${help(TERMS.held)}</span><b>${p.held}</b></li>`
+      : p.tasks.map((x) => `<li><span>${esc(x.label)} ${TERMS[x.kind] ? help(TERMS[x.kind]) : ''}</span><b>${x.n}</b></li>`).join('');
+    const listN = thin ? p.held : p.n;
+    const btns = [
+      listN ? `<button type="button" class="ghost small" data-open="${esc(p.key)}" aria-expanded="${todoState.open === p.key}">${todoState.open === p.key ? 'Listeyi kapat' : 'Listeyi aç'}</button>` : '',
+      p.kind === 'server' && csvRows ? '<a class="ghost small" href="/api/projects/' + esc(prj.id) + '/map?format=csv">301 listesini indir (CSV)</a>' : '',
+      p.kind === 'decide' && p.tasks.some((x) => x.kind === 'map') ? '<button type="button" class="ghost small" data-goto="harita">Haritaya git</button>' : '',
+      p.kind === 'decide' && p.tasks.some((x) => x.kind === 'section') ? '<button type="button" class="ghost small" data-goto="eslestirme">Eşleştirmeye git</button>' : '',
+      p.ready?.state === 'accepted' ? `<button type="button" class="ghost small" data-ready="${esc(p.site)}" data-ok="0">Hazırlık uyarısını geri aç</button>` : '',
+    ].filter(Boolean).join('');
+    return `<section class="place${thin ? ' thin' : ''}" data-place="${esc(p.key)}">
+      <header><span class="ptitle"><b>${esc(p.title)}</b>${tip ? help(tip) : ''}</span>${role ? `<span class="small role">${role}</span>` : ''}
+        <span class="tag-s idle team">${esc(p.team)}</span>${state}</header>
+      ${p.ready?.state === 'accepted' ? '<p class="small note">Bu tarama hazır sayıldı.</p>' : ''}
+      ${lines ? `<ul class="ptasks">${lines}</ul>` : ''}
+      ${btns ? `<div class="pact">${btns}</div>` : ''}
+      ${todoState.open === p.key ? placeList(p, t) : ''}</section>`;
+  }).join('');
+}
+function placeList(p, t) {
+  const thin = p.ready?.state === 'thin';
+  const list = t.items.filter((i) => (thin ? i.held && i.site === p.site : i.placeKey === p.key && !i.held));
+  const max = t.listLimit || 200;
+  const shown = list.slice(0, max);
+  const head = list.length > max ? `<p class="small">${list.length} iş var. İlk ${max} satır görünüyor. Bütün liste Excel'de.</p>` : '';
+  return `<div class="plist">${head}<div class="table-wrap"><table><thead><tr><th>İş</th><th>Eski adres</th><th>Yeni adres</th><th>Not</th></tr></thead><tbody>${
+    shown.map((i) => `<tr><td>${esc(i.label)}</td><td class="u">${cmpLink(i.oldUrl, i.path)}</td><td class="u">${i.newUrl ? cmpLink(i.newUrl) : '<span class="small">—</span>'}</td><td>${esc(i.note)}</td></tr>`).join('')
+  }</tbody></table></div></div>`;
+}
+$('#todoPlaces').addEventListener('click', (e) => {
+  const o = e.target.closest('[data-open]');
+  if (o) { todoState.open = todoState.open === o.dataset.open ? null : o.dataset.open; renderPlaces(); return; }
+  const g = e.target.closest('[data-goto]');
+  if (g) { goStep(g.dataset.goto); return; }
+  const r = e.target.closest('[data-ready]');
+  if (r) setReady(r.dataset.ready, r.dataset.ok === '1', r);
+});
+$('#todoReady').addEventListener('click', (e) => {
+  const c = e.target.closest('[data-recrawl]');
+  if (c) { c.disabled = true; goStep('tarama'); startSiteCrawl(c.dataset.recrawl); return; }
+  const r = e.target.closest('[data-ready]');
+  if (r) setReady(r.dataset.ready, r.dataset.ok === '1', r);
+});
+async function setReady(site, ok, btn) {
+  btn.disabled = true;
+  try {
+    await api(`/api/projects/${prj.id}/ready`, { method: 'POST', body: JSON.stringify({ site, ok }) });
+    Object.assign(prj, await api(`/api/projects/${prj.id}`));
+    prj.matchKey = '';
+    await loadMatch();
+  } catch (err) { $('#todoErr').textContent = err.message; btn.disabled = false; }
+}
+
+// ---------- All pages view (groups of the comparison) ----------
 const CMP_KINDS = [
   { k: 'same', label: 'Aynı kaldı', cls: 'ok' },
   { k: 'changed', label: 'İçerik değişti', cls: 'warning' },
@@ -1204,6 +1317,8 @@ function renderTodo() {
   $('#todoErr').textContent = !prj.loading && prj.matchErr ? prj.matchErr : '';
   const d = prj.match;
   $('#cmpResult').hidden = !d;
+  renderReady();
+  renderPlaces();
   if (!d) return;
   const s = d.summary;
   if (!cmpState.data || cmpState.data !== d) {

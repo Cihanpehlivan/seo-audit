@@ -185,6 +185,30 @@ await check('301 haritası: CSV sadece son listeyi verir', async () => {
   assert.ok(lines.includes(`${OLD}fr/x,${OLD}about,301,Elle`));
   assert.ok(lines.includes(`${OLD}fr/y,,410,Onay`));
 });
+await check('yapılacaklar: işler yere göre gelir, site hazır sayılabilir, Excel sayfası var', async () => {
+  const d = (await api(`/api/projects/${pid}/match`)).data;
+  const keys = d.todo.places.map((p) => p.key);
+  assert.deepEqual(keys, ['server', 'site:heir', 'site:tr', 'content', 'decide']);
+  assert.equal(d.todo.places[0].title, '127.0.0.1 sunucusu');
+  assert.equal(d.todo.total, d.todo.places.reduce((a, p) => a + p.n, 0));
+  assert.equal(d.todo.places[0].tasks.find((t) => t.kind === '410')?.n, 1); // /fr/y kararı
+  assert.ok(d.todo.items.every((i) => i.placeKey && i.label));
+  assert.equal((await api(`/api/projects/${pid}/ready`, { method: 'POST', body: { site: 'old', ok: true } })).status, 400);
+  const r = await api(`/api/projects/${pid}/ready`, { method: 'POST', body: { site: 'tr', ok: true } });
+  assert.deepEqual([r.status, r.data.readyOk.tr], [200, 'tr-kayit']);
+  const p = (await api(`/api/projects/${pid}`)).data.project;
+  await api(`/api/projects/${pid}`, { method: 'PUT', body: p }); // PUT keeps the accepted site
+  assert.equal((await api(`/api/projects/${pid}`)).data.project.readyOk.tr, 'tr-kayit');
+  await api(`/api/projects/${pid}/ready`, { method: 'POST', body: { site: 'tr', ok: false } });
+  assert.deepEqual((await api(`/api/projects/${pid}`)).data.project.readyOk, {});
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await (await fetch(`${base}/api/projects/${pid}/excel`)).arrayBuffer()));
+  const ws = wb.getWorksheet('Yapılacaklar');
+  assert.ok(ws, 'Yapılacaklar sayfası yok');
+  assert.deepEqual(ws.getRow(1).values.slice(1, 4), ['Yer', 'Ekip', 'İş']);
+  assert.equal(ws.rowCount - 1, d.todo.items.length);
+});
 await check('API: Excel ve proje dosyası iner', async () => {
   const x = await fetch(`${base}/api/projects/${pid}/excel`);
   assert.equal(x.status, 200); assert.match(x.headers.get('content-type'), /spreadsheet/);

@@ -170,7 +170,7 @@ function siteRows(ck) {
 }
 
 // Comparison of two crawls (old site vs new site) as an Excel file.
-export async function exportCompareExcel(cmp, file, { map } = {}) {
+export async function exportCompareExcel(cmp, file, { map, todo } = {}) {
   const wb = new ExcelJS.Workbook();
   const s = cmp.summary;
   const targets = cmp.targets || [cmp.new];
@@ -197,6 +197,19 @@ export async function exportCompareExcel(cmp, file, { map } = {}) {
     { k: 'Korunan sayfa oranı', v: `%${s.kept}` },
     ...cmp.warnings.map((w) => ({ k: 'Uyarı', v: w })),
   ]);
+  // v0.9.0: work list by place. One row per task. Filter by "Yer" or "Ekip" and give each team its rows.
+  if (todo?.items.length) {
+    const place = new Map(todo.places.map((p) => [p.key, p]));
+    const where = (p) => (p.kind === 'site' ? `${p.title} (${p.role === 'heir' ? 'eski alan adına geçecek site' : p.name || 'ek site'})` : p.title);
+    sheet(wb, 'Yapılacaklar', [
+      { header: 'Yer', key: 'where', width: 40 }, { header: 'Ekip', key: 'team', width: 10 }, { header: 'İş', key: 'label', width: 36 },
+      { header: 'Eski URL', key: 'oldUrl', width: 60 }, { header: 'Yeni URL', key: 'newUrl', width: 60 }, { header: 'Not', key: 'note', width: 70 },
+      { header: 'Durum', key: 'state', width: 34 },
+    ], todo.items.map((it) => {
+      const p = place.get(it.placeKey);
+      return { ...it, where: p ? where(p) : '', team: p?.team || '', state: it.held ? 'Bekliyor: site hazır değil gibi görünüyor' : '' };
+    }));
+  }
   const yn = (b) => (b ? 'Evet' : 'Hayır');
   const ctx = [
     { header: 'Kural', key: 'rule', width: 34 }, { header: 'Kontrol edilen URL', key: 'checkUrl', width: 60 },

@@ -161,6 +161,7 @@ function resolveMove(row, t, h, accept) {
   const changes = t.changes || [];
   const lostOnes = changes.filter((c) => c.kind === 'lost');
   Object.assign(out, { newTitle: t.title || '', changes, lostCount: lostOnes.length });
+  if (t.unlinked) out.targetUnlinked = true; // v0.9.0: the work list asks for a link on the target site
   const extra = [t.unlinked ? 'Hedef sayfaya yeni sitede link verin.' : '', ...lostOnes.map((c) => FIX[c.field])].filter(Boolean);
   const install = MOVE_TODO(row.path, row.expectUrl);
   if (!h || h.kind === 'unknown') {

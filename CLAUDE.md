@@ -22,6 +22,7 @@ bin/crawl.js            CLI
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
 src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu (v0.7.1: her bölümün sayfa listesi). Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0)
 src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma), 301 haritası kararlarının temizliği
+src/todo.js             Yapılacaklar (v0.9.0): işleri yere göre gruplar (eski alan adı sunucusu, her yeni site, İçerik, Karar bekleyen), site hazırlık kontrolü
 src/redirectmap.js      301 haritası (v0.8.0): bulunamayan eski sayfaya yeni sayfa önerisi (slug, title, H1, içerik; IDF ağırlığı), güven, kullanıcı kararları, CSV. v0.8.1: dil filtresi (html lang), eski ana sayfaya ana sayfa önerisi
 src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
 src/checks.js           Ek kontroller (tarama sonrası): site sürümleri, SSL, HSTS, llms.txt, dış link, görsel
@@ -37,6 +38,7 @@ src/store.js            Dosya tabanlı kayıt
 src/server.js           Web sunucusu + API (/api/crawls, /api/projects, /api/compare, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur
                         /api/projects/:id/map → GET (harita, ?format=csv son liste), POST { set: { "/eski/yol": karar | null } }
                         /api/projects/:id → crawl (POST), match, excel, export. GET/PUT/DELETE tanım
+                        /api/projects/:id/ready → POST { site, ok } (v0.9.0): hazır görünmeyen siteyi bu tarama için hazır say
 render.yaml             Render Blueprint (ücretsiz plan, Docker)
 docs/                   Landing page (v0.8.3): docs/index.html + docs/img/. GitHub Pages (main, /docs) veya Netlify ile yayınlanır. Uygulamadan bağımsız, tarama yapmaz
 public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page (Site denetimi / Taşıma projesi). Proje ekranı: adım çubuğu + Sıradaki iş kartı
@@ -65,13 +67,13 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, yayın limitleri. Şifre isteğe bağlı, Render şifresiz (v0.8.4) | Tamam (v0.5.0) |
-| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1). Sırada: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları. Sonra Parça 3: canlıya çıkış kontrolü | Devam ediyor |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1), yapılacaklar listesi (yere göre), site hazırlık uyarısı ve kavram açıklamaları (v0.9.0). Sırada: Parça 3 canlıya çıkış kontrolü | Devam ediyor |
 | Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), GitHub Pages veya Netlify | Tamam (v0.8.3), yayın bekliyor |
 | Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 17, proje 17 kontrol (toplam yaklaşık 12 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 7, proje 18 kontrol (toplam yaklaşık 12 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
 - Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
@@ -97,6 +99,13 @@ Gerçek site denemesi (v0.8.0, 11 Ekim 2026, çok dilli taşıma: İngilizce kö
 - Bölüm kuralı doğru olan eski İngilizce /prosedur/ sayfaları çoğunlukla doğru eşleşti. Dolgu sayfaları genel /procedures sayfasına gitti (daha özel sayfa vardı); kaynağı belli değil.
 v0.8.1 bu dört sorunu düzeltti. Tekrar test bekliyor.
 
+Açık noktalar (v0.9.0):
+- Yapılacaklar listesi gerçek sitede denenmedi. Şamil Şahin projesinde Yapılacaklar adımını açın. Sayıları 301 haritası ve Excel ile karşılaştırın. Türkçe site az sayfalı ise uyarı görünmeli.
+- Hazırlık eşiği `rules.json` → `todo` (oran 0.3, en az 10 eski sayfa). Sayfaları birleştiren gerçek bir küçük site de uyarı alabilir. Bu durumda kullanıcı uyarıyı kapatır. Yanlış alarm sık olursa oranı düşürün.
+- Hazırlık kabulü projede `readyOk` alanında durur (site anahtarı → tarama kimliği). "Projeyi indir" bu alanı taşımaz.
+- Karar bekleyen sayısı 301 haritasının sayısından küçük olabilir: hedefi olmayan sayfa (kural hedefi yok) Yapılacaklar'da sitenin "Sayfa oluşturun" işidir, haritada ise karar bekler. Kullanıcı haritada başka sayfa seçerse iş sunucunun 301 listesine geçer.
+- Sunucu kuralı biçimleri (.htaccess, nginx, Shopify CSV) hâlâ yok. CSV tek biçimdir.
+
 Açık noktalar (v0.8.4):
 - Render şifresiz. Herkes tarama başlatabilir: aynı anda 1 tarama sınırı sizi bekletebilir. Kötüye kullanım görülürse Render → Environment bölümüne APP_USER ve APP_PASS eklemek yeterli (kod değişikliği gerekmez).
 - Silme düğmeleri şifresiz çalışır. Gerekirse sonraki sürüm: yayın modunda silmeyi kapatmak veya şifresiz demo modu.
@@ -116,7 +125,7 @@ Açık noktalar (v0.8.0):
 
 Açık noktalar (v0.7.1):
 - v0.7.1 gerçek sitede denenmedi. Şamil Şahin projesinde eşleştirmeyi tekrar açın. `/prosedur/` ve `/fr/` "Bulunamadı" demeli, "Bölüm kaldırıldı" önermemeli. Satırları açın ve sayfa listesini kontrol edin.
-- Yapılacaklar adımı şimdilik grup görünümünü ("Bütün sayfalar") gösterir. İşin yapıldığı yere göre liste v0.8.0'dan sonra gelir.
+- Yapılacaklar adımı şimdilik grup görünümünü ("Bütün sayfalar") gösterir. İşin yapıldığı yere göre liste v0.8.0'dan sonra gelir. (v0.9.0 ile tamam.)
 - İstekler staging şifresini göndermez. Şifreli geçecek sitede 301 kontrolü "Kontrol edilemedi" olur.
 - Otomatik öneri kaydedilmez. Tarama değişirse öneri de değişebilir. Kullanıcı seçerse kural olur.
 
@@ -162,6 +171,17 @@ Açık noktalar (Sprint 2'den):
 Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ederiz. Her kalem için: senaryo, beklenen sonuç, gerçek sonuç, bug kaydı. Yöntemi kullanıcı ile birlikte planlarız. Şimdilik sadece bu not var. Plan yapılmadan doğrulamaya başlama.
 
 ## Karar günlüğü
+
+- v0.9.0: Yapılacaklar ekranı (kullanıcı sohbette taslağı onayladı). Her yer bir karttır: başlık + "?", ekip etiketi (Backend, CMS, İçerik, Siz), iş sayısı, iş satırları, "Listeyi aç". Sıra: eski alan adı sunucusu, geçecek site, ek siteler, İçerik, Karar bekleyen. Eski grup görünümü kapalı "Bütün sayfalar" bölümünde kalır.
+- v0.9.0: CLAUDE.md'deki v0.7.0 tasarımından fark: geçecek site de ayrı satırdır (tasarım "her ek site" diyordu). Neden: "Sayfa oluşturun" işi geçecek sitede de olur.
+- v0.9.0: İşlerin yeri. Sunucu: 301 haritasının son listesinde (CSV ile aynı) olup çalışmayan 301'ler (kural satırı kurulu değilse, onaylı satır), zincir veya 302 olan yönlendirmeler (hedefi kırık olan haritadadır), 410 kararları. Yeni site: kural hedefi olmayan sayfa (haritada karar yoksa), haritada seçilen ama taramada olmayan hedef, linksiz sayfa, linksiz taşınan hedef. İçerik: her kayıp alan bir iştir. Karar bekleyen: haritada onay bekleyen veya önerisiz satır (sayfa oluşturma işi olanlar hariç, iki kere sayılmaz), bölüm uyarısı, kontrol edilemeyen sayfa. Her iş bir siteye bağlıdır (beklenen site).
+- v0.9.0: Site hazırlık kontrolü (kullanıcının fikri, onaylandı). Ölçü: sitenin taramadaki 200 veren HTML sayfa sayısı < o siteye giden eski sayfa sayısı × `todo.notReadyRatio` (0.3), en az `notReadyMinOld` (10) eski sayfa ile. "Bulunan sayfa oranı" kullanılmadı: slug değişince hazır site de düşük oran verir. Kaldırılan bölümün sayfaları hiçbir siteye sayılmaz. Hazır görünmeyen sitenin işleri bekler: sayılmaz, site kartında soluk "Bekleyen iş" olarak durur, Excel'de "Bekliyor" yazar. Sunucu işleri beklemez. Liste gizlenmez.
+- v0.9.0: Kullanıcı "Site hazır, uyarıyı kapat" ile siteyi hazır sayar. Kabul tarama kimliğine bağlıdır (`project.readyOk`): yeni tarama kabulü düşürür. "Hazırlık uyarısını geri aç" kabulü siler. Proje `PUT` kabulü silmez.
+- v0.9.0: Hazırlık kontrolüne girmeyenler: taranmamış site (Sıradaki iş kartı zaten söyler), şifreli staging (Karar bekleyen → Kontrol edilemedi), staging'de noindex veya Disallow (staging için normal, Parça 3'te kontrol edilir).
+- v0.9.0: Sıradaki iş kartı: hazır görünmeyen site, bölüm uyarısından sonra ve 301 haritasından önce gelir ("Türkçe tekrar tara"). Yapılacaklar adımında kart listeyi izler: haritada karar varsa "Haritayı açın", yoksa en çok işi olan yer ve "Excel indir".
+- v0.9.0: Kavram açıklamaları tek sözlükte durur (`public/app.js` → `TERMS`). Her terim her ekranda aynı metni gösterir. Mobilde açıklama kutusu kartın genişliğini alır (taşma yok).
+- v0.9.0: Excel'de "Özet"ten sonra "Yapılacaklar" sayfası: Yer, Ekip, İş, Eski URL, Yeni URL, Not, Durum. Ekranda bir yerin listesi en fazla `todo.listLimit` (200) satır gösterir.
+- v0.9.0: Yeni bağımlılık yok.
 
 - v0.8.4: Render şifresiz çalışır (kullanıcının son kararı, v0.5.0 ve v0.4.1 kararlarının şifre kısmının yerine geçer). Claude riskleri yazdı ve şifreli kalmayı ve şifresiz demo modunu önerdi; kullanıcı tam kaldırmayı seçti. Kod: yayın modunda APP_PASS yoksa sunucu açılır ve uyarı yazar. APP_PASS tanımlı ise eski kural geçerli (APP_USER ve en az 10 karakter). SSRF koruması ve yayın limitleri (2.000 URL, aynı anda 1 tarama) değişmedi. `render.yaml` artık APP_USER ve APP_PASS istemez.
 - v0.8.4: Şifresiz yayının kuralları: Render'da müşteri sitesi taranmaz, müşteri projesi tutulmaz. Herkes projeleri görür, Excel indirir ve siler. Müşteri işleri yerelde (`npm start`, 127.0.0.1) yapılır.

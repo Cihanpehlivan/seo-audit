@@ -37,6 +37,12 @@
     "sectionPageLimit": 200,
     "langMinShare": 0.6
   },
+  "todo": {
+    "_aciklama": "Yapılacaklar listesi (v0.9.0). Bir yeni sitenin tarama sayfası sayısı, o siteye giden eski sayfa sayısının notReadyRatio oranından azsa site \"hazır değil gibi görünüyor\" olur. Sadece en az notReadyMinOld eski sayfa o siteye gidiyorsa kontrol edilir. Hazır olmayan sitenin işleri sayılmaz ve bekler. Kullanıcı siteyi hazır sayabilir (o tarama için). listLimit: ekranda bir yerin listesinde en fazla kaç satır görünür (bütün liste Excel'de).",
+    "notReadyRatio": 0.3,
+    "notReadyMinOld": 10,
+    "listLimit": 200
+  },
   "redirectMap": {
     "_aciklama": "301 haritası önerisi (v0.8.0). Puan 0-100. high/mid/low: güven eşikleri, low altı = öneri yok. weights: slug, title, H1 ve içerik (simhash) ağırlığı; eksik alan hesaba girmez. bagWeight: bütün kelimelerin (slug + title + H1) tek torba olarak benzerliğinin puandaki payı. sectionBonus: bir eski bölümün iyi eşleşmelerinin çoğu tek yeni bölüme gidiyorsa (en az sectionMinPairs eşleşme, en az sectionMinRatio oran) o bölümdeki adaylar bu kadar puan kazanır. maxDfRatio: aday sayfaların bu oranından fazlasında geçen kelime aday aramada kullanılmaz. maxScored: her eski sayfa için tam puanı hesaplanan en fazla aday (hız için). stopWords: puana girmeyen kelimeler (Türkçe harfler sadeleşmiş yazılır). maxDecisions: projede saklanan en fazla karar. homeSlugs ve homeScore (v0.8.1): son yol parçası homeSlugs içinde olan eski sayfa veya dil bölümünün kökü (/tr) ana sayfa sayılır. Bu sayfaya doğru sitenin ana sayfası homeScore puanı ile önerilir. Ana sayfa başka sayfalar için aday olmaz.",
     "high": 80,
