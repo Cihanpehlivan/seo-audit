@@ -161,8 +161,7 @@
         <fieldset class="structure">
           <legend>Yeni yapı nasıl?</legend>
           <div class="choices" id="prjStructure">
-            <label><input type="radio" name="structure" value="same"><span><b>Aynı alan adı, aynı yollar</b>Tasarım veya altyapı değişiyor. Adresler aynı kalıyor.</span></label>
-            <label><input type="radio" name="structure" value="paths"><span><b>Aynı alan adı, yollar değişiyor</b>Örnek: /en/about adresi /about olur. 301 gerekir.</span></label>
+            <label><input type="radio" name="structure" value="same"><span><b>Tek alan adı</b>Yollar aynı kalabilir veya değişebilir. Araç farkı bulur.</span></label>
             <label><input type="radio" name="structure" value="domains"><span><b>Diller ayrı alan adlarına</b>Örnek: /tr/ bölümü tr.ornek.com sitesine taşınır.</span></label>
           </div>
         </fieldset>
@@ -262,6 +261,18 @@
         <div class="tools"><label class="sr" for="cmpQ">Ara</label><input id="cmpQ" type="search" placeholder="Yol veya title ara" autocomplete="off"><span class="muted" id="cmpCount"></span></div>
         <div class="table-wrap"><table id="cmpTable"></table></div>
         </details>
+        </div>
+      </div>
+
+      <div id="stepCanliya" class="step-pane" hidden>
+        <p class="muted" id="lnBusy" hidden>Eşleştiriliyor…</p>
+        <p class="err" id="lnErr" role="alert"></p>
+        <div class="ln-sum" id="lnSum"></div>
+        <div id="lnLive"></div>
+        <div id="lnGroups" class="places"></div>
+        <div class="ln-foot">
+          <span class="small">Liste staging taramalarından gelir. Düzeltin, sonra siteyi tekrar tarayın. Excel'de "Canlıya çıkış" sayfası her adresi ekibi ile verir.</span>
+          <a class="ghost small" id="lnExcel" href="#">Excel indir</a>
         </div>
       </div>
     </section>

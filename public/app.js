@@ -484,11 +484,13 @@ loadInfo();
 // ---------- Migration project (v0.7.0) ----------
 // Steps: Proje → Tarama → Eşleştirme → 301 haritası → Yapılacaklar. One "next task" card on every step.
 // v0.8.0: the 301 map comes before Yapılacaklar, because the work list depends on the map.
+// v0.10.0: Canlıya çıkış (launch list from the staging crawls) is active.
 const STEPS = [
   ['proje', 'Proje'], ['tarama', 'Tarama'], ['eslestirme', 'Eşleştirme'], ['harita', '301 haritası'], ['yapilacaklar', 'Yapılacaklar'],
-  ['canliya', 'Canlıya çıkış', true], ['dogrulama', 'Canlı doğrulama', true],
+  ['canliya', 'Canlıya çıkış'], ['dogrulama', 'Canlı doğrulama', true],
 ];
-const PANES = { proje: 'stepProje', tarama: 'stepTarama', eslestirme: 'stepEslestirme', harita: 'stepHarita', yapilacaklar: 'stepYapilacaklar' };
+const PANES = { proje: 'stepProje', tarama: 'stepTarama', eslestirme: 'stepEslestirme', harita: 'stepHarita', yapilacaklar: 'stepYapilacaklar', canliya: 'stepCanliya' };
+const MATCH_STEPS = ['eslestirme', 'harita', 'yapilacaklar', 'canliya'];
 const ROLE = { old: 'Eski site', heir: 'Eski alan adına geçecek site', extra: 'Ek site' };
 const HELP = {
   old: 'Bugün canlıda olan site. Araç bütün sayfalarını listeler.',
@@ -568,7 +570,7 @@ async function openProject(id, step) {
   if (!prj.step) prj.step = firstStep();
   renderProject();
   watchCrawls();
-  if (['eslestirme', 'harita', 'yapilacaklar'].includes(prj.step)) loadMatch();
+  if (MATCH_STEPS.includes(prj.step)) loadMatch();
 }
 // A new project opens on "Proje". A project with crawls opens where the work is.
 function firstStep() {
@@ -595,6 +597,7 @@ function renderProject() {
   if (prj.step === 'eslestirme') renderSections();
   if (prj.step === 'harita') renderMap();
   if (prj.step === 'yapilacaklar') renderTodo();
+  if (prj.step === 'canliya') renderLaunch();
   $('#prjSteps').querySelector('[aria-current="step"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 $('#prjSteps').addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b) goStep(b.dataset.step); });
@@ -611,6 +614,7 @@ function stepStates() {
     const mp = prj.match.map?.summary;
     if (mp) out.harita = mp.pending || mp.none ? 'todo' : 'done';
     out.yapilacaklar = workCount() ? 'todo' : 'done';
+    if (prj.match.launch) out.canliya = prj.match.launch.total ? 'todo' : 'done';
   }
   return out;
 }
@@ -638,6 +642,8 @@ function nextTask() {
   // v0.8.1: a probably wrong section decision comes first. The 301 map depends on it.
   const bad = prj.match.sections.find((x) => x.alert);
   if (bad && prj.step !== 'harita') return { text: `${sectionName(bad)} bölümünün kararı yanlış olabilir. ${alertShort(bad)} Bölümü açın ve önerilen seçimi kullanın.`, btn: 'Bölümü gösterin', act: { step: 'eslestirme', focusSection: bad.from } };
+  // v0.10.0: on Canlıya çıkış the card follows the launch list: critical, decisions, checks, then the launch switches.
+  if (prj.step === 'canliya' && prj.match.launch) return launchTask(prj.match.launch);
   // v0.9.0: a thin new site (content not entered yet) makes its tasks unreal. Recrawl first, or accept the site.
   const thin = prj.match.todo?.places.find((x) => x.ready?.state === 'thin');
   if (thin) {
@@ -674,6 +680,7 @@ function nextTask() {
     return { text: `Harita hazır. ${mp ? mp.rule + mp.approved + mp.gone : 0} satır 301 listesinde. Listeyi indirin ve geliştiriciye verin.`, btn: 'CSV indir', act: { csv: true } };
   }
   const n = workCount();
+  if (!n && prj.step === 'yapilacaklar') return { text: 'Bütün sayfalar yerinde. Yapılacak iş yok. Sıradaki adım: canlıya çıkış listesi.', btn: 'Canlıya çıkışı açın', act: { step: 'canliya' } };
   if (!n) return { text: 'Bütün sayfalar yerinde. Yapılacak iş yok.', btn: 'Excel indir', act: { excel: true } };
   if (prj.step !== 'yapilacaklar') return { text: `Eşleştirme tamam. ${n} iş var.`, btn: 'Yapılacakları açın', act: { step: 'yapilacaklar' } };
   const top = [...(prj.match.todo?.places || [])].sort((a, b) => b.n - a.n)[0];
@@ -708,10 +715,11 @@ $('#prjNext').addEventListener('click', async (e) => {
   }
   if (a.reload) { prj.matchKey = ''; loadMatch(); return; }
   if (a.addSite) addSite();
+  if (a.open) { lnState.open = a.open; renderLaunch(); setTimeout(() => document.querySelector(`[data-ln="${CSS.escape(a.open)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); return; }
   if (a.settings) setTimeout(() => { document.querySelector('#stepTarama details').open = true; $('#crawlAuth').focus(); });
   if (a.step && a.step !== prj.step) goStep(a.step);
   setTimeout(() => {
-    if (a.focus) document.querySelector(`[data-site="${a.focus}"] [name=url]`)?.focus();
+    if (a.focus) document.querySelector(`[data-site="${a.focus}"] [name=${a.focusField || 'url'}]`)?.focus();
     if (a.focusSection) {
       prj.openSecs.add(a.focusSection);
       renderSections();
@@ -725,7 +733,7 @@ $('#prjNext').addEventListener('click', async (e) => {
 // ---------- Step 1: Proje ----------
 function renderSites() {
   const p = prj.project;
-  for (const r of document.querySelectorAll('#prjStructure input')) r.checked = r.value === p.structure;
+  for (const r of document.querySelectorAll('#prjStructure input')) r.checked = r.value === (p.structure === 'domains' ? 'domains' : 'same'); // v0.10.0: old 'paths' = 'same'
   $('#prjSites').innerHTML = p.sites.map((s) => `<div class="site" data-site="${esc(s.key)}">
     <div class="site-role">${esc(ROLE[s.role])}${help(HELP[s.role])}</div>
     ${s.role === 'extra' ? `<label>Ad<input name="name" value="${esc(s.name)}" placeholder="Türkçe" maxlength="40" autocomplete="off"></label>` : ''}
@@ -1300,6 +1308,104 @@ async function setReady(site, ok, btn) {
     await loadMatch();
   } catch (err) { $('#todoErr').textContent = err.message; btn.disabled = false; }
 }
+
+// ---------- Step 6: Canlıya çıkış (v0.10.0): launch list from the staging crawls ----------
+// Groups by time, not by place. Every row shows its site and team. The state always comes from the crawls:
+// there is no manual "done" mark. Fix, then crawl again.
+const LN_TERMS = {
+  critical: 'Bu işler canlıya çıkıştan önce düzelmeli. Yoksa canlı sitede sayfalar kırılır veya Google yanlış adresi görür.',
+  decide: 'Bu satırlar sizin kararınızı bekler. Karar yoksa eski adres canlıda 404 verir.',
+  switch: 'Bu ayarlar staging\'de doğrudur. Canlıya çıkış anında değiştirin. Canlı doğrulama adımı canlıda tekrar kontrol eder.',
+  check: 'Eski sitede olan etiketler yeni sitede de olmalı. Yoksa ölçüm veya Search Console doğrulaması kaybolur.',
+  'map-staging': '301 hedefi her zaman canlı alan adıdır. Staging adresine giden 301 canlıda çalışmaz.',
+  'staging-open': 'Staging şifresiz ve noindex yok. robots.txt de engellemiyor. Google staging sayfalarını dizine ekleyebilir ve kopya içerik görür.',
+  'staging-addr': 'Staging alan adı sayfalarda açık yazılmış. Göreli adres (/hakkimizda) her alan adında çalışır. Açık yazılmış staging adresi canlıdan sonra kırılır.',
+  'map-pending': 'Araç öneri buldu ve onay bekliyor, veya öneri bulamadı. Kararı 301 haritasında verin.',
+  noindex: 'Sayfa Google\'a "dizine ekleme" der. Staging için doğrudur. Canlıda kalırsa site Google\'dan düşer.',
+  disallow: 'robots.txt Googlebot\'u bütün siteden engeller. Staging için doğrudur. Canlıda kalırsa Google siteyi tarayamaz.',
+  tracking: 'Google Analytics, Google Ads veya Tag Manager kimliği. Eski sitedeki kimlik yeni sitede yoksa ölçüm durur.',
+  gsc: 'google-site-verification meta etiketi. Search Console mülkünü doğrular. Etiket kalkarsa doğrulama düşer. DNS ile doğrulanan mülkte etiket gerekmez.',
+  recrawl: 'Bu tarama v0.10.0\'dan önce yapıldı. Yeni kontrollerin verisi yok. Siteyi tekrar tarayın.',
+};
+const LN_DETAIL = { canonical: 'canonical', hreflang: 'hreflang', sitemap: 'sitemap URL', link: 'link', asset: 'görsel, script, CSS', robots: 'robots.txt Sitemap' };
+const lnState = { open: null };
+const lnKey = (it) => `${it.kind}:${it.site || ''}`;
+const lnSiteName = (k) => (k === 'old' ? 'Eski site' : siteByKey(k) ? siteName(siteByKey(k)) : '');
+function launchTask(L) {
+  const all = L.groups.flatMap((g) => g.items.map((it) => ({ ...it, group: g.key })));
+  const btnOf = (it) => (it.action?.type === 'project' ? { btn: 'Projeyi açın', act: { step: 'proje', focus: it.action.site, focusField: 'live' } }
+    : it.action?.type === 'map' ? { btn: 'Haritayı açın', act: { step: 'harita' } }
+    : it.action?.type === 'recrawl' ? { btn: 'Tekrar tara', act: { crawl: it.action.site } }
+    : { btn: 'Listeyi açın', act: { open: lnKey(it) } });
+  const crit = all.filter((i) => i.group === 'critical');
+  if (crit.length) return { text: `${crit.length} kritik iş var. Önce: ${crit[0].title}${crit[0].site ? ` (${lnSiteName(crit[0].site)})` : ''}.`, ...btnOf(crit[0]) };
+  const dec = all.find((i) => i.group === 'decide');
+  if (dec) return { text: `Kritik iş yok. ${dec.n} satır 301 haritasında karar bekliyor.`, ...btnOf(dec) };
+  const chk = all.filter((i) => i.group === 'check' && !i.info);
+  if (chk.length) return { text: `Kritik iş yok. ${chk.length} kontrol var: ${chk[0].title}.`, ...btnOf(chk[0]) };
+  const sw = all.filter((i) => i.group === 'switch');
+  if (sw.length) return { text: `Kritik iş yok. Çıkış anında ${sw.length} ayarı değiştirin. Excel listeyi ekip ile verir.`, btn: 'Excel indir', act: { excel: true } };
+  return { text: 'Liste temiz. Staging canlıya çıkışa hazır görünüyor.', btn: 'Excel indir', act: { excel: true } };
+}
+function renderLaunch() {
+  $('#lnBusy').hidden = !prj.loading;
+  $('#lnErr').textContent = !prj.loading && prj.matchErr ? prj.matchErr : '';
+  const L = prj.match?.launch;
+  $('#lnExcel').href = `/api/projects/${prj.id}/excel`;
+  if (!L) { $('#lnSum').innerHTML = ''; $('#lnGroups').innerHTML = ''; $('#lnLive').innerHTML = ''; return; }
+  const SUM = [['critical', 'Kritik', 'crit'], ['decide', 'Karar bekleyen', 'warn'], ['switch', 'Çıkışta değiştirin', 'warn'], ['check', 'Kontrol edin', '']];
+  $('#lnSum').innerHTML = SUM.map(([k, label, cls]) => `<div class="ln-tile ${L.counts[k] ? cls : 'zero'}"><span>${label}</span><b>${L.counts[k]}</b></div>`).join('');
+  const live = L.sites.filter((x) => !x.staging);
+  $('#lnLive').innerHTML = live.map((x) => `<p class="small note">${esc(lnSiteName(x.key))} (${esc(x.host)}) canlı alan adında tarandı. Staging kontrolleri bu site için çalışmaz. Canlı kontrolü sonraki adımdadır.</p>`).join('');
+  $('#lnGroups').innerHTML = L.groups.map((g) => {
+    const n = L.counts[g.key];
+    const state = n ? `<span class="tag-s ${g.key === 'critical' ? 'run' : 'warn'}">${n} iş</span>` : '<span class="tag-s ok">Sorun yok</span>';
+    return `<section class="place ln-group ln-${g.key}">
+      <header><span class="ptitle"><b>${esc(g.title)}</b>${help(LN_TERMS[g.key])}</span>${g.sub ? `<span class="small role">${esc(g.sub)}</span>` : ''}${state}</header>
+      ${g.items.map(launchRow).join('')}</section>`;
+  }).join('');
+}
+function launchRow(it) {
+  const k = lnKey(it);
+  const tagCls = it.info ? 'idle' : it.group === 'critical' ? 'run' : 'warn';
+  const count = it.info ? 'Bilgi' : it.unit === 'eksik' ? 'Eksik' : it.unit === 'bütün site' ? 'Bütün site' : it.n ? `${it.n}${it.unit ? ` ${it.unit}` : ''}` : '';
+  const detail = it.kind === 'staging-addr' && it.detail ? Object.entries(it.detail).map(([x, n]) => `${LN_DETAIL[x] || x} ${n}`).join(' · ')
+    : it.kind === 'noindex' && it.detail ? [it.detail.meta && `meta robots ${it.detail.meta}`, it.detail.header && `X-Robots-Tag ${it.detail.header}`].filter(Boolean).join(' · ') + ' sayfa' : '';
+  const site = it.site ? lnSiteName(it.site) : '';
+  const btns = [
+    it.list.length && !['tracking', 'gsc'].includes(it.kind) ? `<button type="button" class="ghost small" data-lnopen="${esc(k)}" aria-expanded="${lnState.open === k}">${lnState.open === k ? 'Listeyi kapat' : 'Listeyi aç'}</button>` : '',
+    it.action?.type === 'map' ? '<button type="button" class="ghost small" data-goto="harita">Haritayı açın</button>' : '',
+    it.action?.type === 'project' ? `<button type="button" class="ghost small" data-lnproject="${esc(it.action.site)}">Projeyi açın</button>` : '',
+    it.action?.type === 'recrawl' ? `<button type="button" class="ghost small strong" data-recrawl="${esc(it.action.site)}">Tekrar tara</button>` : '',
+  ].filter(Boolean).join('');
+  return `<div class="ln-row${it.info ? ' info' : ''}" data-ln="${esc(k)}">
+    <div class="ln-main"><b>${esc(it.title)}</b> ${LN_TERMS[it.kind] ? help(LN_TERMS[it.kind]) : ''}
+      <div class="ln-tags">${site ? `<span class="tag-s idle">${esc(site)}</span>` : ''}${it.team ? `<span class="tag-s idle team">${esc(it.team)}</span>` : ''}</div>
+      ${detail ? `<div class="small ln-detail">${esc(detail)}</div>` : ''}
+      <p class="small ln-note">${esc(it.note)}</p></div>
+    <div class="ln-side">${count ? `<span class="tag-s ${tagCls}">${esc(count)}</span>` : ''}</div>
+    ${btns ? `<div class="pact">${btns}</div>` : ''}
+    ${lnState.open === k ? launchList(it) : ''}</div>`;
+}
+function launchList(it) {
+  const max = prj.match.launch.listLimit || 200;
+  const shown = it.list.slice(0, max);
+  const head = it.list.length > max ? `<p class="small">${it.list.length} satır var. İlk ${max} satır görünüyor. Bütün liste Excel'de.</p>` : '';
+  const addr = (u) => (/^https?:\/\/\S+$/.test(u || '') ? cmpLink(u) : esc(u || '—'));
+  return `<div class="plist">${head}<div class="table-wrap"><table><thead><tr><th>Tür</th><th>Adres</th><th>Değer</th></tr></thead><tbody>${
+    shown.map((x) => `<tr><td>${esc(x.what)}</td><td class="u">${addr(x.page)}</td><td class="u">${addr(x.value)}</td></tr>`).join('')
+  }</tbody></table></div></div>`;
+}
+$('#lnGroups').addEventListener('click', (e) => {
+  const o = e.target.closest('[data-lnopen]');
+  if (o) { lnState.open = lnState.open === o.dataset.lnopen ? null : o.dataset.lnopen; renderLaunch(); return; }
+  const g = e.target.closest('[data-goto]');
+  if (g) { goStep(g.dataset.goto); return; }
+  const p = e.target.closest('[data-lnproject]');
+  if (p) { const k = p.dataset.lnproject; goStep('proje'); setTimeout(() => document.querySelector(`[data-site="${CSS.escape(k)}"] [name=live]`)?.focus(), 80); return; }
+  const c = e.target.closest('[data-recrawl]');
+  if (c) { c.disabled = true; goStep('tarama'); startSiteCrawl(c.dataset.recrawl); }
+});
 
 // ---------- All pages view (groups of the comparison) ----------
 const CMP_KINDS = [

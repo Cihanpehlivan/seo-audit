@@ -9,7 +9,9 @@ import { ID_RE } from './store.js';
 import { cleanDecision } from './redirectmap.js';
 
 export const PID_RE = /^p-[a-z0-9]{8,24}$/;
-export const STRUCTURES = ['same', 'paths', 'domains'];
+// v0.10.0: 'paths' (same domain, new paths) merged into 'same' (one domain). Both did the same work: the tool finds path changes.
+// Old project files with 'paths' are read as 'same'.
+export const STRUCTURES = ['same', 'domains'];
 const KEY_RE = /^[a-z0-9-]{1,20}$/;
 const bareHost = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
 const bad = (msg) => Object.assign(new Error(msg), { code: 400 });

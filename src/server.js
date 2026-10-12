@@ -13,6 +13,7 @@ import { normalizeUrl } from './normalize.js';
 import { runAudit, loadConfig, RULES, CATEGORIES } from './rules/index.js';
 import { isBroken, isOk } from './rules/helpers.js';
 import { buildTodo } from './todo.js';
+import { buildLaunch } from './launch.js';
 import os from 'node:os';
 import { makeGuard } from './netguard.js';
 import { readFileSync } from 'node:fs';
@@ -162,6 +163,13 @@ async function startProjectCrawl(id, key, options) {
   return job;
 }
 
+// Display names of the project sites (Excel). The heir and the old site have fixed names.
+function siteNames(p) {
+  const out = { old: 'Eski site' };
+  for (const s of p.sites) if (s.role !== 'old') out[s.key] = s.role === 'heir' ? 'Eski alan adına geçecek site' : s.name || 'Ek site';
+  return out;
+}
+
 // Matching of a project: old site → heir and other sites. Sections without a decision get the suggested move.
 async function projectMatch(p) {
   const cc = loadConfig().compare;
@@ -214,7 +222,10 @@ async function projectMatch(p) {
   const todo = buildTodo({ cmp, map, sections, oldHost: oldRes.meta.host, readyOk: p.readyOk || {}, cfg: loadConfig().todo || {},
     sites: targets.map((s, i) => ({ key: s.key, role: s.role, name: s.name, host: newList[i].meta.host, origin: mapSites[i].origin, liveOrigin: mapSites[i].liveOrigin,
       okPages: newList[i].pages.filter(isOk).length, crawlId: status[s.key].crawlId })) });
-  return { cmp, sections, targets: targets.map((s) => s.key), status, map, todo };
+  // Launch list (v0.10.0): staging checks of every target site, the 301 list and the tags of the old site.
+  const launch = buildLaunch({ oldRes, map, cfg: loadConfig(),
+    sites: targets.map((s, i) => ({ key: s.key, role: s.role, res: newList[i], liveOrigin: mapSites[i].liveOrigin })) });
+  return { cmp, sections, targets: targets.map((s) => s.key), status, map, todo, launch };
 }
 
 async function startJob(body) {
@@ -389,11 +400,11 @@ const server = http.createServer(async (req, res) => {
         try { m = await projectMatch(await projects.get(pid)); }
         catch (e) { if (e.code === 409) return send(res, 409, { error: e.message, need: e.need }); throw e; }
         if (action === 'match') {
-          const { cmp, sections, targets, status, map, todo } = m;
-          return send(res, 200, { ...cmp, sections, targetSites: targets, status, map, todo });
+          const { cmp, sections, targets, status, map, todo, launch } = m;
+          return send(res, 200, { ...cmp, sections, targetSites: targets, status, map, todo, launch });
         }
         const tmp = path.join(os.tmpdir(), `prj-${Date.now()}.xlsx`);
-        await exportCompareExcel(m.cmp, tmp, { map: m.map, todo: m.todo });
+        await exportCompareExcel(m.cmp, tmp, { map: m.map, todo: m.todo, launch: m.launch, siteNames: siteNames(await projects.get(pid)) });
         res.writeHead(200, {
           'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'content-disposition': `attachment; filename="tasima-${m.cmp.old.host}.xlsx"`,

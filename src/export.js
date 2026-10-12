@@ -170,7 +170,7 @@ function siteRows(ck) {
 }
 
 // Comparison of two crawls (old site vs new site) as an Excel file.
-export async function exportCompareExcel(cmp, file, { map, todo } = {}) {
+export async function exportCompareExcel(cmp, file, { map, todo, launch, siteNames = {} } = {}) {
   const wb = new ExcelJS.Workbook();
   const s = cmp.summary;
   const targets = cmp.targets || [cmp.new];
@@ -210,6 +210,22 @@ export async function exportCompareExcel(cmp, file, { map, todo } = {}) {
       const p = place.get(it.placeKey);
       return { ...it, where: p ? where(p) : '', team: p?.team || '', state: it.held ? 'Bekliyor: site hazır değil gibi görünüyor' : '' };
     }));
+  }
+  // v0.10.0: launch list. One row per address; an item without a list gets one row.
+  if (launch?.groups.some((g) => g.items.length)) {
+    const rows = [];
+    for (const g of launch.groups) {
+      for (const it of g.items) {
+        const base = { group: g.title, site: it.site ? siteNames[it.site] || it.site : '', team: it.team, task: it.title, note: it.note, state: it.info ? 'Bilgi' : '' };
+        if (!it.list.length) rows.push(base);
+        for (const x of it.list) rows.push({ ...base, what: x.what, page: x.page, value: x.value });
+      }
+    }
+    sheet(wb, 'Canlıya çıkış', [
+      { header: 'Grup', key: 'group', width: 30 }, { header: 'Site', key: 'site', width: 30 }, { header: 'Ekip', key: 'team', width: 10 },
+      { header: 'İş', key: 'task', width: 36 }, { header: 'Tür', key: 'what', width: 20 }, { header: 'Adres', key: 'page', width: 60 },
+      { header: 'Değer', key: 'value', width: 60 }, { header: 'Not', key: 'note', width: 70 }, { header: 'Durum', key: 'state', width: 10 },
+    ], rows);
   }
   const yn = (b) => (b ? 'Evet' : 'Hayır');
   const ctx = [

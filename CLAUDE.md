@@ -22,6 +22,7 @@ bin/crawl.js            CLI
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
 src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu (v0.7.1: her bölümün sayfa listesi). Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0)
 src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma), 301 haritası kararlarının temizliği
+src/launch.js           Canlıya çıkış listesi (v0.10.0): staging taramalarından kritik, karar, çıkışta değişecek ve kontrol işleri
 src/todo.js             Yapılacaklar (v0.9.0): işleri yere göre gruplar (eski alan adı sunucusu, her yeni site, İçerik, Karar bekleyen), site hazırlık kontrolü
 src/redirectmap.js      301 haritası (v0.8.0): bulunamayan eski sayfaya yeni sayfa önerisi (slug, title, H1, içerik; IDF ağırlığı), güven, kullanıcı kararları, CSV. v0.8.1: dil filtresi (html lang), eski ana sayfaya ana sayfa önerisi
 src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
@@ -37,7 +38,7 @@ src/export.js           Excel çıktısı
 src/store.js            Dosya tabanlı kayıt
 src/server.js           Web sunucusu + API (/api/crawls, /api/projects, /api/compare, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur
                         /api/projects/:id/map → GET (harita, ?format=csv son liste), POST { set: { "/eski/yol": karar | null } }
-                        /api/projects/:id → crawl (POST), match, excel, export. GET/PUT/DELETE tanım
+                        /api/projects/:id → crawl (POST), match (v0.10.0: `launch` alanı), excel, export. GET/PUT/DELETE tanım
                         /api/projects/:id/ready → POST { site, ok } (v0.9.0): hazır görünmeyen siteyi bu tarama için hazır say
 render.yaml             Render Blueprint (ücretsiz plan, Docker)
 docs/                   Landing page (v0.8.3): docs/index.html + docs/img/. GitHub Pages (main, /docs) veya Netlify ile yayınlanır. Uygulamadan bağımsız, tarama yapmaz
@@ -67,13 +68,13 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, yayın limitleri. Şifre isteğe bağlı, Render şifresiz (v0.8.4) | Tamam (v0.5.0) |
-| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1), yapılacaklar listesi (yere göre), site hazırlık uyarısı ve kavram açıklamaları (v0.9.0), canlı adres ve staging adresi ayrımı (v0.9.1). Sırada: Parça 3a çıkış öncesi liste | Devam ediyor |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1), yapılacaklar listesi (yere göre), site hazırlık uyarısı ve kavram açıklamaları (v0.9.0), canlı adres ve staging adresi ayrımı (v0.9.1), Parça 3a canlıya çıkış listesi ve "Yeni yapı" seçeneklerinin birleşmesi (v0.10.0). Sırada: v0.10.0 gerçek sitede deneme, sonra Parça 3b canlı doğrulama | Devam ediyor |
 | Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), GitHub Pages veya Netlify | Tamam (v0.8.3), yayın bekliyor |
 | Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 18 kontrol (toplam yaklaşık 12 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 20, canlıya çıkış 11 kontrol (toplam yaklaşık 13 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
 - Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
@@ -99,8 +100,12 @@ Gerçek site denemesi (v0.8.0, 11 Ekim 2026, çok dilli taşıma: İngilizce kö
 - Bölüm kuralı doğru olan eski İngilizce /prosedur/ sayfaları çoğunlukla doğru eşleşti. Dolgu sayfaları genel /procedures sayfasına gitti (daha özel sayfa vardı); kaynağı belli değil.
 v0.8.1 bu dört sorunu düzeltti. Tekrar test bekliyor.
 
-Açık noktalar (v0.9.1):
-- "Yeni yapı nasıl?" sorusunda "aynı yollar" ve "yollar değişiyor" seçenekleri aynı işi yapıyor (sadece "diller ayrı alan adlarına" davranışı değiştirir). Birleştirme önerildi, karar bekliyor.
+Açık noktalar (v0.10.0):
+- Canlıya çıkış listesi gerçek sitede denenmedi. Şamil Şahin veya Doyuyo projesinde siteleri tekrar tarayın (eski taramalarda yeni veri yok, liste "Tarama eski" der). Sonra Canlıya çıkış adımını açın. Kritik satırların listesini açın ve yanlış alarm arayın.
+- Etiket kimliği sadece script ve noscript içinden okunur (GTM-, G-, UA-, AW-). Etiket sadece JS ile yüklenirse (örnek: consent aracı içinden) araç bulamaz ve "Eksik" der. Sprint 6 (JS render) bunu çözer.
+- Staging adresi tahmini: projedeki yeni sitelerin tarama alan adı (canlı alan adından farklıysa) ve `stagingHosts` deseni. Başka bir geliştirme ortamı (adı tanıdık olmayan) bulunmaz.
+- Canlı alan adında taranan site staging sayılmaz. Bu sitenin kontrolleri Parça 3b'de (canlı doğrulama) gelir. Ekran bunu not olarak yazar.
+- Sitemap'teki staging URL sayısı adres sayısına eklenir (örnek: "9 adres" içinde 3 sitemap URL'si). Sayı bu yüzden sayfa sayısı değildir.
 
 Açık noktalar (v0.9.0):
 - Yapılacaklar listesi gerçek sitede denenmedi. Şamil Şahin projesinde Yapılacaklar adımını açın. Sayıları 301 haritası ve Excel ile karşılaştırın. Türkçe site az sayfalı ise uyarı görünmeli.
@@ -139,7 +144,7 @@ Açık noktalar (Sprint 2'den):
 
 ## Yol haritası (kalan sprintler)
 
-**v0.7.0 — Taşıma projesi (arayüz, Sprint 3 Parça 2'den önce):** Araç kullanıcıyı adım adım yönlendirir. Adım çubuğu: Proje → Tarama → Eşleştirme → Yapılacaklar → (sonra) 301 haritası → Canlıya çıkış → Canlı doğrulama. Her ekranda tek bir "Sıradaki iş" kartı. Boş veya engelli her sonuç nedeni ve sıradaki işi söyler.
+**v0.7.0 — Taşıma projesi (arayüz, Sprint 3 Parça 2'den önce):** Araç kullanıcıyı adım adım yönlendirir. Adım çubuğu: Proje → Tarama → Eşleştirme → Yapılacaklar → (sonra) 301 haritası → Canlıya çıkış → Canlı doğrulama. (Güncel sıra v0.8.0 ve v0.10.0 kararlarında.) Her ekranda tek bir "Sıradaki iş" kartı. Boş veya engelli her sonuç nedeni ve sıradaki işi söyler.
 - Proje: ad + "Yeni yapı nasıl?" sorusu (aynı alan adı ve aynı yollar / aynı alan adı, değişen yollar / diller ayrı alan adlarına). Site rolleri: eski site, eski alan adına geçecek site, ek siteler. Etiket (eski/yeni) seçimi gerekmez.
 - Tarama: her site için "Tara" düğmesi ve durum (bekliyor, taranıyor, tamam, silinmiş).
 - Eşleştirme: eski bölüm tablosu (`/tr/ · 8 sayfa → [TR site] · 7 bulundu`), öneri satırda hazır. Serbest kural editörü "Gelişmiş" altında. v0.6.1 tarayıcı kuralları projeye aktarılır.
@@ -175,11 +180,27 @@ Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ed
 
 ## Karar günlüğü
 
+- v0.10.0: Parça 3a, canlıya çıkış listesi (kullanıcı sohbette taslağı ve dört noktayı onayladı). Gruplama zamana göredir, yere göre değildir: Kritik (çıkıştan önce düzeltin), Karar bekleyen, Çıkış anında değiştirin (staging'de normal), Kontrol edin. Her satır siteyi ve ekibi etiket olarak gösterir. Elle "tamam" işareti yok: durum her zaman taramadan gelir.
+- v0.10.0: Staging adresini proje bilir. Bir yeni site, tarama alan adı canlı alan adından farklıysa staging'dir (canlı alan adı yazılmamışsa da staging sayılır). Ayrıca `stagingHosts`/`stagingSuffixes` desenine uyan ve canlı olmayan alan adları staging sayılır. Canlı alan adları asla staging sayılmaz.
+- v0.10.0: Göreli adres iş değildir. Sadece HTML'de açık yazılmış staging adresi iştir. Bu yüzden parser ham değeri okur (`absHosts`: canonical, hreflang, link, asset). Normalize edilen değer her zaman host taşıdığı için kullanılamaz. Canlı alan adına giden canonical doğrudur.
+- v0.10.0: Kritik işler: 301 listesinde staging adresi (son listede, rule ve approved satırları; canlı alan adı yoksa "Projeyi açın", elle yazılmışsa "Haritayı açın"), sitede staging adresi (canonical, hreflang, link, görsel/script/CSS/iframe, sitemap URL'leri, robots.txt `Sitemap:` satırı), staging Google'a açık (şifre yok, `Disallow: /` yok, noindex olmayan sayfa var). Son madde kullanıcının onayladığı ek öneridir.
+- v0.10.0: noindex (meta robots ve X-Robots-Tag) ve `Disallow: /` kritik değildir. Staging'de doğrudur, "Çıkış anında değiştirin" grubunda durur. Canlıda aynı bulgu kritik olur (Parça 3b). Kısmi Disallow (`/admin/`) iş değildir.
+- v0.10.0: Karar bekleyen: 301 haritasında `pending` ve `none` satırları. Sayı haritanın sayısı ile aynıdır (Yapılacaklar'daki "sayfa oluşturma" ayrımı burada yok).
+- v0.10.0: Etiket kontrolü. Analytics/GTM kimliği bütün hedef sitelerde aranır. Eski kimlik yeni sitede hiç yoksa iş olur ("Eksik"). Yeni sitede başka kimlik varsa "Bilgi" satırı olur ve sayılmaz (yeni hesap bilinçli olabilir). Search Console doğrulama etiketi sadece geçecek sitede aranır: ek site yeni alan adıdır, eski doğrulama orada geçerli değildir. DNS ile doğrulanan mülkte etiket gerekmez (not yazar).
+- v0.10.0: Yeni veri: `parser.js` → `absHosts`, `tracking` (sadece script ve noscript içinden, sayfa metninden değil), `gscVerify`. `crawler.js` → `meta.sitemap.hosts` (başka hosttaki sitemap URL'leri de sayılır; önceden sessizce düşüyordu). Eski taramada bu veri yoksa liste "Tarama eski · Tekrar tara" der ve o kontrolü yapmaz (yanlış iş üretmez). robots.txt satırı eski taramada da okunur.
+- v0.10.0: Canlı alan adında taranan site staging sayılmaz. Staging kontrolleri o sitede çalışmaz. Etiket kontrolü çalışır.
+- v0.10.0: Kontroller kural motoruna (`definitions.js`) girmez. Proje kontrolüdür (`src/launch.js`), çünkü canlı alan adını ve 301 haritasını bilmesi gerekir. Test kuralı yine uygulandı: `test/fixture-launch.js` tetikleyen siteleri, `test/launch-test.js` beklentileri içerir. Şifreli "temiz" staging hiçbir iş üretmez (`/temiz` kuralının karşılığı).
+- v0.10.0: Sıradaki iş kartı (Canlıya çıkış adımında): önce kritik iş, sonra karar, sonra kontrol, sonra çıkış ayarları ("Excel indir"). Liste temizse "Staging canlıya çıkışa hazır görünüyor". Yapılacaklar boşsa kart Canlıya çıkışı önerir.
+- v0.10.0: Excel'de "Canlıya çıkış" sayfası: Grup, Site, Ekip, İş, Tür, Adres, Değer, Not, Durum. Her adres bir satırdır. Ekranda bir işin listesi en fazla `launch.listLimit` (200) satır gösterir.
+- v0.10.0: "Yeni yapı nasıl?" iki seçenek oldu: "Tek alan adı" ve "Diller ayrı alan adlarına" (kullanıcı onayladı). "Aynı yollar" ve "yollar değişiyor" aynı işi yapıyordu: yol farkını araç eşleştirmede bulur. Eski proje dosyasındaki `paths` değeri `same` okunur.
+- v0.10.0: Adım çubuğu: Canlıya çıkış aktif. Sadece Canlı doğrulama "Sonraki sürüm".
+- v0.10.0: Yeni bağımlılık yok (robots-parser zaten vardı).
+
 - v0.9.1: Gerçek kullanımda kafa karışıklığı (Doyuyo): Yapılacaklar listesindeki "Yeni adres" sütunu bazı satırlarda staging adresini gösteriyordu. Kullanıcı bunu "eski adresi staging'e yönlendiriyoruz" diye okudu. Düzeltme: her işin iki adresi var. `liveUrl` = canlıya çıkıştan sonraki adres (geçecek site için eski alan adı, ek site için projedeki canlı alan adı). `checkUrl` = aracın kontrol ettiği adres (staging). Ekranda ve Excel'de ayrı sütunlar: "Canlı adres" ve "Kontrol edilen adres". Canlı adres link değildir (canlıda sayfa henüz yok). Canlı alan adı yoksa canlı adres boş kalır ve ekran "Canlı alan adı yok" der: staging adresi asla canlı adres gibi yazılmaz.
 - v0.9.1: Kural: 301 hedefi her zaman canlı alan adıdır. Staging sadece karşılaştırma ve test içindir. Staging'de test edilen kural staging içinde çalışır (`staging/eski` → `staging/yeni`). Canlıdan staging'e yönlendirme hiçbir aşamada olmaz.
 - v0.9.1: Linksiz sayfa notu değişti: "Sayfa yeni sitede aynı yolda var. 301 gerekmez. Menüden veya içerikten link verin." Eski metindeki "Sayfa gereksizse 301 ile yönlendirin" cümlesi satırı yönlendirme işi gibi gösteriyordu. Sayfa oluşturma ve harita kararı notları da adres içermez (adres sütunlarda).
 - v0.9.1: "Hazır 301 listesini içe aktar ve kontrol et" özelliği yapılmayacak (kullanıcı kararı). Neden: 301 listesini bu araç üretir. Örnek dosya (eski bir projeden, SEO uzmanının listesi) staging adresli hedefler, toplu ana sayfa yönlendirmesi, sonda boşluk ve tutarsız `/` içeriyordu. Bu sorunları aracın kendi listesi zaten önler (canlı alan adı, soft 404 uyarısı, CSV temizliği).
-- v0.9.1: Parça 3a için not (henüz onaylanmadı): "301 listesinde staging adresi" kontrolü kritik madde olarak listeye girer.
+- v0.9.1: Parça 3a için not: "301 listesinde staging adresi" kontrolü kritik madde olarak listeye girer. (v0.10.0 ile yapıldı.)
 
 - v0.9.0: Yapılacaklar ekranı (kullanıcı sohbette taslağı onayladı). Her yer bir karttır: başlık + "?", ekip etiketi (Backend, CMS, İçerik, Siz), iş sayısı, iş satırları, "Listeyi aç". Sıra: eski alan adı sunucusu, geçecek site, ek siteler, İçerik, Karar bekleyen. Eski grup görünümü kapalı "Bütün sayfalar" bölümünde kalır.
 - v0.9.0: CLAUDE.md'deki v0.7.0 tasarımından fark: geçecek site de ayrı satırdır (tasarım "her ek site" diyordu). Neden: "Sayfa oluşturun" işi geçecek sitede de olur.

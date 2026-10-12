@@ -62,15 +62,16 @@ Not: Bu tool sunucu tarafında tarama yapar. Tarayıcı içinde tek başına ça
 
 ## Taşıma projesi (v0.7.0)
 
-Site yenilemede "Taşıma projesi" seçin. Proje adını yazın. Araç beş adımda yol gösterir. Her ekranda tek bir "Sıradaki iş" kartı durur: tek cümle ve tek düğme.
+Site yenilemede "Taşıma projesi" seçin. Proje adını yazın. Araç altı adımda yol gösterir. Her ekranda tek bir "Sıradaki iş" kartı durur: tek cümle ve tek düğme.
 
 | Adım | Ne yapılır |
 |---|---|
-| Proje | "Yeni yapı nasıl?" sorusunu cevaplayın. Siteleri yazın: eski site (canlı), eski alan adına geçecek site (staging olabilir), ek siteler (örnek: Türkçe sitesi ayrı alan adında). |
+| Proje | "Yeni yapı nasıl?" sorusunu cevaplayın: "Tek alan adı" (yollar aynı kalabilir veya değişebilir, araç farkı bulur) veya "Diller ayrı alan adlarına". Siteleri yazın: eski site (canlı), eski alan adına geçecek site (staging olabilir), ek siteler (örnek: Türkçe sitesi ayrı alan adında). |
 | Tarama | Her site için "Tara" düğmesi. Var olan bir taramayı da bağlayabilirsiniz. Staging şifresini tarama ayarlarına yazın. Araç şifreyi saklamaz. |
 | Eşleştirme | Eski sitenin her bölümü (`/tr/`, `/fr/`…) bir satırdır. Araç yeni yeri önerir ve seçili getirir. Bulamadığı bölüm "Bulunamadı" der; satırı açın ve sayfaları görün. Serbest kural "Gelişmiş" altındadır. |
 | 301 haritası (v0.8.0) | Adresi değişen her sayfa için araç yeni sayfa önerir: slug, title, H1 ve içerik benzerliği. Güven: Yüksek / Orta / Düşük. Öneriyi onaylayın, başka sayfa seçin, adres yazın veya 410 verin. "CSV indir" son listeyi verir (eski URL, yeni URL, 301/410). Kararlar projede saklanır. v0.8.1: araç sayfanın dilini (html lang) kullanır. Türkçe sayfaya Türkçe sayfa önerir. Eski ana sayfaya doğru sitenin ana sayfasını önerir. Excel her satırda kararın kaynağını ve aracın önerisini gösterir. |
 | Yapılacaklar (v0.9.0) | İşler yapıldığı yere göre kartlara ayrılır: eski alan adı sunucusu (301, yönlendirme düzeltmesi, 410), her yeni site (sayfa oluşturun, link verin), İçerik (title, meta, H1, noindex) ve Karar bekleyen. Her kart ekibi gösterir ve listeyi açar. Yeni sitede çok az sayfa varsa araç "hazır değil gibi görünüyor" der ve o sitenin işlerini saymaz. Site gerçekten küçükse uyarıyı kapatın. Her terimin yanında "?" açıklaması var. Excel'in "Yapılacaklar" sayfası her işi yeri ve ekibi ile verir. v0.9.1: listede "Canlı adres" (canlıya çıkıştan sonraki adres, 301 hedefi) ve "Kontrol edilen adres" (staging) ayrı sütunlardır. Eski gruplar "Bütün sayfalar" altında. |
+| Canlıya çıkış (v0.10.0) | Staging taramalarından çıkış öncesi liste. Dört grup: **Kritik** (301 listesinde staging adresi, sitede açık yazılmış staging adresi: canonical, hreflang, link, görsel/script/CSS, sitemap, robots.txt `Sitemap:` satırı; şifresiz ve Google'a açık staging), **Karar bekleyen** (301 haritasında açık satır), **Çıkış anında değiştirin** (noindex, X-Robots-Tag, `Disallow: /`; staging'de normaldir), **Kontrol edin** (eski sitedeki Analytics/GTM kimliği ve Search Console doğrulama etiketi yeni sitede var mı). Göreli adres sorun değildir. Durum her zaman taramadan gelir: düzeltin, sonra tekrar tarayın. v0.10.0 öncesi taramalar "Tarama eski" der. Excel'de "Canlıya çıkış" sayfası var. |
 
 **Eski alan adına geçecek site:** Canlıdan sonra eski alan adını bu site kullanır. Bütün 301'ler bu sitede kurulur. Kurala girmeyen yol bu sitede aynı yolda aranır.
 
@@ -217,14 +218,16 @@ Skor = kritik sorunu olmayan URL oranı (robots ile engelli URL'ler hariç). Sit
 
 ## Testler
 
-`npm test` beş test çalıştırır:
+`npm test` sekiz test çalıştırır:
 
 1. Crawler testi (19 kontrol).
 2. Kural testi (99 kontrol): `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. SSL ve HSTS kuralları `test/fixture-https.js` (self-signed sertifika, 2046'ya kadar geçerli) ile test edilir. Testler internete çıkmaz: dış linkler `.invalid` alan adı kullanır. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü).
 
 3. Yayın modu testi (12 kontrol): iç ağ adresleri, tarayıcının iç adrese hiç istek göndermemesi, şifre zorunluluğu, `/healthz` ve limitler.
-4. Karşılaştırma testi (48 kontrol): yol eşleşmesi, kaybolan, yönlenen, içerik kaybı, yeni hostta istek, yol kuralları, çoklu hedef, bölüm kaldırıldı, desen önerisi, taşınan sayfanın 301 kontrolü, Excel.
-5. Proje testi (13 kontrol): proje tanımı, kayıt, API, "Tara" düğmesi, gerçek test siteleri ile eşleştirme ve 301 kontrolü (`test/fixture-migration.js`), proje dosyası indir/yükle.
+4. Karşılaştırma testi (49 kontrol): yol eşleşmesi, kaybolan, yönlenen, içerik kaybı, yeni hostta istek, yol kuralları, çoklu hedef, bölüm kaldırıldı, desen önerisi, taşınan sayfanın 301 kontrolü, Excel.
+5. Proje testi (20 kontrol): proje tanımı, kayıt, API, "Tara" düğmesi, gerçek test siteleri ile eşleştirme ve 301 kontrolü (`test/fixture-migration.js`), canlıya çıkış listesi API ve Excel, proje dosyası indir/yükle.
+6. 301 haritası testi (17 kontrol) ve yapılacaklar testi (8 kontrol).
+7. Canlıya çıkış testi (11 kontrol): `test/fixture-launch.js` dört site içerir (eski, kirli staging, açık staging, şifreli temiz staging). Temiz staging hiçbir iş üretmemeli.
 
 Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 
@@ -240,7 +243,7 @@ Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 2. **Sprint 1 — Kural motoru (77 kural), Sorunlar sekmesi, sağlık skoru, başlık ağacı** ✅
 3. **Sprint 2 — Ek kontroller: dış link, görsel, site sürümleri, HSTS, SSL, sıkıştırma, llms.txt (11 kural)** ✅
 4. **v0.5 — Yayın hazırlığı: Render, SSRF koruması, yayın modu** ✅
-5. Sprint 3 — Migration: **Parça 1 karşılaştırma ✅ (v0.6.1: yol kuralları, çoklu hedef, desen önerisi)**, **v0.7.0 taşıma projesi ✅ (proje, tarama, eşleştirme, 301 kontrolü)**, **v0.7.1 eşleştirme düzeltmesi ✅**, **v0.8.0 Parça 2 301 haritası ✅**, **v0.8.1 dil kontrolü ve gerçek site düzeltmeleri ✅**, **v0.9.0 yapılacaklar listesi (işin yapıldığı yere göre) ✅**, Parça 3 canlıya çıkış kontrolü, Parça 4 canlıda 301 doğrulama.
+5. Sprint 3 — Migration: **Parça 1 karşılaştırma ✅ (v0.6.1: yol kuralları, çoklu hedef, desen önerisi)**, **v0.7.0 taşıma projesi ✅ (proje, tarama, eşleştirme, 301 kontrolü)**, **v0.7.1 eşleştirme düzeltmesi ✅**, **v0.8.0 Parça 2 301 haritası ✅**, **v0.8.1 dil kontrolü ve gerçek site düzeltmeleri ✅**, **v0.9.0 yapılacaklar listesi (işin yapıldığı yere göre) ✅**, **v0.10.0 Parça 3a canlıya çıkış listesi ✅**, Parça 3b canlı doğrulama, Parça 4 canlıda 301 doğrulama.
 5. Sprint 4 — AI: title/description, alt text, başlık önerisi, schema, yazım, 301 eşleştirme
 6. Sprint 5 — Entegrasyon: PageSpeed (CWV), Search Console, ClickUp
 7. Sprint 6 — JS render (Playwright)

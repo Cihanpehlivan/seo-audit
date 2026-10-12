@@ -5,6 +5,12 @@ import { exactHash, simhash } from './fingerprint.js';
 
 const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
 const MAX_IMAGES = 200;
+// v0.10.0: analytics and tag manager IDs (GA4, Universal Analytics, Google Ads, GTM). Read only from scripts and noscript iframes.
+const TRACKING = /\b(GTM-[A-Z0-9]{4,10}|G-[A-Z0-9]{6,12}|UA-\d{4,10}-\d{1,4}|AW-\d{6,12})\b/g;
+const MAX_ABS_HOSTS = 20;
+const ABS = /^(https?:)?\/\//i;
+const absHost = (v) => { const x = String(v || '').trim(); if (!ABS.test(x)) return ''; try { return new URL(x, 'https://x.invalid').hostname.toLowerCase(); } catch { return ''; } };
+const uniq = (list) => [...new Set(list.filter(Boolean))].slice(0, MAX_ABS_HOSTS);
 const PLACEHOLDER = /lorem ipsum|dolor sit amet|consectetur adipiscing|buraya (bir )?(metin|yazı|içerik) gel|metin buraya gel|örnek metin(dir)?\b|sample text|text goes here|\bTODO\b|\bTBD\b/i;
 
 function jsonLdEntities(raw) {
@@ -38,6 +44,9 @@ export function parsePage(html, pageUrl, rootHost) {
   const baseHref = $('base[href]').attr('href');
   const base = baseHref ? normalizeUrl(baseHref, pageUrl) || pageUrl : pageUrl;
   const isHttps = pageUrl.startsWith('https:');
+  // Read before scripts are removed for the text.
+  const scriptText = $('script').map((_, el) => `${$(el).attr('src') || ''} ${$(el).html() || ''}`).get().join(' ') + ' ' + $('noscript').map((_, el) => $(el).html() || '').get().join(' ');
+  const tracking = [...new Set(scriptText.match(TRACKING) || [])].slice(0, MAX_ABS_HOSTS);
 
   const titles = $('head title, title').first().length ? $('title').map((_, el) => clean($(el).text())).get() : [];
   const metaDesc = $('meta[name="description" i]').map((_, el) => clean($(el).attr('content'))).get();
@@ -124,6 +133,16 @@ export function parsePage(html, pageUrl, rootHost) {
   const mainText = clean($main.text());
   const contentWordCount = mainText ? mainText.split(' ').length : 0;
 
+  // v0.10.0 (launch list): hosts written in full in the HTML. A relative address is not here: it works on any domain.
+  // canonical and hreflang are read raw, because the parsed value always has a host.
+  const absHosts = {
+    canonical: absHost($('link[rel="canonical" i]').first().attr('href')),
+    hreflang: uniq($('link[rel="alternate" i][hreflang]').map((_, el) => absHost($(el).attr('href'))).get()),
+    link: uniq($('a[href]').map((_, el) => absHost($(el).attr('href'))).get()),
+    asset: uniq($('img[src], script[src], link[rel="stylesheet" i][href], source[src], video[src], iframe[src]').map((_, el) => absHost($(el).attr('src') || $(el).attr('href'))).get()),
+  };
+  const gscVerify = uniq($('meta[name="google-site-verification" i]').map((_, el) => clean($(el).attr('content'))).get());
+
   return {
     title: titles[0] || '',
     titleCount: titles.length,
@@ -154,5 +173,6 @@ export function parsePage(html, pageUrl, rootHost) {
     textSample: text.slice(0, 600),
     placeholder: (PLACEHOLDER.exec(titles[0] || '') || PLACEHOLDER.exec(text) || [null])[0],
     links,
+    absHosts, tracking, gscVerify,
   };
 }

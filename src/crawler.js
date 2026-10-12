@@ -41,6 +41,12 @@ function decodeBody(buf, contentType) {
   catch { return new TextDecoder('utf-8').decode(buf); }
 }
 
+function sitemapHosts(urls) {
+  const out = {};
+  for (const u of urls) { try { const h = new URL(u).hostname.toLowerCase(); out[h] = (out[h] || 0) + 1; } catch {} }
+  return out;
+}
+
 export async function crawl(startUrl, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   const start = normalizeUrl(startUrl);
@@ -248,7 +254,8 @@ export async function crawl(startUrl, opts = {}) {
       startedAt, crawlFinishedAt: finishedCrawl, finishedAt: new Date().toISOString(),
       options: { ...o, auth: o.auth ? '***' : null, onProgress: undefined, onChecks: undefined, signal: undefined, checks: o.checks ? { ...(o.checks === true ? {} : o.checks), variants: undefined } : false },
       robots: { url: robotsUrl, status: robotsRes.status, sitemaps: robots.getSitemaps(), body: robotsTxt.slice(0, 20000) },
-      sitemap: { files: sitemap.files, urlCount: sitemap.urls.length },
+      // v0.10.0: hosts of the sitemap URLs (also hosts that are not crawled). The launch list finds staging addresses here.
+      sitemap: { files: sitemap.files, urlCount: sitemap.urls.length, hosts: sitemapHosts(sitemap.urls) },
       limitReached: list.length >= o.maxUrls,
       cancelled: !!o.signal?.aborted,
       notCrawled: [...linkQueue, ...sitemapQueue].length,

@@ -36,6 +36,10 @@ await check('tanım: hatalar açık mesaj verir', () => {
   assert.throws(() => validateProject({ ...DEF, sites: [...DEF.sites, { role: 'extra', key: 'tr', url: '' }] }), /anahtarı/);
   assert.throws(() => validateProject(DEF, { maxExtras: 0 }), /ek site/);
 });
+await check('tanım: eski \'paths\' yapısı \'same\' okunur (v0.10.0)', () => {
+  assert.equal(validateProject({ ...DEF, structure: 'paths' }).structure, 'same');
+  assert.equal(validateProject(DEF).structure, 'domains');
+});
 await check('kural: site anahtarı tarama alan adına çevrilir', () => {
   const p = validateProject(DEF);
   assert.deepEqual(engineRules(p, (k) => (k === 'tr' ? 'tr-staging.ornek.com' : '')), [{ from: '/tr/*', host: 'tr-staging.ornek.com', to: '/*' }, { from: '/fr/*', drop: true }]);
@@ -208,6 +212,19 @@ await check('yapılacaklar: işler yere göre gelir, site hazır sayılabilir, E
   assert.ok(ws, 'Yapılacaklar sayfası yok');
   assert.deepEqual(ws.getRow(1).values.slice(1, 7), ['Yer', 'Ekip', 'İş', 'Eski URL', 'Canlı URL', 'Kontrol edilen URL (staging)']);
   assert.equal(ws.rowCount - 1, d.todo.items.length);
+});
+await check('canlıya çıkış: liste match yanıtında ve Excel\'de (v0.10.0)', async () => {
+  const d = (await api(`/api/projects/${pid}/match`)).data;
+  assert.deepEqual(d.launch.groups.map((g) => g.key), ['critical', 'decide', 'switch', 'check']);
+  assert.equal(d.launch.total, Object.values(d.launch.counts).reduce((a, b) => a + b, 0));
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await (await fetch(`${base}/api/projects/${pid}/excel`)).arrayBuffer()));
+  const rows = d.launch.groups.flatMap((g) => g.items).reduce((a, it) => a + Math.max(1, it.list.length), 0);
+  const ws = wb.getWorksheet('Canlıya çıkış');
+  if (!rows) return assert.equal(ws, undefined);
+  assert.ok(ws, 'Canlıya çıkış sayfası yok');
+  assert.equal(ws.rowCount - 1, rows);
 });
 await check('API: Excel ve proje dosyası iner', async () => {
   const x = await fetch(`${base}/api/projects/${pid}/excel`);
