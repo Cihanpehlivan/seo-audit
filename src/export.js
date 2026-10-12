@@ -203,7 +203,8 @@ export async function exportCompareExcel(cmp, file, { map, todo } = {}) {
     const where = (p) => (p.kind === 'site' ? `${p.title} (${p.role === 'heir' ? 'eski alan adına geçecek site' : p.name || 'ek site'})` : p.title);
     sheet(wb, 'Yapılacaklar', [
       { header: 'Yer', key: 'where', width: 40 }, { header: 'Ekip', key: 'team', width: 10 }, { header: 'İş', key: 'label', width: 36 },
-      { header: 'Eski URL', key: 'oldUrl', width: 60 }, { header: 'Yeni URL', key: 'newUrl', width: 60 }, { header: 'Not', key: 'note', width: 70 },
+      { header: 'Eski URL', key: 'oldUrl', width: 60 }, { header: 'Canlı URL', key: 'liveUrl', width: 60 },
+      { header: 'Kontrol edilen URL (staging)', key: 'checkUrl', width: 60 }, { header: 'Not', key: 'note', width: 70 },
       { header: 'Durum', key: 'state', width: 34 },
     ], todo.items.map((it) => {
       const p = place.get(it.placeKey);

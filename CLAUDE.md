@@ -67,13 +67,13 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, yayın limitleri. Şifre isteğe bağlı, Render şifresiz (v0.8.4) | Tamam (v0.5.0) |
-| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1), yapılacaklar listesi (yere göre), site hazırlık uyarısı ve kavram açıklamaları (v0.9.0). Sırada: Parça 3 canlıya çıkış kontrolü | Devam ediyor |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1), yapılacaklar listesi (yere göre), site hazırlık uyarısı ve kavram açıklamaları (v0.9.0), canlı adres ve staging adresi ayrımı (v0.9.1). Sırada: Parça 3a çıkış öncesi liste | Devam ediyor |
 | Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), GitHub Pages veya Netlify | Tamam (v0.8.3), yayın bekliyor |
 | Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 7, proje 18 kontrol (toplam yaklaşık 12 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 18 kontrol (toplam yaklaşık 12 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
 - Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
@@ -98,6 +98,9 @@ Gerçek site denemesi (v0.8.0, 11 Ekim 2026, çok dilli taşıma: İngilizce kö
 - Excel onaylanan satırda güven, puan ve nedeni silmişti. Önerinin doğruluğu ölçülemedi.
 - Bölüm kuralı doğru olan eski İngilizce /prosedur/ sayfaları çoğunlukla doğru eşleşti. Dolgu sayfaları genel /procedures sayfasına gitti (daha özel sayfa vardı); kaynağı belli değil.
 v0.8.1 bu dört sorunu düzeltti. Tekrar test bekliyor.
+
+Açık noktalar (v0.9.1):
+- "Yeni yapı nasıl?" sorusunda "aynı yollar" ve "yollar değişiyor" seçenekleri aynı işi yapıyor (sadece "diller ayrı alan adlarına" davranışı değiştirir). Birleştirme önerildi, karar bekliyor.
 
 Açık noktalar (v0.9.0):
 - Yapılacaklar listesi gerçek sitede denenmedi. Şamil Şahin projesinde Yapılacaklar adımını açın. Sayıları 301 haritası ve Excel ile karşılaştırın. Türkçe site az sayfalı ise uyarı görünmeli.
@@ -171,6 +174,12 @@ Açık noktalar (Sprint 2'den):
 Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ederiz. Her kalem için: senaryo, beklenen sonuç, gerçek sonuç, bug kaydı. Yöntemi kullanıcı ile birlikte planlarız. Şimdilik sadece bu not var. Plan yapılmadan doğrulamaya başlama.
 
 ## Karar günlüğü
+
+- v0.9.1: Gerçek kullanımda kafa karışıklığı (Doyuyo): Yapılacaklar listesindeki "Yeni adres" sütunu bazı satırlarda staging adresini gösteriyordu. Kullanıcı bunu "eski adresi staging'e yönlendiriyoruz" diye okudu. Düzeltme: her işin iki adresi var. `liveUrl` = canlıya çıkıştan sonraki adres (geçecek site için eski alan adı, ek site için projedeki canlı alan adı). `checkUrl` = aracın kontrol ettiği adres (staging). Ekranda ve Excel'de ayrı sütunlar: "Canlı adres" ve "Kontrol edilen adres". Canlı adres link değildir (canlıda sayfa henüz yok). Canlı alan adı yoksa canlı adres boş kalır ve ekran "Canlı alan adı yok" der: staging adresi asla canlı adres gibi yazılmaz.
+- v0.9.1: Kural: 301 hedefi her zaman canlı alan adıdır. Staging sadece karşılaştırma ve test içindir. Staging'de test edilen kural staging içinde çalışır (`staging/eski` → `staging/yeni`). Canlıdan staging'e yönlendirme hiçbir aşamada olmaz.
+- v0.9.1: Linksiz sayfa notu değişti: "Sayfa yeni sitede aynı yolda var. 301 gerekmez. Menüden veya içerikten link verin." Eski metindeki "Sayfa gereksizse 301 ile yönlendirin" cümlesi satırı yönlendirme işi gibi gösteriyordu. Sayfa oluşturma ve harita kararı notları da adres içermez (adres sütunlarda).
+- v0.9.1: "Hazır 301 listesini içe aktar ve kontrol et" özelliği yapılmayacak (kullanıcı kararı). Neden: 301 listesini bu araç üretir. Örnek dosya (eski bir projeden, SEO uzmanının listesi) staging adresli hedefler, toplu ana sayfa yönlendirmesi, sonda boşluk ve tutarsız `/` içeriyordu. Bu sorunları aracın kendi listesi zaten önler (canlı alan adı, soft 404 uyarısı, CSV temizliği).
+- v0.9.1: Parça 3a için not (henüz onaylanmadı): "301 listesinde staging adresi" kontrolü kritik madde olarak listeye girer.
 
 - v0.9.0: Yapılacaklar ekranı (kullanıcı sohbette taslağı onayladı). Her yer bir karttır: başlık + "?", ekip etiketi (Backend, CMS, İçerik, Siz), iş sayısı, iş satırları, "Listeyi aç". Sıra: eski alan adı sunucusu, geçecek site, ek siteler, İçerik, Karar bekleyen. Eski grup görünümü kapalı "Bütün sayfalar" bölümünde kalır.
 - v0.9.0: CLAUDE.md'deki v0.7.0 tasarımından fark: geçecek site de ayrı satırdır (tasarım "her ek site" diyordu). Neden: "Sayfa oluşturun" işi geçecek sitede de olur.

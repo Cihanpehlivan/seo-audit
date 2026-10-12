@@ -453,7 +453,7 @@ export async function probeLost(cmp, request, { concurrency = 5, maxHops = 5 } =
     } else if (st === 401 || st === 403) {
       move('unknown', { ...r, newUrl, reason: `Erişim engeli (${st}). Staging şifreli olabilir.`, todo: 'Staging şifresini geçici olarak kaldırın veya eşleştirmeyi canlıda yapın.' });
     } else if (st >= 200 && st < 300) {
-      move('unlinked', { ...r, newUrl, reason: `Açılıyor (${st}) ama yeni sitede bu sayfaya link yok`, todo: 'Sayfaya menüden veya içerikten link verin. Sayfa gereksizse 301 ile yönlendirin.' });
+      move('unlinked', { ...r, newUrl, reason: `Açılıyor (${st}) ama yeni sitede bu sayfaya link yok`, todo: 'Sayfa yeni sitede aynı yolda var. 301 gerekmez. Menüden veya içerikten link verin.' });
     } else if (r.dropped) {
       move('removed', { ...r, newUrl, newStatus: st, reason: `Adres ${st} veriyor`, todo: REMOVED_TODO });
     } else {

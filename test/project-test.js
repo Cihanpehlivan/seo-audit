@@ -206,7 +206,7 @@ await check('yapılacaklar: işler yere göre gelir, site hazır sayılabilir, E
   await wb.xlsx.load(Buffer.from(await (await fetch(`${base}/api/projects/${pid}/excel`)).arrayBuffer()));
   const ws = wb.getWorksheet('Yapılacaklar');
   assert.ok(ws, 'Yapılacaklar sayfası yok');
-  assert.deepEqual(ws.getRow(1).values.slice(1, 4), ['Yer', 'Ekip', 'İş']);
+  assert.deepEqual(ws.getRow(1).values.slice(1, 7), ['Yer', 'Ekip', 'İş', 'Eski URL', 'Canlı URL', 'Kontrol edilen URL (staging)']);
   assert.equal(ws.rowCount - 1, d.todo.items.length);
 });
 await check('API: Excel ve proje dosyası iner', async () => {

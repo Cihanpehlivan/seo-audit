@@ -37,11 +37,11 @@ const cmp = {
       row('/tr/gecici', TR, { newUrl: 'https://tr.ornek.com/gecici', status: 302, hops: 1, changes: [{ field: 'noindex', kind: 'lost' }], targetUnlinked: true }),
     ],
     no301: [row('/tr/eksik', TR, { todo: 'Eski alan adına geçecek sitede 301 kurun.' })],
-    notarget: [row('/tr/yok-1', TR, { expectUrl: 'https://tr.eski.com/yok-1', todo: 'Sayfayı oluşturun.' }), row('/tr/yok-2', TR, { expectUrl: 'https://tr.eski.com/yok-2' })],
+    notarget: [row('/tr/yok-1', TR, { expectUrl: 'https://tr.eski.com/yok-1', checkUrl: 'https://tr.ornek.com/yok-1', todo: 'Sayfayı oluşturun.' }), row('/tr/yok-2', TR, { expectUrl: 'https://tr.eski.com/yok-2', checkUrl: 'https://tr.ornek.com/yok-2' })],
     added: [],
   },
 };
-const T = (site, path) => ({ site, path, url: `https://x/${path}` });
+const T = (site, path) => ({ site, path, url: `https://x.test${path}` });
 const map = { rows: [
   { path: '/tr/kurulu', oldUrl: O('/tr/kurulu'), kind: 'rule', installed: true, status: 'rule', target: T('tr', '/kurulu') },
   { path: '/tr/eksik', oldUrl: O('/tr/eksik'), kind: 'rule', installed: false, status: 'rule', target: T('tr', '/eksik'), why: 'Kural: /tr/*' },
@@ -54,8 +54,8 @@ const map = { rows: [
 ] };
 const sections = [{ from: '/tr/*', alert: { kind: 'lang' } }, { from: '/blog/*' }];
 const SITES = [
-  { key: 'heir', role: 'heir', host: HEIR, okPages: 40, crawlId: 'c-heir' },
-  { key: 'tr', role: 'extra', name: 'Türkçe', host: TR, okPages: 30, crawlId: 'c-tr' },
+  { key: 'heir', role: 'heir', host: HEIR, origin: `https://${HEIR}`, liveOrigin: 'https://www.eski.com', okPages: 40, crawlId: 'c-heir' },
+  { key: 'tr', role: 'extra', name: 'Türkçe', host: TR, origin: `https://${TR}`, liveOrigin: 'https://tr.eski.com', okPages: 30, crawlId: 'c-tr' },
 ];
 const build = (x = {}) => buildTodo({ cmp, map, sections, sites: SITES, oldHost: 'www.eski.com', cfg, ...x });
 const place = (t, key) => t.places.find((p) => p.key === key);
@@ -113,6 +113,19 @@ await check('hazır olmayan site: kullanıcı kabul edince işler sayılır, yen
   assert.equal(ok.ready.tr.state, 'accepted');
   assert.deepEqual([place(ok, 'site:tr').n, ok.held], [13, 0]);
   assert.equal(build({ sites: thin, cmp: big, readyOk: { tr: 'eski-tarama' } }).ready.tr.state, 'thin');
+});
+await check('adres: canlı adres canlı alan adıdır, staging sadece kontrol adresidir', () => {
+  const t = build();
+  const it = (p, task) => t.items.find((i) => i.path === p && i.task === task);
+  assert.deepEqual([it('/linksiz', 'link').liveUrl, it('/linksiz', 'link').checkUrl], ['https://www.eski.com/linksiz', 'https://staging.ornek.com/linksiz']);
+  assert.doesNotMatch(it('/linksiz', 'link').note, /yönlendirin/);
+  assert.deepEqual([it('/zincir', 'fix').liveUrl, it('/zincir', 'fix').checkUrl], ['https://www.eski.com/z', 'https://staging.ornek.com/z']);
+  assert.equal(it('/tr/eksik', '301').liveUrl, 'https://tr.eski.com/eksik');
+  assert.equal(it('/kayip-b', 'map').liveUrl, 'https://www.eski.com/b');
+  assert.ok(t.items.every((i) => !/staging\.ornek\.com/.test(i.liveUrl)), 'canlı adreste staging var');
+  const noLive = buildTodo({ cmp, map, sections, oldHost: 'www.eski.com', cfg, sites: SITES.map((s) => (s.key === 'tr' ? { ...s, liveOrigin: null } : s)) });
+  const c = noLive.items.find((i) => i.path === '/tr/yok-1');
+  assert.deepEqual([c.liveUrl, c.checkUrl], ['', 'https://tr.ornek.com/yok-1']); // canlı alan adı yoksa staging canlı adres gibi yazılmaz
 });
 await check('hazırlık: az eski sayfa veya yeterli yeni sayfa uyarı vermez', () => {
   const r = siteReadiness(cmp, SITES.map((s) => ({ ...s, okPages: 1 })), {}, cfg);

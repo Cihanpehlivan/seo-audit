@@ -52,45 +52,58 @@ export function buildTodo({ cmp, map, sections = [], sites, oldHost, readyOk = {
   const keyOfHost = (h) => sites.find((s) => bare(s.host) === bare(h))?.key || null;
   const ready = siteReadiness(cmp, sites, readyOk, cfg);
   const items = [];
-  const add = (place, task, row, extra = {}) => items.push({
-    place, task, label: TASK[task], path: row.path || '', oldUrl: row.oldUrl || '', newUrl: '', site: null, note: '', ...extra,
+  // v0.9.1: every task has two addresses. liveUrl: the address after launch (the live domain). checkUrl: the address the
+  // tool checked (staging). A 301 always goes to liveUrl, never to staging. liveUrl is empty when the site has no live domain.
+  const byKey = new Map(sites.map((s) => [s.key, s]));
+  const pathOf = (u) => { try { const x = new URL(u); return x.pathname + x.search; } catch { return ''; } };
+  const where = (siteKey, url) => {
+    const s = byKey.get(siteKey), p = url ? pathOf(url) : '';
+    if (!url) return { liveUrl: '', checkUrl: '' };
+    if (!s || !p) return siteKey ? { liveUrl: '', checkUrl: url } : { liveUrl: url, checkUrl: '' }; // no site: an address the user wrote
+    return { liveUrl: s.liveOrigin ? new URL(p, s.liveOrigin).href : '', checkUrl: s.origin ? new URL(p, s.origin).href : url };
+  };
+  // site: the site the task belongs to (a thin site holds it). addrSite: the site of the address, if it differs.
+  const add = (place, task, row, { site = null, addrSite = site, url = '', note = '' } = {}) => items.push({
+    place, task, label: TASK[task], path: row.path || '', oldUrl: row.oldUrl || '', site, ...where(addrSite, url), note,
   });
+  const hostKey = (u) => { try { return keyOfHost(new URL(u).hostname); } catch { return null; } };
   const mapRow = new Map((map?.rows || []).map((r) => [r.path, r]));
 
   // Server of the old domain: the final 301 list (as in the CSV) minus the 301s that already work.
   const cmpNo301 = new Map((R.no301 || []).map((r) => [r.path, r]));
   for (const r of map?.rows || []) {
-    if (r.status === 'rule' && !r.installed) add('server', '301', r, { newUrl: r.target.url, site: r.target.site, note: cmpNo301.get(r.path)?.todo || r.why });
-    if (r.status === 'approved') add('server', '301', r, { newUrl: r.target.url, site: r.target.site, note: r.decision?.src === 'elle' ? 'Haritada elle yazıldı.' : 'Haritada onaylandı.' });
+    if (r.status === 'rule' && !r.installed) add('server', '301', r, { url: r.target.url, site: r.target.site, note: cmpNo301.get(r.path)?.todo || r.why });
+    if (r.status === 'approved') add('server', '301', r, { url: r.target.url, site: r.target.site || null, note: r.decision?.src === 'elle' ? 'Haritada elle yazıldı.' : 'Haritada onaylandı.' });
     if (r.status === 'gone') add('server', '410', r, { note: 'Haritada 410 seçildi.' });
   }
   for (const r of R.redirected || []) {
     const fix = !r.targetBroken && redirectFix(r);
-    if (fix) add('server', 'fix', r, { newUrl: r.target, site: keyOfHost(r.site), note: fix });
+    if (fix) add('server', 'fix', r, { url: r.target, site: hostKey(r.target) || keyOfHost(r.site), note: fix });
   }
   for (const r of R.moved || []) {
     const fix = redirectFix(r);
-    if (fix) add('server', 'fix', r, { newUrl: r.newUrl || r.expectUrl, site: keyOfHost(r.site), note: fix });
+    if (fix) add('server', 'fix', r, { url: r.newUrl || r.checkUrl, site: keyOfHost(r.site), note: fix });
   }
 
   // New sites: a missing target page (rule target or a target chosen in the map), a page without links.
   for (const r of R.notarget || []) {
     const m = mapRow.get(r.path);
     if (m && !['pending', 'none'].includes(m.status)) continue; // a decision replaced the rule target
-    add('site', 'create', r, { newUrl: r.expectUrl || r.checkUrl, site: keyOfHost(r.site), note: r.todo });
+    add('site', 'create', r, { url: r.checkUrl, site: keyOfHost(r.site), note: 'Sayfayı yeni sitede oluşturun. Sayfa olmayacaksa 301 haritasında başka sayfa seçin.' });
   }
   for (const r of map?.rows || []) {
     if (r.status === 'approved' && r.target?.site && r.warn && sites.some((s) => s.key === r.target.site)) {
-      add('site', 'create', r, { newUrl: r.target.url, site: r.target.site, note: 'Haritada seçilen hedef sayfa son taramada yok.' });
+      add('site', 'create', r, { url: r.target.url, site: r.target.site, note: 'Haritada seçilen hedef sayfa son taramada yok. Sayfayı oluşturun veya haritada başka sayfa seçin.' });
     }
   }
-  for (const r of R.unlinked || []) add('site', 'link', r, { newUrl: r.newUrl, site: keyOfHost(r.site), note: r.todo });
-  for (const r of R.moved || []) if (r.targetUnlinked) add('site', 'link', r, { newUrl: r.newUrl, site: keyOfHost(r.site), note: 'Hedef sayfaya yeni sitede link verin.' });
+  // A link task is not a redirect: the page is already on the new site. Only a link is missing.
+  for (const r of R.unlinked || []) add('site', 'link', r, { url: r.newUrl, site: keyOfHost(r.site), note: 'Sayfa yeni sitede aynı yolda var. 301 gerekmez. Menüden veya içerikten link verin.' });
+  for (const r of R.moved || []) if (r.targetUnlinked) add('site', 'link', r, { url: r.newUrl, site: keyOfHost(r.site), note: 'Hedef sayfa yeni sitede var. Menüden veya içerikten link verin.' });
 
   // Content: one task per lost field.
   for (const r of [...(R.changed || []), ...(R.moved || [])]) {
     for (const c of (r.changes || []).filter((x) => x.kind === 'lost')) {
-      add('content', c.field, r, { newUrl: r.newUrl || '', site: keyOfHost(r.site), note: FIX[c.field] || '' });
+      add('content', c.field, r, { url: r.newUrl || '', site: keyOfHost(r.site), note: FIX[c.field] || '' });
     }
   }
 
@@ -99,12 +112,12 @@ export function buildTodo({ cmp, map, sections = [], sites, oldHost, readyOk = {
   const cmpSite = new Map();
   for (const k of ['lost', 'notarget', 'removed', 'redirected']) for (const r of R[k] || []) cmpSite.set(r.path, keyOfHost(r.site));
   for (const r of map?.rows || []) {
-    if (r.status === 'pending' && !created.has(r.path)) add('decide', 'map', r, { newUrl: r.target.url, site: r.from === 'removed' ? null : cmpSite.get(r.path) || null, note: `Öneri onay bekliyor: ${r.target.url}` });
+    if (r.status === 'pending' && !created.has(r.path)) add('decide', 'map', r, { url: r.target.url, site: r.from === 'removed' ? null : cmpSite.get(r.path) || null, addrSite: r.target.site, note: 'Öneri onay bekliyor. Haritada onaylayın veya başka sayfa seçin.' });
     if (r.status === 'none' && !created.has(r.path)) add('decide', 'map', r, { site: r.from === 'removed' ? null : cmpSite.get(r.path) || null, note: 'Öneri yok. Adres seçin veya 410 verin.' });
     if (r.status === 'approved' && r.warn && !sites.some((s) => s.key === r.target?.site) && r.target?.site) add('decide', 'map', r, { note: r.warn });
   }
   for (const s of sections.filter((x) => x.alert)) add('decide', 'section', { path: s.from }, { note: 'Eşleştirme ekranında önerilen seçimi kullanın.' });
-  for (const r of R.unknown || []) add('decide', 'unknown', r, { newUrl: r.checkUrl || '', site: keyOfHost(r.site), note: [r.reason, r.todo].filter(Boolean).join('. ') });
+  for (const r of R.unknown || []) add('decide', 'unknown', r, { url: r.checkUrl || '', site: keyOfHost(r.site), note: [r.reason, r.todo].filter(Boolean).join('. ') });
 
   // A task of a thin site waits. Server tasks never wait: the 301 list does not depend on the new site's content.
   for (const it of items) it.held = it.place !== 'server' && !!it.site && ready[it.site]?.state === 'thin';

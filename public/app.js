@@ -1218,6 +1218,9 @@ const TERMS = {
   section: 'Bölümün kararı sayfaların diline veya bulunan sayfa sayısına uymuyor. Eşleştirme ekranında önerilen seçimi kullanın.',
   unknown: 'Araç adresi kontrol edemedi. Neden: staging şifresi, robots.txt engeli veya bağlantı hatası. Satırda çözüm yazılı.',
   held: 'Site hazır olmadığı için bu işler sayılmaz. Site hazır olunca tekrar tarayın.',
+  liveUrl: 'Canlıya çıkıştan sonraki adres. 301 her zaman bu adrese gider. Canlı adresi staging adresine asla yönlendirmeyin.',
+  checkUrl: 'Aracın kontrol ettiği adres (genelde staging). Sayfayı açıp görmek içindir. 301 hedefi değildir.',
+  noLive: 'Bu sitenin canlı alan adı projede yok. Proje adımında "canlı alan adı" alanını doldurun.',
 };
 const todoState = { open: null };
 const placeSite = (p) => (p.kind === 'site' ? siteByKey(p.site) : null);
@@ -1268,8 +1271,10 @@ function placeList(p, t) {
   const max = t.listLimit || 200;
   const shown = list.slice(0, max);
   const head = list.length > max ? `<p class="small">${list.length} iş var. İlk ${max} satır görünüyor. Bütün liste Excel'de.</p>` : '';
-  return `<div class="plist">${head}<div class="table-wrap"><table><thead><tr><th>İş</th><th>Eski adres</th><th>Yeni adres</th><th>Not</th></tr></thead><tbody>${
-    shown.map((i) => `<tr><td>${esc(i.label)}</td><td class="u">${cmpLink(i.oldUrl, i.path)}</td><td class="u">${i.newUrl ? cmpLink(i.newUrl) : '<span class="small">—</span>'}</td><td>${esc(i.note)}</td></tr>`).join('')
+  // v0.9.1: the live address and the checked (staging) address are separate columns. A 301 goes to the live address only.
+  const live = (i) => (i.liveUrl ? `<span class="u-live">${esc(i.liveUrl)}</span>` : i.checkUrl ? `<span class="small">Canlı alan adı yok ${help(TERMS.noLive)}</span>` : '<span class="small">—</span>');
+  return `<div class="plist">${head}<div class="table-wrap"><table><thead><tr><th>İş</th><th>Eski adres</th><th>Canlı adres ${help(TERMS.liveUrl)}</th><th>Kontrol edilen adres ${help(TERMS.checkUrl)}</th><th>Not</th></tr></thead><tbody>${
+    shown.map((i) => `<tr><td>${esc(i.label)}</td><td class="u">${cmpLink(i.oldUrl, i.path)}</td><td class="u">${live(i)}</td><td class="u">${i.checkUrl ? cmpLink(i.checkUrl) : '<span class="small">—</span>'}</td><td>${esc(i.note)}</td></tr>`).join('')
   }</tbody></table></div></div>`;
 }
 $('#todoPlaces').addEventListener('click', (e) => {

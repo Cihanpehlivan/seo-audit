@@ -212,7 +212,8 @@ async function projectMatch(p) {
   map.noLive = mapSites.filter((s) => !s.liveOrigin).map((s) => s.key);
   // Work list by place (v0.9.0). A thin site (few pages) is "not ready" until the user accepts its crawl.
   const todo = buildTodo({ cmp, map, sections, oldHost: oldRes.meta.host, readyOk: p.readyOk || {}, cfg: loadConfig().todo || {},
-    sites: targets.map((s, i) => ({ key: s.key, role: s.role, name: s.name, host: newList[i].meta.host, okPages: newList[i].pages.filter(isOk).length, crawlId: status[s.key].crawlId })) });
+    sites: targets.map((s, i) => ({ key: s.key, role: s.role, name: s.name, host: newList[i].meta.host, origin: mapSites[i].origin, liveOrigin: mapSites[i].liveOrigin,
+      okPages: newList[i].pages.filter(isOk).length, crawlId: status[s.key].crawlId })) });
   return { cmp, sections, targets: targets.map((s) => s.key), status, map, todo };
 }
 

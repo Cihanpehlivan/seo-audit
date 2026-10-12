@@ -463,6 +463,10 @@ details.q p { position: absolute; z-index: 5; top: 24px; left: -8px; width: 280p
 .plist .table-wrap { max-height: 420px; overflow: auto; }
 .plist td { font-size: 13px; vertical-align: top; }
 .plist td.u { min-width: 150px; overflow-wrap: anywhere; }
+.plist .u-live { color: var(--ink); }
+.plist th { white-space: nowrap; }
+.plist th details.q { vertical-align: middle; }
+.plist th details.q p { white-space: normal; font-weight: 400; }
 .ready-warn { background: var(--amber-soft); border: 1px solid #5C4A26; border-radius: 8px; padding: 12px 16px; margin: 0 0 12px; }
 .ready-warn p { margin: 0 0 4px; color: #F2D29A; }
 .ready-warn .rw-h { color: #F2D29A; margin: 0 0 4px; }
