@@ -9,8 +9,7 @@
     "bundle": "node scripts/bundle.js"
   },
   "author": "",
-  "license": "UNLICENSED",
-  "private": true,
+  "license": "ISC",
   "dependencies": {
     "cheerio": "^1.0.0",
     "exceljs": "^4.4.0",

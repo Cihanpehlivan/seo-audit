@@ -4,7 +4,7 @@ Sürüm: `package.json` dosyasındaki `version` alanı. Değişiklikler: `CLAUDE
 
 Teknik SEO denetim aracı. Kişisel proje. Bir siteyi tarar. Sonuçları web arayüzünde, JSON'da ve Excel'de gösterir.
 
-Tanıtım sayfası: `docs/index.html`. Yayın: statik servis (Netlify veya Cloudflare Pages), yayın klasörü `docs`, build komutu yok. Depo gizlidir, servis sadece `docs/` klasörünü yayınlar.
+Tanıtım sayfası: `docs/index.html`. Yayın: GitHub Pages (Settings → Pages → Deploy from a branch → main, /docs) veya Netlify (yayın klasörü `docs`, build komutu yok).
 
 ## Kurulum
 

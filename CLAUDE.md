@@ -38,7 +38,7 @@ src/server.js           Web sunucusu + API (/api/crawls, /api/projects, /api/com
                         /api/projects/:id/map → GET (harita, ?format=csv son liste), POST { set: { "/eski/yol": karar | null } }
                         /api/projects/:id → crawl (POST), match, excel, export. GET/PUT/DELETE tanım
 render.yaml             Render Blueprint (ücretsiz plan, Docker)
-docs/                   Landing page (v0.8.3): docs/index.html + docs/img/. Statik serviste (Netlify veya Cloudflare Pages) yayınlanır, yayın klasörü docs. Uygulamadan bağımsız, tarama yapmaz
+docs/                   Landing page (v0.8.3): docs/index.html + docs/img/. GitHub Pages (main, /docs) veya Netlify ile yayınlanır. Uygulamadan bağımsız, tarama yapmaz
 public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page (Site denetimi / Taşıma projesi). Proje ekranı: adım çubuğu + Sıradaki iş kartı
 config/rules.json       Bütün eşikler, kural ayarları ve ek kontrol limitleri (checks)
 test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi, fixture-migration.js: eski site + geçecek site)
@@ -61,12 +61,12 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 |---|---|---|
 | Faz 1 | Crawler, CLI, Excel, web arayüzü, canlı durum şeridi | Tamam (v0.2) |
 | Sprint 1 | Kural motoru (77 kural), Sorunlar sekmesi, sağlık skoru, başlık ağacı | Tamam (v0.3) |
-| Altyapı | CLAUDE.md, .env.example, GitHub deposu `seo-audit` (v0.8.3'ten beri Private, kullanıcı zip yükler) | Tamam (v0.4.3) |
+| Altyapı | CLAUDE.md, .env.example, GitHub deposu `seo-audit` (Public), Claude depoyu klonlar | Tamam (v0.4.3) |
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, zorunlu şifre, yayın limitleri | Tamam (v0.5.0) |
 | Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1). Sırada: işin yapıldığı yere göre yapılacaklar listesi ve kavram açıklamaları. Sonra Parça 3: canlıya çıkış kontrolü | Devam ediyor |
-| Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), Netlify veya Cloudflare Pages | Tamam (v0.8.3), yayın bekliyor |
+| Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), GitHub Pages veya Netlify | Tamam (v0.8.3), yayın bekliyor |
 | Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
@@ -159,12 +159,12 @@ Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ed
 
 ## Karar günlüğü
 
-- v0.8.3: Depo gizli olur (kullanıcı kararı, v0.4.3 kararının yerine geçer). Neden: kod herkese verilmeyebilir. Sonuçlar: (1) Claude depoyu klonlayamaz, kullanıcı her sohbetin başında depoyu zip olarak yükler. (2) Arkadaş depoya davetli üye olarak eklenir. (3) Render'ın GitHub uygulaması gizli depoya erişim izni almalı. (4) GitHub Pages ücretsiz planda gizli depoda çalışmaz, landing statik serviste yayınlanır. (5) `package.json`: license UNLICENSED, private true. Gizli depoda da kural aynı: .env, anahtar, müşteri verisi ve tarama sonucu depoya girmez.
-- v0.8.3: Landing page (kullanıcı onayladı). Proje iş listesinden ayrı bir görev, Sprint 3 sırasını değiştirmez. Yer: `docs/index.html`, yayın: Netlify veya Cloudflare Pages (gizli GitHub deposuna bağlanır, yayın klasörü `docs`, build komutu yok). Sayfada kod linki yok. Uygulamanın içinde değil, çünkü: yayın modunda uygulama şifre ister, Render ücretsiz plan uyur (ilk açılış yavaş), portfolyo linki şifre denemesi çeker. v0.4.1 kararı (sunucuyu herkese açma) korunur.
+- v0.8.3: Depo açık kalır (v0.4.3 kararı geçerli). Kullanıcı önce gizli depoyu seçti, sonra vazgeçti. Claude depoyu klonlamaya devam eder. Landing'de "Kodu inceleyin" düğmesi ve GitHub linki var.
+- v0.8.3: Landing page (kullanıcı onayladı). Proje iş listesinden ayrı bir görev, Sprint 3 sırasını değiştirmez. Yer: `docs/index.html`, yayın: GitHub Pages (Settings → Pages → main, /docs) veya Netlify (yayın klasörü `docs`). Uygulamanın içinde değil, çünkü: yayın modunda uygulama şifre ister, Render ücretsiz plan uyur (ilk açılış yavaş), portfolyo linki şifre denemesi çeker. v0.4.1 kararı (sunucuyu herkese açma) korunur.
 - v0.8.3: Tasarım yönü "kadastro paftası" (frontend-design skill ile, üç yönden kullanıcı seçti). Eski site = mavi ölçü çizgisi, yeni site = kırmızı kesik sınır, sorun = kırmızı nokta, ekip = kare. Renk: pafta zemini #E6EDE3, grafit #2B2E2A, ölçü mavisi #2F5D8C, sınır kırmızısı #B3261E, ızgara #D3DECF. Yazı: Overpass (Google Fonts). Uygulama teması (grafit + kırmızı) kopyalanmadı: landing kendi kimliğini taşır. Tek hareket: eski parseller çizilir, yeni sınırlar gelir, iki sorun işareti düşer; prefers-reduced-motion açıksa yok. Parsellere sayfa yolları yazılır (/urun → /kahveler).
 - v0.8.3: Düzen tam genişliktir (kullanıcı istedi). Izgara bütün ekranı kaplar, bölümler tam genişlik bantlardır, bantlar arasında pafta çizgisi var. Hero ekran yüksekliğindedir, çizim sağ kenara uzanır. Metin satırı dar kalır (40-45 karakter). İlk sürümdeki ortada çerçeveli kâğıt düzeni bırakıldı: geniş ekranda küçük ve belge gibi duruyordu.
 - v0.8.3: Ekran görüntüleri örnek sitelerden alındı (kavrulmus.example: eski site, staging, İngilizce site; RFC 2606 alan adları). Müşteri verisi yok. Örnek site depoya girmez.
-- v0.8.3: "Uygulamaya girin" düğmesi `docs/index.html` sonundaki `APP_URL` sabitini kullanır. Boş ise düğme gizlidir. Adres yazılırsa landing'i açan herkes görür: karar kullanıcıda.
+- v0.8.3: "Uygulamaya girin" düğmesi `docs/index.html` sonundaki `APP_URL` sabitini kullanır. Boş ise düğme gizlidir. Adres yazılırsa landing'i açan herkes görür: karar kullanıcıda. Uygulama şifreli kalır (v0.4.1).
 
 - v0.8.2: README başlığındaki sürüm (v0.6.1'de kalmıştı) kaldırıldı. Sürümün tek kaynağı `package.json`. İş sonu kuralına README eklendi (Çalışma döngüsü, 5. adım).
 - v0.8.1: Belge değişiklikleri. "İki kişi çalışma kuralları" ve "Doğrulama planı (bekliyor)" bölümleri eklendi. Render'daki tek tarama sınırı Durum'a not olarak yazıldı.
@@ -268,18 +268,18 @@ Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ed
 
 ## Proje dosyaları
 
-Kodun tek kaynağı GitHub deposudur: https://github.com/Cihanpehlivan/seo-audit (Private, v0.8.3). Arkadaş davetli üyedir.
+Kodun tek kaynağı GitHub deposudur: https://github.com/Cihanpehlivan/seo-audit (Public). Depo bir arkadaş ile paylaşılır.
 
 - `CLAUDE.md` — bu dosya: amaç, mimari, kurallar, durum, karar günlüğü. Depoda durur.
 - `KAYNAK_KOD.md` — artık gerekmez. Depoya girmez. `npm run bundle` komutu yedek olarak durur.
-- Depoya asla gizli bilgi koyma: `.env`, API anahtarı, staging şifresi, müşteri verisi, tarama sonucu (`crawls/`). Depo gizli olsa da bu kural geçerlidir: depo paylaşılır ve tekrar açılabilir.
+- Depoya asla gizli bilgi koyma: `.env`, API anahtarı, staging şifresi, müşteri verisi, tarama sonucu (`crawls/`). Depo herkese açıktır.
 
 ## Çalışma döngüsü
 
 Sohbette (claude.ai):
 
 1. Kullanıcı yeni sohbet açar ve görevi yazar. Dosya yüklemez.
-2. Depo gizlidir (v0.8.3), Claude klonlayamaz. Kullanıcı depoyu zip olarak yükler (GitHub → Code → Download ZIP). Claude zip'i açar, `npm install` ve `npm test` çalıştırır. Testler geçmeden geliştirmeye başlama.
+2. Claude depoyu klonlar: `git clone https://github.com/Cihanpehlivan/seo-audit.git`. Sonra `npm install` ve `npm test` çalıştırır. Testler geçmeden geliştirmeye başlama. Klonlama çalışmazsa kullanıcıdan depoyu zip olarak ister (GitHub → Code → Download ZIP).
 3. Görevi bu dosyadan ve kullanıcıdan al. Kodu yaz, test sitesine yeni sayfalar ekle, `npm test` çalıştır.
 4. Arayüz değiştiyse ekran görüntüsü ile kontrol et (masaüstü 1440 px ve mobil 390 px).
 5. İş sonunda: bu dosyadaki Durum ve Karar günlüğü bölümlerini güncelle, `package.json` sürümünü artır. Kullanıcıya görünen özellik değiştiyse `README.md` içindeki ilgili bölümü de güncelle. README başlığına sürüm yazma.
@@ -303,7 +303,7 @@ Arkadaş:
 
 Kullanıcı (Cihan):
 1. Pull Request kontrolünü Claude ile yapar.
-2. Kullanıcı branch'i zip olarak yükler (GitHub → branch'i seçin → Code → Download ZIP). Depo gizli olduğu için Claude klonlayamaz.
+2. Claude branch'i klonlar: `git clone -b <branch> https://github.com/Cihanpehlivan/seo-audit.git`.
 3. Claude `npm install` ve `npm test` çalıştırır.
 4. Claude değişikliği bu dosyadaki kurallara göre inceler: testler, `/temiz` sayfası, eşikler, bağımlılık, XSS (`esc()`), gizli bilgi, Durum ve Karar günlüğü güncel mi. Arayüz değiştiyse ekran görüntüsü alır (1440 px ve 390 px).
 5. Claude bulguları listeler. Kullanıcı merge eder veya değişiklik ister.
