@@ -30,21 +30,22 @@ src/checks.js           Ek kontroller (tarama sonrası): site sürümleri, SSL, 
 src/parser.js           HTML → SEO alanları (başlık ağacı, JSON-LD, görseller, linkler, parmak izi)
 src/fingerprint.js      exactHash + 64-bit simhash (BigInt yok)
 src/normalize.js        URL normalizasyonu, iç/dış ayrımı (www = aynı site)
-src/sitemap.js          sitemap + sitemap index
+src/sitemap.js          sitemap + sitemap index. v0.10.1: entity genişletmez (processEntities: false), standart entity'leri elle çözer
 src/rules/definitions.js  88 kural (tek kaynak)
 src/rules/helpers.js    isIndexable, titlePx, staging host tespiti, isBroken, TLS hata metinleri
 src/rules/index.js      Denetim motoru, sağlık skoru
 src/export.js           Excel çıktısı
 src/store.js            Dosya tabanlı kayıt
-src/server.js           Web sunucusu + API (/api/crawls, /api/projects, /api/compare, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur
+src/server.js           Web sunucusu + API (/api/crawls, /api/projects, /api/compare, /api/rules, /api/info, /healthz) + SSE canlı ilerleme. PUBLIC_MODE=1 yayın modudur. v0.10.1: Host ve Origin kontrolü (ALLOWED_HOSTS), istek sınırı `server.maxBodyKb`
                         /api/projects/:id/map → GET (harita, ?format=csv son liste), POST { set: { "/eski/yol": karar | null } }
                         /api/projects/:id → crawl (POST), match (v0.10.0: `launch` alanı), excel, export. GET/PUT/DELETE tanım
                         /api/projects/:id/ready → POST { site, ok } (v0.9.0): hazır görünmeyen siteyi bu tarama için hazır say
+                        /api/projects/:id/match?fresh=1 (v0.10.1): eski adresleri tekrar ister. Yanıtta `checkedAt` var. Kayıtlı sonuç `compare.probeCacheMin` dakika geçerlidir
 render.yaml             Render Blueprint (ücretsiz plan, Docker)
 docs/                   Landing page (v0.8.3): docs/index.html + docs/img/. GitHub Pages (main, /docs) veya Netlify ile yayınlanır. Uygulamadan bağımsız, tarama yapmaz
 public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page (Site denetimi / Taşıma projesi). Proje ekranı: adım çubuğu + Sıradaki iş kartı
 config/rules.json       Bütün eşikler, kural ayarları ve ek kontrol limitleri (checks)
-test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi, fixture-migration.js: eski site + geçecek site)
+test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi, fixture-migration.js: eski site + geçecek site, server-test.js: yerel sunucu güvenliği ve "Tekrar kontrol et")
 ```
 
 ## Kurallar ve konvansiyonlar
@@ -70,11 +71,12 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Yayın | Render (ücretsiz), SSRF koruması, yayın limitleri. Şifre isteğe bağlı, Render şifresiz (v0.8.4) | Tamam (v0.5.0) |
 | Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1), yapılacaklar listesi (yere göre), site hazırlık uyarısı ve kavram açıklamaları (v0.9.0), canlı adres ve staging adresi ayrımı (v0.9.1), Parça 3a canlıya çıkış listesi ve "Yeni yapı" seçeneklerinin birleşmesi (v0.10.0). Sırada: v0.10.0 gerçek sitede deneme, sonra Parça 3b canlı doğrulama | Devam ediyor |
 | Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), GitHub Pages veya Netlify | Tamam (v0.8.3), yayın bekliyor |
+| Bakım | Kod incelemesi ve hata düzeltme sürümü: 12 hata (şifre sızıntısı, gövde zaman aşımı ve boyutu, Host/Origin kontrolü, SVG title, noindex okuma, bozuk URL, kelime sayısı, 301 kontrol önbelleği, istek sınırı, sitemap entity, tarama kimliği) | Tamam (v0.10.1) |
 | Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 19, kural 99, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 20, canlıya çıkış 11 kontrol (toplam yaklaşık 13 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 22, kural 103, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 20, canlıya çıkış 11, sunucu 6 (IPv6 varsa 7) kontrol (toplam yaklaşık 20 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
 - Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
@@ -99,6 +101,17 @@ Gerçek site denemesi (v0.8.0, 11 Ekim 2026, çok dilli taşıma: İngilizce kö
 - Excel onaylanan satırda güven, puan ve nedeni silmişti. Önerinin doğruluğu ölçülemedi.
 - Bölüm kuralı doğru olan eski İngilizce /prosedur/ sayfaları çoğunlukla doğru eşleşti. Dolgu sayfaları genel /procedures sayfasına gitti (daha özel sayfa vardı); kaynağı belli değil.
 v0.8.1 bu dört sorunu düzeltti. Tekrar test bekliyor.
+
+Açık noktalar (v0.10.1):
+- v0.10.1 gerçek sitede denenmedi. Şifreli bir staging taraması yapın ve sonucu kontrol edin. Eşleştirmede "Tekrar kontrol et" düğmesini 301 kurduktan sonra deneyin.
+- Kelime sayısı ve içerik parmak izi değişti (bitişik etiketler artık ayrı kelime). v0.10.1 öncesi tarama ile yeni tarama arasında "benzer içerik" ve 301 haritasının içerik puanı tutarsız olabilir. Bir projede bütün siteleri tekrar tarayın.
+- `AUDIT_VERSION` 3 oldu. Eski taramalar açılınca denetim kendiliğinden tekrar çalışır (kural sonuçları değişebilir: noindex, title, URL kuralları). Eski taramadaki `title`, `titleCount` ve kelime sayısı tarama anındaki değerdir, tekrar tarama ile düzelir.
+- Arayüzdeki "noindex" filtresi (`app.js` BUCKETS) hâlâ basit metin araması yapar. "bingbot: noindex" başlıklı sayfa filtrede görünür ama kurallarda noindex sayılmaz.
+- IPv6 tarama kimliği testi sadece IPv6 olan bilgisayarda çalışır. Claude'un ortamında IPv6 yok: kimlik elle denendi (`ipv6-1_<tarih>`), tam test atlandı.
+- Host kontrolü sadece yerel modda çalışır. Yayın modunda (Render) alan adı bilinmez ve veri zaten herkese açıktır. Origin kontrolü her modda çalışır. Sunucu bir ters vekil (reverse proxy) arkasında ise ve vekil Host başlığını değiştiriyorsa `ALLOWED_HOSTS` yazın.
+- `npm audit` 3 orta açık gösterir: `fast-xml-parser` XMLBuilder (araç kullanmaz, düzeltme 5.x ana sürümünde) ve `exceljs` içindeki `uuid`. Kritik ve yüksek açık yok.
+- İncelemede görülen, düzeltilmeyen küçük eksikler: `.xml.gz` sitemap okunmaz, 5 MB üstü sitemap kesilir, HTTP başlığındaki canonical okunmaz, `charset="utf-8"` (tırnaklı) başlığı doğru çözülmez (utf-8'e düşer).
+- Öneri (karar verilmedi): "Eski URL listesi". Eski siteye CSV veya yapıştırılan adres listesi (Search Console, Analytics, backlink dışa aktarımı; isteğe bağlı tıklama sütunu). Araç adresleri eski sitede ister, 200 verenleri eski sayfa kümesine ekler, 301 haritasını tıklamaya göre sıralar. Neden: araç eski sayfaları sadece link ve sitemap ile bulur; linksiz ama trafik alan sayfa haritaya girmez. v0.9.1 kararı ile çelişmez (o karar hazır 301 listesi içe aktarmayı reddetti). Yol haritasında yok; sıra kullanıcı kararı (Parça 3b'den önce veya sonra).
 
 Açık noktalar (v0.10.0):
 - Canlıya çıkış listesi gerçek sitede denenmedi. Şamil Şahin veya Doyuyo projesinde siteleri tekrar tarayın (eski taramalarda yeni veri yok, liste "Tarama eski" der). Sonra Canlıya çıkış adımını açın. Kritik satırların listesini açın ve yanlış alarm arayın.
@@ -179,6 +192,19 @@ Açık noktalar (Sprint 2'den):
 Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ederiz. Her kalem için: senaryo, beklenen sonuç, gerçek sonuç, bug kaydı. Yöntemi kullanıcı ile birlikte planlarız. Şimdilik sadece bu not var. Plan yapılmadan doğrulamaya başlama.
 
 ## Karar günlüğü
+
+- v0.10.1: Kod incelemesi (kullanıcı istedi). 12 hata deney ile doğrulandı ve düzeltildi. Her düzeltmenin testi var; yeni testler eski kodda başarısız, yeni kodda geçer.
+- v0.10.1: Staging şifresi sadece taranan siteye gider (`crawler.js` → `headersFor`). Başka hosta giden yönlendirme ve başka hosttaki sitemap şifreyi almaz. Sprint 2 kararı ek kontrollerde uygulanıyordu, ana taramada uygulanmıyordu.
+- v0.10.1: Zaman aşımı gövde okumasını da kapsar. Gövde akış olarak okunur ve `maxBodyBytes` (5 MB) değerinde kesilir; sayfa `truncated: true` alır. Başlık gelip gövde gelmezse sayfa `status 0`, `error timeout` olur (`http-failed` kuralı).
+- v0.10.1: Yerel sunucu Host başlığını kontrol eder: `localhost`, IP adresi veya `ALLOWED_HOSTS`. Neden: DNS rebinding ile başka bir site yerel taramaları (müşteri verisi) okuyabiliyordu. Yazma istekleri (POST, PUT, DELETE) için Origin, Host ile aynı olmalı (her modda). `/healthz` kontrol dışıdır.
+- v0.10.1: `isNoindex` yönergeleri tek tek okur (`robotsDirectives`). `max-image-preview:none` noindex değildir. X-Robots-Tag içinde başka bota yazılan yönerge sayılmaz; sadece genel ve `googlebot` yönergeleri sayılır (araç Google için raporlar). Canlıya çıkış listesi de aynı fonksiyonu kullanır.
+- v0.10.1: SVG içindeki `<title>` sayfa title'ı değildir. Blok etiketlerden sonra boşluk eklenir: kelime sayısı, parmak izi ve dummy metin araması bitişik etiketlerde doğru çalışır.
+- v0.10.1: URL kuralları `safeDecode` kullanır. Bozuk yüzde kodu kuralı durdurmaz, ham yol kullanılır.
+- v0.10.1: 301 kontrol sonucu `compare.probeCacheMin` (30) dakika saklanır. "Tekrar kontrol et" düğmesi (`/match?fresh=1`) adresleri hemen tekrar ister. Satır adım çubuğunun altında, eşleştirme kullanan dört adımda görünür ve son kontrol saatini yazar. Neden: 301 kurulduktan sonra sonuç sadece yeni tarama veya sunucu yeniden başlatma ile yenileniyordu.
+- v0.10.1: İstek sınırı `rules.json` → `server.maxBodyKb` (4096). Önceki sınır kodda 100 KB idi: yaklaşık 1.000 kararlı proje dosyası yüklenmiyordu. Sınır üstü 413, bozuk JSON 400 verir.
+- v0.10.1: Sitemap okuyucu entity genişletmez. Sadece standart XML entity'leri (`&amp;` ve sayısal) elle çözülür. `npm audit fix` ile `fast-xml-parser` 4.5.7 ve `undici` 6.29.1 oldu (sadece `package-lock.json`, aynı ana sürüm). Ana sürüm yükseltmesi gerekmedi. Yeni bağımlılık yok.
+- v0.10.1: Tarama kimliği dosya adına uygun yapılır (IPv6 → `ipv6-…`). Aynı saniyede aynı hostun ikinci taraması `_2` ekini alır.
+
 
 - v0.10.0: Parça 3a, canlıya çıkış listesi (kullanıcı sohbette taslağı ve dört noktayı onayladı). Gruplama zamana göredir, yere göre değildir: Kritik (çıkıştan önce düzeltin), Karar bekleyen, Çıkış anında değiştirin (staging'de normal), Kontrol edin. Her satır siteyi ve ekibi etiket olarak gösterir. Elle "tamam" işareti yok: durum her zaman taramadan gelir.
 - v0.10.0: Staging adresini proje bilir. Bir yeni site, tarama alan adı canlı alan adından farklıysa staging'dir (canlı alan adı yazılmamışsa da staging sayılır). Ayrıca `stagingHosts`/`stagingSuffixes` desenine uyan ve canlı olmayan alan adları staging sayılır. Canlı alan adları asla staging sayılmaz.

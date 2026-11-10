@@ -57,6 +57,9 @@ Ortam değişkenleri:
 | `APP_USER`, `APP_PASS` | Arayüz şifresi. Ağa açarsanız mutlaka tanımlayın. | — |
 | `MAX_JOBS` | Aynı anda çalışan tarama sayısı | 2 |
 | `CRAWL_DIR` | Kayıt klasörü | ./crawls |
+| `ALLOWED_HOSTS` | Sunucuyu bir alan adı ile açarsanız (örnek: `seo.ofis.example`) adı buraya yazın. Virgül ile ayırın. `localhost` ve IP adresi için gerekmez. | — |
+
+Güvenlik (v0.10.1): yerel sunucu sadece `localhost`, IP adresi veya `ALLOWED_HOSTS` içindeki ad ile açılır. Başka bir siteden gelen yazma isteği (POST, PUT, DELETE) reddedilir. Böylece tarayıcıda açık olan başka bir site taramalarınızı okuyamaz ve tarama başlatamaz.
 
 Not: Bu tool sunucu tarafında tarama yapar. Tarayıcı içinde tek başına çalışamaz, çünkü tarayıcılar başka sitelerin içeriğini okumayı engeller (CORS).
 
@@ -94,6 +97,8 @@ Başka yola veya başka siteye taşınan sayfa için araç iki şeyi kontrol ede
 | Kontrol edilemedi | robots.txt engeli, şifreli staging (401) veya bağlantı hatası. |
 
 Yeni tarama eski adresleri bulamaz, çünkü yeni sitede onlara link yoktur. Bu yüzden araç gereken her adresi tek tek ister. İlk eşleştirme birkaç saniye sürebilir. Araç sadece projede taranan sitelere istek gönderir.
+
+Araç bu yanıtları 30 dakika saklar (`rules.json` → `compare.probeCacheMin`). Sunucuda 301 kurduysanız adım çubuğunun altındaki "Tekrar kontrol et" düğmesine basın. Araç adresleri tekrar ister. Yeni tarama gerekmez. Satır son kontrolün saatini gösterir.
 
 Proje sunucuda `crawls/projects/` klasöründe durur. Projede sonuç yok, sadece tanım var: siteler, roller, tarama kimlikleri, kurallar. Ücretsiz Render planında disk kalıcı değildir: "Projeyi indir" ile JSON dosyasını alın, "Proje yükle" ile geri yükleyin.
 
@@ -218,16 +223,17 @@ Skor = kritik sorunu olmayan URL oranı (robots ile engelli URL'ler hariç). Sit
 
 ## Testler
 
-`npm test` sekiz test çalıştırır:
+`npm test` dokuz test çalıştırır:
 
-1. Crawler testi (19 kontrol).
-2. Kural testi (99 kontrol): `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. SSL ve HSTS kuralları `test/fixture-https.js` (self-signed sertifika, 2046'ya kadar geçerli) ile test edilir. Testler internete çıkmaz: dış linkler `.invalid` alan adı kullanır. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü).
+1. Crawler testi (22 kontrol): tarama, staging şifresinin sadece taranan siteye gitmesi, gövde zaman aşımı ve boyut sınırı, sitemap entity koruması.
+2. Kural testi (103 kontrol): `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. SSL ve HSTS kuralları `test/fixture-https.js` (self-signed sertifika, 2046'ya kadar geçerli) ile test edilir. Testler internete çıkmaz: dış linkler `.invalid` alan adı kullanır. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü).
 
 3. Yayın modu testi (12 kontrol): iç ağ adresleri, tarayıcının iç adrese hiç istek göndermemesi, şifre zorunluluğu, `/healthz` ve limitler.
 4. Karşılaştırma testi (49 kontrol): yol eşleşmesi, kaybolan, yönlenen, içerik kaybı, yeni hostta istek, yol kuralları, çoklu hedef, bölüm kaldırıldı, desen önerisi, taşınan sayfanın 301 kontrolü, Excel.
 5. Proje testi (20 kontrol): proje tanımı, kayıt, API, "Tara" düğmesi, gerçek test siteleri ile eşleştirme ve 301 kontrolü (`test/fixture-migration.js`), canlıya çıkış listesi API ve Excel, proje dosyası indir/yükle.
 6. 301 haritası testi (17 kontrol) ve yapılacaklar testi (8 kontrol).
 7. Canlıya çıkış testi (11 kontrol): `test/fixture-launch.js` dört site içerir (eski, kirli staging, açık staging, şifreli temiz staging). Temiz staging hiçbir iş üretmemeli.
+8. Sunucu testi (6 kontrol, IPv6 varsa 7): Host ve Origin kontrolü, istek boyutu, "Tekrar kontrol et", tarama kimliği.
 
 Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 
@@ -235,6 +241,7 @@ Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
 
 - JavaScript ile oluşan içerik görünmez. SPA siteler için render modu sonraki fazlarda gelir.
 - `srcset` ve CSS arka plan görselleri kontrol edilmez. Sadece `<img src>` kontrol edilir.
+- `.xml.gz` sitemap okunmaz. 5 MB üstü sayfa ve sitemap kesilir.
 - SSRF koruması adresi istekten önce DNS ile kontrol eder. DNS cevabı istek anında değişirse (DNS rebinding) koruma bunu yakalamaz. Şifre zorunluluğu bu riski azaltır.
 
 ## Yol haritası
