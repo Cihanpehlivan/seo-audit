@@ -38,6 +38,15 @@
     "langMinShare": 0.6,
     "probeCacheMin": 30
   },
+  "validate": {
+    "_aciklama": "Doğrulama (v0.10.2): npm run dogrula. Aracın taraması referans tarayıcının dışa aktarımı ile karşılaştırılır. Sayı alanlarında küçük fark sayılmaz: fark en fazla *Abs veya büyük sayının *Ratio oranı kadar olabilir. titlePxAbs: title genişliği farkı (piksel). sampleLimit: özet dosyasında alan başına en fazla kaç örnek durur (bütün farklar CSV dosyasında).",
+    "wordRatio": 0.25,
+    "wordAbs": 30,
+    "inlinkRatio": 0.25,
+    "inlinkAbs": 3,
+    "titlePxAbs": 40,
+    "sampleLimit": 25
+  },
   "server": {
     "_aciklama": "Sunucu limitleri (v0.10.1). maxBodyKb: bir isteğin gövdesi en fazla kaç KB olur (proje dosyası ve 301 kararları).",
     "maxBodyKb": 4096

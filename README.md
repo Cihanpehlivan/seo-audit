@@ -223,7 +223,7 @@ Skor = kritik sorunu olmayan URL oranı (robots ile engelli URL'ler hariç). Sit
 
 ## Testler
 
-`npm test` dokuz test çalıştırır:
+`npm test` on test çalıştırır:
 
 1. Crawler testi (22 kontrol): tarama, staging şifresinin sadece taranan siteye gitmesi, gövde zaman aşımı ve boyut sınırı, sitemap entity koruması.
 2. Kural testi (103 kontrol): `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. SSL ve HSTS kuralları `test/fixture-https.js` (self-signed sertifika, 2046'ya kadar geçerli) ile test edilir. Testler internete çıkmaz: dış linkler `.invalid` alan adı kullanır. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü).
@@ -234,8 +234,26 @@ Skor = kritik sorunu olmayan URL oranı (robots ile engelli URL'ler hariç). Sit
 6. 301 haritası testi (17 kontrol) ve yapılacaklar testi (8 kontrol).
 7. Canlıya çıkış testi (11 kontrol): `test/fixture-launch.js` dört site içerir (eski, kirli staging, açık staging, şifreli temiz staging). Temiz staging hiçbir iş üretmemeli.
 8. Sunucu testi (6 kontrol, IPv6 varsa 7): Host ve Origin kontrolü, istek boyutu, "Tekrar kontrol et", tarama kimliği.
+9. Doğrulama testi (8 kontrol): CSV okuyucu, referans sütunları, alan karşılaştırması, komut çıktısı.
 
 Yeni kural eklerseniz test sitesine onu tetikleyen bir sayfa da ekleyin.
+
+## Doğrulama (v0.10.2)
+
+Aracın sonuçlarını Screaming Frog ile karşılaştırır. Amaç: aracın nerede yanlış veya farklı okuduğunu bulmak.
+
+1. Siteyi araç ile tarayın. Tarama kimliği kenar çubuğundaki adrestedir (`#/crawl/<kimlik>`) ve `crawls/<kimlik>.json` dosyasının adıdır.
+2. Aynı siteyi Screaming Frog ile tarayın. Ayarlar: robots.txt'ye uy, Rendering "Text Only", alt alan adları kapalı.
+3. Screaming Frog'da Internal sekmesi → filtre "All" → Export. Dosyayı CSV olarak kaydedin.
+4. Komutu çalıştırın:
+
+```bash
+npm run dogrula -- <tarama kimliği> /yol/internal_all.csv
+```
+
+Komut özet tablosunu yazar ve iki dosya üretir: `crawls/dogrulama-<host>.json` (özet) ve `crawls/dogrulama-<host>.csv` (bütün farklar, Excel ile açılır). Dosyalar depoya girmez.
+
+Karşılaştırılan alanlar: durum kodu, yönlendirme hedefi, title, meta description, ilk H1, canonical, meta robots, indekslenebilirlik, kelime sayısı, iç link sayısı, derinlik, title piksel genişliği. Sayı alanlarında küçük fark sayılmaz (`rules.json` → `validate`). Komut referans dosyasında bulamadığı sütunları uyarı olarak yazar.
 
 ## Sınırlar (bilinçli)
 

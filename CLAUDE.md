@@ -19,6 +19,7 @@ Kullanıcı: proje sahibi (Cihan). Sorunlar iş alanına göre gruplanır (Front
 
 ```
 bin/crawl.js            CLI
+scripts/dogrula.js      Doğrulama komutu (v0.10.2): `npm run dogrula -- <tarama> <internal_all.csv>`. Mantık `src/validate.js` içinde (CSV okuyucu, referans sütunları, alan karşılaştırması)
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
 src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu (v0.7.1: her bölümün sayfa listesi). Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0)
 src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma), 301 haritası kararlarının temizliği
@@ -72,11 +73,12 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1), yapılacaklar listesi (yere göre), site hazırlık uyarısı ve kavram açıklamaları (v0.9.0), canlı adres ve staging adresi ayrımı (v0.9.1), Parça 3a canlıya çıkış listesi ve "Yeni yapı" seçeneklerinin birleşmesi (v0.10.0). Sırada: v0.10.0 gerçek sitede deneme, sonra Parça 3b canlı doğrulama | Devam ediyor |
 | Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), GitHub Pages veya Netlify | Tamam (v0.8.3), yayın bekliyor |
 | Bakım | Kod incelemesi ve hata düzeltme sürümü: 12 hata (şifre sızıntısı, gövde zaman aşımı ve boyutu, Host/Origin kontrolü, SVG title, noindex okuma, bozuk URL, kelime sayısı, 301 kontrol önbelleği, istek sınırı, sitemap entity, tarama kimliği) | Tamam (v0.10.1) |
+| Doğrulama | Aracın taramasını Screaming Frog dışa aktarımı ile karşılaştıran komut (`npm run dogrula`). Plan kullanıcı ile yapıldı. Sırada: kullanıcı iki projede taramaları yapar ve özet dosyalarını sohbete yükler | Araç tamam (v0.10.2), ölçüm bekliyor |
 | Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 22, kural 103, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 20, canlıya çıkış 11, sunucu 6 (IPv6 varsa 7) kontrol (toplam yaklaşık 20 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler: crawler 22, kural 103, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 20, canlıya çıkış 11, sunucu 6 (IPv6 varsa 7), doğrulama 8 kontrol (toplam yaklaşık 20 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
 - Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
@@ -187,11 +189,38 @@ Açık noktalar (Sprint 2'den):
 
 **Sprint 6 — JS render:** Playwright modu. Ham HTML ile render edilmiş HTML farkı, sadece JS ile gelen linkler.
 
-## Doğrulama planı (bekliyor)
+## Doğrulama planı (v0.10.2, kullanıcı ile yapıldı)
 
-Bütün özellikler bittikten sonra her kalemin doğruluğunu tek tek kontrol ederiz. Her kalem için: senaryo, beklenen sonuç, gerçek sonuç, bug kaydı. Yöntemi kullanıcı ile birlikte planlarız. Şimdilik sadece bu not var. Plan yapılmadan doğrulamaya başlama.
+Amaç: aracın bulgularına güvenmek. Yeni özellikten önce yapılır (10 Kasım 2026 kararı; eski plan "bütün özellikler bittikten sonra" idi).
+
+Yöntem:
+1. Referans araç: Screaming Frog (kullanıcının lisansı var). Siteler: Şamil Şahin (eski site ve yeni site) ve Doyuyo.
+2. Kullanıcı her siteyi iki araç ile tarar. Ayarlar aynı olmalı: aynı başlangıç adresi, robots.txt'ye uy, JavaScript render kapalı (Screaming Frog → Rendering: Text Only), alt alan adları kapalı. Araçta URL sınırı sitenin sayfa sayısından büyük olmalı.
+3. Screaming Frog'da: Internal sekmesi → filtre "All" → Export → CSV (`internal_all.csv`).
+4. Kullanıcı komutu çalıştırır: `npm run dogrula -- <tarama kimliği> <internal_all.csv>`. Komut iki dosya yazar (`crawls/` içinde, depoya girmez): `dogrulama-<host>.json` (özet, alan başına en fazla 25 örnek) ve `dogrulama-<host>.csv` (bütün farklar).
+5. Kullanıcı özet dosyasını sohbete yükler. Claude her farkı inceler. Her fark üç sonuçtan birini alır: araç hatalı (kod düzelir, test eklenir), eşik yanlış (`rules.json`), fark beklenen (aşağıya not).
+6. Sonuç bu bölüme yazılır: site, tarih, alan, fark sayısı, karar. Müşteri adresi ve içeriği buraya yazılmaz (depo herkese açık): sadece sayı ve genel neden.
+
+Karşılaştırılan alanlar: durum kodu, yönlendirme hedefi, title, meta description, ilk H1, canonical, meta robots, indekslenebilirlik, kelime sayısı, iç link sayısı (benzersiz kaynak sayfa), derinlik, title piksel genişliği. Ayrıca: sadece aracın bulduğu ve sadece referansın bulduğu sayfalar.
+
+Beklenen farklar (hata değildir, ilk ölçümde doğrulayın):
+- Kelime sayısı: iki araç metni farklı sayar. Komut aracın iki sayısından (bütün gövde, ana içerik) referansa yakın olanı kullanır. Tolerans `rules.json` → `validate`.
+- Title piksel genişliği: araç kaba tahmin yapar (`titlePx`). Fark büyükse harf genişlikleri kalibre edilir.
+- Araç izleme parametrelerini (utm_, gclid…) URL'den siler. Referans silmez: bu adresler "sadece referans buldu" listesine girer.
+- Araç dosya uzantılı adresleri (pdf, görsel, css, js) taramaz. Referansın HTML olmayan satırları sayılmaz.
+- Robots.txt ile engelli sayfa karşılaştırılmaz.
+
+Bilinen sınır: sütun adları Screaming Frog'un İngilizce arayüzüne göredir. Komut bulamadığı sütunları uyarı olarak yazar ve o alanı karşılaştırmaz. Sütun adı farklı ise `src/validate.js` → `COLUMNS` listesine eklenir. Sütun adları Claude'un bilgisinden yazıldı, gerçek bir dışa aktarım dosyası ile denenmedi: ilk çalıştırmada uyarı satırını kontrol edin.
+
+Sonuçlar: henüz ölçüm yok.
 
 ## Karar günlüğü
+
+- v0.10.2: Konum kararı (kullanıcı onayladı). Araç genel bir denetim aracı olarak yerleşik tarayıcılar ile yarışmaz. Hedef: site taşıma aracı. Anahtar kelime takibi, backlink veritabanı ve hız laboratuvarı yapılmaz; bu veri hazır servislerden alınır (Search Console, PageSpeed API).
+- v0.10.2: Yeni sıra (kullanıcı onayladı, Claude'un önerisi): (1) doğrulama, (2) Parça 3b canlı doğrulama, (3) eski URL listesi ve Search Console verisi, (4) JS render (Sprint 6 öne alındı; Playwright yeni bağımlılıktır, başlamadan önce onay gerekir), (5) paylaşılabilir rapor ve ClickUp işi, (6) canlıdan sonra izleme (1, 7, 30 gün). Sprint 4 (AI) ve PageSpeed bu sıradan sonra tekrar konuşulur.
+- v0.10.2: Doğrulama komutu depoya girer, veri girmez. Rapor dosyaları `crawls/` içine yazılır (.gitignore). CSV okuyucu kendi kodumuzdur: yeni bağımlılık yok. Karşılaştırma mantığı `src/validate.js` içindedir ve testi vardır (`test/validate-test.js`); kural motoruna girmez.
+- v0.10.2: v0.10.1 yüklemesi depoya düz girdi (klasörler olmadan): 18 dosya kök klasöre kopyalandı, `src/`, `public/`, `test/` ve `config/` v0.10.0'da kaldı. v0.10.2 zip dosyası v0.10.1 değişikliklerini de içerir. Kök klasördeki 18 kopya silinmeli. Ders: zip içeriğini klasörler ile sürükleyin, dosyaları tek tek seçmeyin.
+
 
 - v0.10.1: Kod incelemesi (kullanıcı istedi). 12 hata deney ile doğrulandı ve düzeltildi. Her düzeltmenin testi var; yeni testler eski kodda başarısız, yeni kodda geçer.
 - v0.10.1: Staging şifresi sadece taranan siteye gider (`crawler.js` → `headersFor`). Başka hosta giden yönlendirme ve başka hosttaki sitemap şifreyi almaz. Sprint 2 kararı ek kontrollerde uygulanıyordu, ana taramada uygulanmıyordu.
