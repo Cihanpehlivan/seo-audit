@@ -1,0 +1,49 @@
+name: Guncelleme zip dosyasini uygula
+on:
+  push:
+    branches: [main]
+    paths: ['*.zip']
+permissions:
+  contents: write
+concurrency: guncelleme
+jobs:
+  uygula:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Depoyu al
+        run: git clone --depth 1 "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" .
+      - name: Zip dosyasini ac, testleri calistir, commit yap
+        run: |
+          set -euo pipefail
+          zips=()
+          while IFS= read -r z; do zips+=("$z"); done < <(printf '%s\n' *.zip | sort -V)
+          if [ "${zips[0]:-}" = "*.zip" ]; then zips=(); fi
+          if [ ${#zips[@]} -eq 0 ]; then echo "Kök klasörde zip yok. İş yok."; exit 0; fi
+          for z in "${zips[@]}"; do
+            echo "Açılıyor: $z"
+            unzip -o -q "$z" -d .
+            git rm -q -f --ignore-unmatch -- "$z"
+            rm -f -- "$z"
+          done
+          if [ -f SIL.txt ]; then
+            while IFS= read -r line || [ -n "$line" ]; do
+              f="$(printf '%s' "$line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+              case "$f" in ''|'#'*) continue ;; /*|*..*|.github*|.git|.git/*) echo "Atlandı (izin yok): $f"; continue ;; esac
+              echo "Siliniyor: $f"
+              git rm -q -r -f --ignore-unmatch -- "$f"
+            done < SIL.txt
+            rm -f SIL.txt
+          fi
+          msg="Güncelleme: ${zips[*]}"
+          if [ -f COMMIT.txt ]; then msg="$(head -n 1 COMMIT.txt | tr -d '\r')"; rm -f COMMIT.txt; fi
+          if [ -n "$(git status --porcelain -- .github)" ]; then echo "HATA: zip .github klasörünü değiştiremez."; exit 1; fi
+          npm ci --no-audit --no-fund
+          npm test
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "Değişiklik yok."; exit 0; fi
+          git commit -q -m "$msg"
+          git push -q origin HEAD:main
+          echo "Tamam: $msg"
