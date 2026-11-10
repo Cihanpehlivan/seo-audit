@@ -75,6 +75,7 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), GitHub Pages veya Netlify | Tamam (v0.8.3), yayın bekliyor |
 | Bakım | Kod incelemesi ve hata düzeltme sürümü: 12 hata (şifre sızıntısı, gövde zaman aşımı ve boyutu, Host/Origin kontrolü, SVG title, noindex okuma, bozuk URL, kelime sayısı, 301 kontrol önbelleği, istek sınırı, sitemap entity, tarama kimliği) | Tamam (v0.10.1) |
 | Doğrulama | Aracın taramasını Screaming Frog dışa aktarımı ile karşılaştıran komut (`npm run dogrula`). Plan kullanıcı ile yapıldı. Sırada: kullanıcı iki projede taramaları yapar ve özet dosyalarını sohbete yükler | Araç tamam (v0.10.2), ölçüm bekliyor |
+| Belge | README baştan yazıldı: aracın ne yaptığı, ne yapmadığı ve güncel yol haritası | Tamam (v0.10.4) |
 | Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
@@ -216,6 +217,9 @@ Bilinen sınır: sütun adları Screaming Frog'un İngilizce arayüzüne göredi
 Sonuçlar: henüz ölçüm yok.
 
 ## Karar günlüğü
+
+- v0.10.4: README baştan yazıldı (kullanıcı istedi). Yeni yapı: aracın konumu (site taşıma aracı), "Araç ne yapar" bölümü (tam yaptığı, kısmen yaptığı ve yapmadığı işler), site denetimi, taşıma projesi, komut satırı, sunucu, doğrulama, geliştirme, sınırlar, yol haritası. Sürüm etiketleri (v0.7.0 gibi) README'den çıktı: geçmiş bu dosyadadır. Yol haritası v0.10.2 sırasına göre yazıldı. Akış şeması Mermaid ile (GitHub kendisi çizer). "Tam yaptığı işler" notu: kod ve test tamam, gerçek site ölçümü sürüyor. Doğrulama ölçümü bitince bu notu güncelleyin.
+- v0.10.4: `.env.example` içindeki "şifreyi zorunlu yapar" yorumu düzeltildi (v0.8.4'ten beri şifre isteğe bağlı).
 
 - v0.10.3: Yükleme yöntemi değişti (kullanıcı istedi: "sadece yükleyeceğim dosyayı ver"). Neden: v0.10.1 ve v0.10.2 yüklemeleri depoya düz girdi (klasör sürükleme kullanıcının ortamında çalışmadı), 21 dosya kök klasöre kopyalandı ve `src/`, `public/`, `test/` eski sürümde kaldı. Çözüm: kullanıcı zip dosyasını açmadan köke yükler, GitHub Actions iş akışı (`.github/workflows/guncelle.yml`) gerisini yapar. İş akışı üçüncü taraf action kullanmaz (sadece git, unzip, npm). Yetki: `contents: write`, sadece `main` dalına `*.zip` push'unda çalışır. `SIL.txt` içinde `/` ile başlayan, `..` içeren veya `.github` ile başlayan yol atlanır. İş akışı dosyasını kullanıcı web'de bir kez elle oluşturur: GITHUB_TOKEN iş akışı dosyası yazamaz.
 - v0.10.3: Zip dosyaları depo geçmişinde kalır (her biri yaklaşık 200 KB). Kabul edildi. Arkadaşın Pull Request düzeni değişmedi.
