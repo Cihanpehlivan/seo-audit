@@ -11,6 +11,7 @@ const MAX_ABS_HOSTS = 20;
 const ABS = /^(https?:)?\/\//i;
 const absHost = (v) => { const x = String(v || '').trim(); if (!ABS.test(x)) return ''; try { return new URL(x, 'https://x.invalid').hostname.toLowerCase(); } catch { return ''; } };
 const uniq = (list) => [...new Set(list.filter(Boolean))].slice(0, MAX_ABS_HOSTS);
+const BLOCKS = 'address, article, aside, blockquote, br, button, dd, details, div, dl, dt, fieldset, figcaption, figure, footer, form, h1, h2, h3, h4, h5, h6, header, hr, label, li, main, nav, ol, option, p, pre, section, summary, table, td, th, tr, ul';
 const PLACEHOLDER = /lorem ipsum|dolor sit amet|consectetur adipiscing|buraya (bir )?(metin|yazı|içerik) gel|metin buraya gel|örnek metin(dir)?\b|sample text|text goes here|\bTODO\b|\bTBD\b/i;
 
 function jsonLdEntities(raw) {
@@ -48,7 +49,8 @@ export function parsePage(html, pageUrl, rootHost) {
   const scriptText = $('script').map((_, el) => `${$(el).attr('src') || ''} ${$(el).html() || ''}`).get().join(' ') + ' ' + $('noscript').map((_, el) => $(el).html() || '').get().join(' ');
   const tracking = [...new Set(scriptText.match(TRACKING) || [])].slice(0, MAX_ABS_HOSTS);
 
-  const titles = $('head title, title').first().length ? $('title').map((_, el) => clean($(el).text())).get() : [];
+  // v0.10.1: a <title> inside an inline SVG is the name of an icon, not the page title.
+  const titles = $('title').filter((_, el) => !$(el).closest('svg').length).map((_, el) => clean($(el).text())).get();
   const metaDesc = $('meta[name="description" i]').map((_, el) => clean($(el).attr('content'))).get();
   const canonicals = $('link[rel="canonical" i]').map((_, el) => normalizeUrl($(el).attr('href'), base)).get();
   const robotsMeta = $('meta[name="robots" i], meta[name="googlebot" i]').map((_, el) => clean($(el).attr('content')).toLowerCase()).get().join(', ');
@@ -126,6 +128,8 @@ export function parsePage(html, pageUrl, rootHost) {
 
   // Text: full body and main content (without header/nav/footer/aside).
   $('script, style, noscript, svg, template').remove();
+  // v0.10.1: block elements get a space after them. Without it "<li>bir</li><li>iki</li>" reads as one word.
+  $(BLOCKS).after(' ');
   const text = clean($('body').text());
   const wordCount = text ? text.split(' ').length : 0;
   const $main = $('main').length ? $('main').first().clone() : $('body').clone();

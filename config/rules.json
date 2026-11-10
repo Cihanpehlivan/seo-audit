@@ -28,14 +28,28 @@
     "maxImages": 2000
   },
   "compare": {
-    "_aciklama": "Eski ve yeni site karşılaştırması. suggest*: desen önerisi eşikleri. Bir grup en az suggestMinPages sayfa içermeli. Öneri, gruptaki sayfaların en az suggestMinRatio oranını bulmalı. sectionPageLimit: eşleştirme ekranında bir bölüm satırı açılınca en fazla kaç sayfa listelenir (bütün sayfalar Excel'de). langMinShare (v0.8.1): bir bölümün veya sitenin dili, dili bilinen sayfaların en az bu oranında aynı html lang varsa kabul edilir.",
+    "_aciklama": "Eski ve yeni site karşılaştırması. suggest*: desen önerisi eşikleri. Bir grup en az suggestMinPages sayfa içermeli. Öneri, gruptaki sayfaların en az suggestMinRatio oranını bulmalı. sectionPageLimit: eşleştirme ekranında bir bölüm satırı açılınca en fazla kaç sayfa listelenir (bütün sayfalar Excel'de). langMinShare (v0.8.1): bir bölümün veya sitenin dili, dili bilinen sayfaların en az bu oranında aynı html lang varsa kabul edilir. probeCacheMin (v0.10.1): eski adreslerin yeni sitedeki kontrol sonucu kaç dakika saklanır. Süre dolunca veya kullanıcı \"Tekrar kontrol et\" deyince araç adresleri tekrar ister.",
     "maxTargets": 4,
     "maxRules": 50,
     "suggestMinPages": 3,
     "suggestMinRatio": 0.5,
     "maxSuggestions": 8,
     "sectionPageLimit": 200,
-    "langMinShare": 0.6
+    "langMinShare": 0.6,
+    "probeCacheMin": 30
+  },
+  "validate": {
+    "_aciklama": "Doğrulama (v0.10.2): npm run dogrula. Aracın taraması referans tarayıcının dışa aktarımı ile karşılaştırılır. Sayı alanlarında küçük fark sayılmaz: fark en fazla *Abs veya büyük sayının *Ratio oranı kadar olabilir. titlePxAbs: title genişliği farkı (piksel). sampleLimit: özet dosyasında alan başına en fazla kaç örnek durur (bütün farklar CSV dosyasında).",
+    "wordRatio": 0.25,
+    "wordAbs": 30,
+    "inlinkRatio": 0.25,
+    "inlinkAbs": 3,
+    "titlePxAbs": 40,
+    "sampleLimit": 25
+  },
+  "server": {
+    "_aciklama": "Sunucu limitleri (v0.10.1). maxBodyKb: bir isteğin gövdesi en fazla kaç KB olur (proje dosyası ve 301 kararları).",
+    "maxBodyKb": 4096
   },
   "todo": {
     "_aciklama": "Yapılacaklar listesi (v0.9.0). Bir yeni sitenin tarama sayfası sayısı, o siteye giden eski sayfa sayısının notReadyRatio oranından azsa site \"hazır değil gibi görünüyor\" olur. Sadece en az notReadyMinOld eski sayfa o siteye gidiyorsa kontrol edilir. Hazır olmayan sitenin işleri sayılmaz ve bekler. Kullanıcı siteyi hazır sayabilir (o tarama için). listLimit: ekranda bir yerin listesinde en fazla kaç satır görünür (bütün liste Excel'de).",

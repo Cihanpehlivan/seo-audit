@@ -1,6 +1,6 @@
 // Core crawler: follows internal links, records redirect chains, reads robots.txt and sitemaps.
 import robotsParser from 'robots-parser';
-import { normalizeUrl, isInternal, looksLikeAsset } from './normalize.js';
+import { normalizeUrl, isInternal, looksLikeAsset, bareHost } from './normalize.js';
 import { parsePage } from './parser.js';
 import { readSitemaps } from './sitemap.js';
 import { runChecks } from './checks.js';
@@ -57,6 +57,18 @@ export async function crawl(startUrl, opts = {}) {
 
   const guard = o.blockPrivate ? makeGuard() : null;
 
+  // v0.10.1: the staging password goes only to the crawled site. A redirect or a sitemap on another host never gets it.
+  const rootBare = bareHost(root.hostname);
+  const headersFor = (url) => {
+    if (!headers.authorization) return headers;
+    let same = false;
+    try { same = bareHost(new URL(url).hostname) === rootBare; } catch {}
+    if (same) return headers;
+    const { authorization, ...rest } = headers;
+    return rest;
+  };
+
+  // v0.10.1: the timer stays active until the caller calls done(). So the timeout also covers the body.
   async function request(url) {
     if (guard) {
       const why = await guard(url);
@@ -65,10 +77,25 @@ export async function crawl(startUrl, opts = {}) {
     const t0 = Date.now();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), o.timeoutMs);
+    const done = () => clearTimeout(timer);
     try {
-      const res = await fetch(url, { headers, redirect: 'manual', signal: ctrl.signal });
-      return { res, ms: Date.now() - t0 };
-    } finally { clearTimeout(timer); }
+      const res = await fetch(url, { headers: headersFor(url), redirect: 'manual', signal: ctrl.signal });
+      return { res, ms: Date.now() - t0, done, ctrl };
+    } catch (e) { done(); throw e; }
+  }
+
+  // Reads the body as a stream and stops at maxBodyBytes: a huge page does not fill the memory.
+  async function readBody(res, ctrl) {
+    const chunks = []; let size = 0; let truncated = false;
+    if (res.body) {
+      for await (const chunk of res.body) {
+        const room = o.maxBodyBytes - size;
+        if (chunk.length >= room) { chunks.push(chunk.subarray(0, room)); size += room; truncated = true; break; }
+        chunks.push(chunk); size += chunk.length;
+      }
+      if (truncated) ctrl.abort();
+    }
+    return { buf: Buffer.concat(chunks, size), truncated };
   }
 
   // Fetch one URL and follow redirects by hand, so every hop is recorded.
@@ -88,7 +115,8 @@ export async function crawl(startUrl, opts = {}) {
       if (res.status >= 300 && res.status < 400 && loc) {
         const next = normalizeUrl(loc, current);
         chain.push({ url: current, status: res.status, to: next });
-        res.body?.cancel?.();
+        res.body?.cancel?.().catch(() => {});
+        r.done();
         if (!next || chain.some((c) => c.url === next)) {
           return { chain, finalUrl: next || current, status: res.status, error: 'redirect-loop', ms: totalMs };
         }
@@ -98,15 +126,24 @@ export async function crawl(startUrl, opts = {}) {
       const ct = res.headers.get('content-type') || '';
       let body = null; let size = 0;
       const extra = { contentEncoding: res.headers.get('content-encoding') || '', hsts: res.headers.get('strict-transport-security') };
+      let truncated = false;
       if (wantBody && /text\/html|application\/xhtml|xml|text\/plain|text\/markdown/i.test(ct)) {
-        const buf = Buffer.from(await res.arrayBuffer());
-        size = buf.length;
-        body = decodeBody(buf.subarray(0, o.maxBodyBytes), ct);
+        const tb = Date.now();
+        let got;
+        try { got = await readBody(res, r.ctrl); }
+        catch (e) {
+          // The headers came, the body did not: the page counts as failed (timeout or broken connection).
+          r.done();
+          return { chain, finalUrl: current, status: 0, error: r.ctrl.signal.aborted ? 'timeout' : e.cause?.code || e.message, ms: totalMs + (Date.now() - tb) };
+        }
+        size = got.buf.length; truncated = got.truncated;
+        body = decodeBody(got.buf, ct);
       } else {
-        res.body?.cancel?.();
+        res.body?.cancel?.().catch(() => {});
         size = Number(res.headers.get('content-length')) || 0;
       }
-      return { chain, finalUrl: current, status: res.status, contentType: ct, xRobotsTag: res.headers.get('x-robots-tag') || '', body, size, ms: totalMs, ...extra };
+      r.done();
+      return { chain, finalUrl: current, status: res.status, contentType: ct, xRobotsTag: res.headers.get('x-robots-tag') || '', body, size, ms: totalMs, ...(truncated ? { truncated: true } : {}), ...extra };
     }
     return { chain, finalUrl: current, status: 0, error: 'too-many-redirects', ms: totalMs };
   }
@@ -179,6 +216,7 @@ export async function crawl(startUrl, opts = {}) {
       responseMs: r.ms,
       sizeBytes: r.size || 0,
       contentEncoding: r.contentEncoding || '',
+      ...(r.truncated ? { truncated: true } : {}),
       ...(r.finalUrl?.startsWith('https:') && !r.chain.length ? { hsts: r.hsts || '' } : {}),
     });
 

@@ -592,6 +592,7 @@ function renderProject() {
     : `<li><button type="button" class="step ${state[k] || ''}" data-step="${k}" aria-current="${prj.step === k ? 'step' : 'false'}"><i>${state[k] === 'done' ? '✓' : i + 1}</i>${name}</button></li>`).join('');
   for (const [k, pane] of Object.entries(PANES)) $('#' + pane).hidden = k !== prj.step;
   renderNext();
+  renderRecheck();
   if (prj.step === 'proje') renderSites();
   if (prj.step === 'tarama') renderCrawls();
   if (prj.step === 'eslestirme') renderSections();
@@ -881,6 +882,32 @@ async function loadMatch() {
   finally { prj.loading = false; }
   renderProject();
 }
+// v0.10.1: when the tool asked the old addresses on the new sites, and a button to ask again.
+// The server keeps the answers for some minutes. After the developer sets up the 301s, the user asks again here.
+const fmtClock = (iso) => new Date(iso).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+function renderRecheck() {
+  const el = $('#prjRecheck');
+  const at = prj.match?.checkedAt;
+  el.hidden = !(MATCH_STEPS.includes(prj.step) && at);
+  if (el.hidden) return;
+  const today = new Date(at).toDateString() === new Date().toDateString();
+  el.innerHTML = `<span>Son adres kontrolü: ${esc(today ? `bugün ${fmtClock(at)}` : fmtDate(at))}</span>
+    ${help(TERMS.recheck)}
+    <button type="button" class="ghost small" id="recheckBtn"${prj.rechecking ? ' disabled' : ''}>${prj.rechecking ? 'Kontrol ediyor…' : 'Tekrar kontrol et'}</button>
+    ${prj.recheckErr ? `<span class="recheck-err" role="alert">${esc(prj.recheckErr)}</span>` : ''}`;
+}
+$('#prjRecheck').addEventListener('click', async (e) => {
+  if (!e.target.closest('#recheckBtn') || prj.rechecking || prj.loading) return;
+  const id = prj.id;
+  prj.rechecking = true; prj.recheckErr = null;
+  renderRecheck();
+  try {
+    const m = await api(`/api/projects/${id}/match?fresh=1`);
+    if (prj.id === id) { prj.match = m; prj.matchKey = crawlKey(); }
+  } catch (err) { if (prj.id === id) prj.recheckErr = err.message; }
+  finally { prj.rechecking = false; }
+  if (prj.id === id) renderProject();
+});
 const sectionName = (x) => (x.from === '/*' ? 'Kök ve küçük bölümler' : x.from.slice(0, -1));
 // Short state of one old page in the section list. Green: the page is in place. Amber: work is needed.
 const PAGE_OK = new Set(['same', 'changed', 'redirected', 'moved']);
@@ -1211,6 +1238,7 @@ $('#mapRows').addEventListener('click', (e) => {
 // One card per place: the old domain's server, each new site, content, decisions. Every term has a "?" text.
 // All help texts live here, so the same term has the same text on every screen.
 const TERMS = {
+  recheck: 'Araç her eski adresi yeni sitede ister ve yanıtı bir süre saklar. Sunucuda 301 kurduysanız "Tekrar kontrol et" düğmesine basın. Araç adresleri tekrar ister. Yeni tarama gerekmez.',
   server: 'Canlıdan sonra eski alan adını kullanan sunucu. Eski adreslerin bütün 301 ve 410 yanıtları burada kurulur. Ayrı alan adına taşınan sayfaların 301\'i de buradadır.',
   heir: HELP.heir,
   extra: HELP.extra,

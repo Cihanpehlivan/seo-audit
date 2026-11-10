@@ -3,7 +3,29 @@ import { bareHost } from '../normalize.js';
 
 export const isHtml = (p) => /html/i.test(p.contentType || '') && !p.redirectChain?.length;
 export const isOk = (p) => p.status === 200 && isHtml(p);
-export const isNoindex = (p) => /noindex|none/.test(`${p.metaRobots || ''} ${p.xRobotsTag || ''}`.toLowerCase());
+// v0.10.1: reads robots directives one by one. "max-image-preview:none" is not noindex.
+// A directive for another bot ("bingbot: noindex" in X-Robots-Tag) does not count: the tool reports for Google.
+const VALUE_DIRECTIVES = new Set(['max-snippet', 'max-image-preview', 'max-video-preview', 'unavailable_after']);
+const GOOGLE_BOTS = new Set(['googlebot', 'googlebot-news', 'robots']);
+export function robotsDirectives(value) {
+  const out = [];
+  let scope = null;
+  for (let part of String(value || '').toLowerCase().split(',')) {
+    part = part.trim();
+    const i = part.indexOf(':');
+    if (i > 0) {
+      const name = part.slice(0, i).trim();
+      if (VALUE_DIRECTIVES.has(name)) { if (!scope || GOOGLE_BOTS.has(scope)) out.push(name); continue; }
+      scope = name; part = part.slice(i + 1).trim();
+    }
+    if (part && (!scope || GOOGLE_BOTS.has(scope))) out.push(part);
+  }
+  return out;
+}
+export const blocksIndex = (value) => robotsDirectives(value).some((d) => d === 'noindex' || d === 'none');
+export const isNoindex = (p) => blocksIndex(p.metaRobots) || blocksIndex(p.xRobotsTag);
+// v0.10.1: a path with a bad percent code ("%E9" alone) must not stop a rule. The raw text is used then.
+export const safeDecode = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
 export const isCanonicalized = (p) => !!p.canonical && p.canonical !== p.url;
 export const isIndexable = (p) => isOk(p) && !isNoindex(p) && !p.blockedByRobots && !isCanonicalized(p);
 

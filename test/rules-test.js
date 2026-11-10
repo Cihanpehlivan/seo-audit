@@ -4,6 +4,7 @@ import { startRuleFixture, VARIANTS } from './fixture-rules.js';
 import { startHttpsFixture } from './fixture-https.js';
 import { crawl } from '../src/crawler.js';
 import { runAudit, loadConfig, RULES } from '../src/rules/index.js';
+import { isNoindex } from '../src/rules/helpers.js';
 
 const cfg = loadConfig();
 cfg.thresholds = { ...cfg.thresholds, maxLinksPerPage: 30 };
@@ -67,6 +68,30 @@ check('temiz sayfada sorun yok', () => {
 });
 check('benzer içerik sadece benzer sayfalarda', () => assert.deepEqual(fired('content-near-duplicate').map((i) => i.url.replace(base, '')).sort(), ['/benzer-a', '/benzer-b']));
 check('sağlık skoru site kritik hata ile en fazla 40', () => assert.ok(audit.score <= 40));
+
+// v0.10.1: parser and rule fixes.
+check('SVG içindeki title sayfa title sayılmaz', () => {
+  assert.deepEqual(fired('title-multiple').map((i) => i.url.replace(base, '')), ['/multititle']);
+  assert.equal(result.pages.find((p) => p.url === base + '/notitle').title, '');
+});
+check('bozuk yüzde kodlu URL, URL kurallarını durdurmaz', () => {
+  assert.ok(hits('url-format', '/Bozuk%E9_Sayfa') && hits('url-format', '/Buyuk_Harf'));
+  assert.ok(hits('url-non-ascii', '/Bozuk%E9_Sayfa') && hits('url-non-ascii', '/%C5%9Fehir-rehberi'));
+});
+check('noindex: değerli yönerge ve başka bot noindex sayılmaz', () => {
+  assert.equal(isNoindex({ metaRobots: 'index, follow, max-image-preview:none' }), false);
+  assert.equal(isNoindex({ xRobotsTag: 'bingbot: noindex' }), false);
+  assert.equal(isNoindex({ xRobotsTag: 'unavailable_after: 25 Jun 2030 15:00:00 PST' }), false);
+  assert.equal(isNoindex({ metaRobots: 'NOINDEX, nofollow' }), true);
+  assert.equal(isNoindex({ metaRobots: 'none' }), true);
+  assert.equal(isNoindex({ xRobotsTag: 'googlebot: noindex' }), true);
+  assert.equal(isNoindex({ xRobotsTag: 'noindex' }), true);
+  assert.deepEqual(fired('noindex-in-sitemap').map((i) => i.url.replace(base, '')), ['/noindex']);
+});
+check('bitişik etiketlerdeki kelimeler ayrı sayılır', () => {
+  assert.equal(result.pages.find((p) => p.url === base + '/bitisik').contentWordCount, 305);
+  assert.ok(!hits('thin-content', '/bitisik'));
+});
 
 // Sprint 2: extra checks.
 const urls = (id) => fired(id).map((i) => i.url.replace(base, '')).sort();

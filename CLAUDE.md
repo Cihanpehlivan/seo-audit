@@ -43,6 +43,7 @@ src/server.js           Web sunucusu + API (/api/crawls, /api/projects, /api/com
                         /api/projects/:id/ready → POST { site, ok } (v0.9.0): hazır görünmeyen siteyi bu tarama için hazır say
                         /api/projects/:id/match?fresh=1 (v0.10.1): eski adresleri tekrar ister. Yanıtta `checkedAt` var. Kayıtlı sonuç `compare.probeCacheMin` dakika geçerlidir
 render.yaml             Render Blueprint (ücretsiz plan, Docker)
+.github/workflows/guncelle.yml  Güncelleme zip dosyasını uygular (v0.10.3): köke yüklenen `*.zip` açılır, test edilir, commit edilir. Bkz. Çalışma döngüsü 7. adım
 docs/                   Landing page (v0.8.3): docs/index.html + docs/img/. GitHub Pages (main, /docs) veya Netlify ile yayınlanır. Uygulamadan bağımsız, tarama yapmaz
 public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page (Site denetimi / Taşıma projesi). Proje ekranı: adım çubuğu + Sıradaki iş kartı
 config/rules.json       Bütün eşikler, kural ayarları ve ek kontrol limitleri (checks)
@@ -215,6 +216,9 @@ Bilinen sınır: sütun adları Screaming Frog'un İngilizce arayüzüne göredi
 Sonuçlar: henüz ölçüm yok.
 
 ## Karar günlüğü
+
+- v0.10.3: Yükleme yöntemi değişti (kullanıcı istedi: "sadece yükleyeceğim dosyayı ver"). Neden: v0.10.1 ve v0.10.2 yüklemeleri depoya düz girdi (klasör sürükleme kullanıcının ortamında çalışmadı), 21 dosya kök klasöre kopyalandı ve `src/`, `public/`, `test/` eski sürümde kaldı. Çözüm: kullanıcı zip dosyasını açmadan köke yükler, GitHub Actions iş akışı (`.github/workflows/guncelle.yml`) gerisini yapar. İş akışı üçüncü taraf action kullanmaz (sadece git, unzip, npm). Yetki: `contents: write`, sadece `main` dalına `*.zip` push'unda çalışır. `SIL.txt` içinde `/` ile başlayan, `..` içeren veya `.github` ile başlayan yol atlanır. İş akışı dosyasını kullanıcı web'de bir kez elle oluşturur: GITHUB_TOKEN iş akışı dosyası yazamaz.
+- v0.10.3: Zip dosyaları depo geçmişinde kalır (her biri yaklaşık 200 KB). Kabul edildi. Arkadaşın Pull Request düzeni değişmedi.
 
 - v0.10.2: Konum kararı (kullanıcı onayladı). Araç genel bir denetim aracı olarak yerleşik tarayıcılar ile yarışmaz. Hedef: site taşıma aracı. Anahtar kelime takibi, backlink veritabanı ve hız laboratuvarı yapılmaz; bu veri hazır servislerden alınır (Search Console, PageSpeed API).
 - v0.10.2: Yeni sıra (kullanıcı onayladı, Claude'un önerisi): (1) doğrulama, (2) Parça 3b canlı doğrulama, (3) eski URL listesi ve Search Console verisi, (4) JS render (Sprint 6 öne alındı; Playwright yeni bağımlılıktır, başlamadan önce onay gerekir), (5) paylaşılabilir rapor ve ClickUp işi, (6) canlıdan sonra izleme (1, 7, 30 gün). Sprint 4 (AI) ve PageSpeed bu sıradan sonra tekrar konuşulur.
@@ -395,8 +399,8 @@ Sohbette (claude.ai):
 3. Görevi bu dosyadan ve kullanıcıdan al. Kodu yaz, test sitesine yeni sayfalar ekle, `npm test` çalıştır.
 4. Arayüz değiştiyse ekran görüntüsü ile kontrol et (masaüstü 1440 px ve mobil 390 px).
 5. İş sonunda: bu dosyadaki Durum ve Karar günlüğü bölümlerini güncelle, `package.json` sürümünü artır. Kullanıcıya görünen özellik değiştiyse `README.md` içindeki ilgili bölümü de güncelle. README başlığına sürüm yazma.
-6. Kullanıcıya bir zip ver. Zip sadece değişen ve yeni dosyaları, depodaki klasör yapısı ile içerir. Silinmesi gereken dosya varsa adlarını ayrıca yaz. Kısa bir commit mesajı öner.
-7. Kullanıcı GitHub'da Add file → Upload files ile zip içeriğini sürükler ve commit yapar. Gizli dosyalar (nokta ile başlayan) değiştiyse Claude içeriklerini metin olarak da verir; kullanıcı bunları web'de düzenler.
+6. Kullanıcıya bir zip ver (`seo-audit-vX.Y.Z.zip`). Zip sadece değişen ve yeni dosyaları, depodaki klasör yapısı ile içerir. Zip kökünde iki yardımcı dosya olur: `COMMIT.txt` (ilk satır commit mesajıdır) ve silinecek dosya varsa `SIL.txt` (her satır bir yol). Silinecek dosyaları ve commit mesajını sohbette de yaz. Zip `.github/` klasörünü içermez (iş akışı bunu reddeder).
+7. Kullanıcı zip dosyasını AÇMADAN deponun kök klasörüne yükler (Add file → Upload files) ve commit yapar. `.github/workflows/guncelle.yml` iş akışı (v0.10.3) zip dosyasını açar, dosyaları doğru klasörlere yazar, `SIL.txt` içindeki dosyaları siler, `npm ci` ve `npm test` çalıştırır ve sonucu commit eder. Zip, `SIL.txt` ve `COMMIT.txt` depoda kalmaz. Testler geçmezse depo değişmez (zip kökte kalır, Actions sekmesi kırmızı olur). Gizli dosyalar da zip ile gelir; ayrıca metin vermek gerekmez. Sonraki sohbette Claude kök klasörde zip kalıp kalmadığını ve son iş akışının sonucunu kontrol eder (kökte zip varsa uygulama başarısız olmuştur).
 
 Claude Code ile (masaüstü): Claude yerel depo klasöründe doğrudan çalışır, commit yapar. Zip ve 6-7. adımlar gerekmez. Push kullanıcı onayı ile yapılır.
 

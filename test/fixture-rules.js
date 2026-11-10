@@ -27,7 +27,7 @@ function page(path, o = {}) {
     o.head || '',
   ].join('');
   const lang = o.lang === false ? '' : ` lang="${o.lang || 'tr'}"`;
-  return `<!doctype html><html${lang}><head><meta charset="utf-8">${head}</head><body><header><nav><a href="/">Ana sayfa</a></nav></header><main>${h1 === null ? '' : `<h1>${h1}</h1>`}<h2>Alt başlık</h2>${body}</main><footer>© ${BRAND}</footer></body></html>`;
+  return `<!doctype html><html${lang}><head><meta charset="utf-8">${head}</head><body><header><svg width="24" height="24" role="img"><title>Logo</title><circle cx="12" cy="12" r="10"/></svg><nav><a href="/">Ana sayfa</a></nav></header><main>${h1 === null ? '' : `<h1>${h1}</h1>`}<h2>Alt başlık</h2>${body}</main><footer>© ${BRAND}</footer></body></html>`;
 }
 
 const dupText = `<p>${words('kopya', 300)}</p>`;
@@ -39,7 +39,7 @@ const LINKED = ['/temiz', '/yok', '/hata', '/yavas', '/noindex', '/d1', '/soft40
   '/thin', '/kopya-a', '/kopya-b', '/benzer-a', '/benzer-b', '/lorem', '/nofollow', '/generic', '/manylinks', '/staging-link', '/gorsel',
   '/hl-tr', '/hl-en', '/hl-noreturn', '/hl-noself', '/hl-badtarget', '/hl-bad', '/schema-bad', '/schema-eksik', '/noog', '/slow', '/big',
   '/blocking', '/noviewport', '/nolang', '/unnamed', '/Buyuk_Harf', '/%C5%9Fehir-rehberi', '/uzun?a=1&b=2&c=3&d=4',
-  '/sikistirmasiz', '/dis-link', '/buyuk-gorsel'];
+  '/sikistirmasiz', '/dis-link', '/buyuk-gorsel', '/Bozuk%E9_Sayfa', '/bitisik'];
 // Sprint 2: these are not linked. The test passes them as host variants of the site.
 export const VARIANTS = ['/varyant-ayni', '/varyant-302', '/varyant-ok', '/varyant-zincir'];
 const BIG_IMAGE = Buffer.alloc(250 * 1024, 7);
@@ -47,7 +47,8 @@ const BIG_IMAGE = Buffer.alloc(250 * 1024, 7);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const R = {
   '/': () => page('/', { favicon: false, title: `Ana sayfa test sitesi | ${BRAND}`, body: `<p>${words('home', 300)}</p>` + LINKED.map((u) => `<a href="${u}">${u}</a>`).join(' ') }),
-  '/temiz': () => page('/temiz'),
+  // v0.10.1: these robots values do not block Google. /temiz must stay clean (it is in the sitemap).
+  '/temiz': () => [200, page('/temiz', { head: '<meta name="robots" content="index, follow, max-image-preview:none">' }), { 'x-robots-tag': 'bingbot: noindex' }],
   '/hata': () => [500, 'err'],
   '/yavas': async () => { await sleep(2500); return page('/yavas'); },
   '/noindex': () => page('/noindex', { head: '<meta name="robots" content="noindex">' }),
@@ -116,6 +117,10 @@ const R = {
   '/nolang': () => page('/nolang', { lang: false }),
   '/unnamed': () => page('/unnamed', { body: `<p>${words('unnamed', 300)}</p><a href="/temiz"><i class="icon"></i></a><button></button>` }),
   '/Buyuk_Harf': () => page('/Buyuk_Harf'),
+  // v0.10.1: a bad percent code in one URL must not stop the URL rules for the whole site.
+  '/Bozuk%E9_Sayfa': () => page('/Bozuk%E9_Sayfa'),
+  // v0.10.1: 300 words in list items without white space between the tags. This is not thin content.
+  '/bitisik': () => page('/bitisik', { body: `<ul>${words('bitisik', 300).split(' ').map((w) => `<li>${w}</li>`).join('')}</ul>` }),
   '/%C5%9Fehir-rehberi': () => page('/%C5%9Fehir-rehberi'),
   '/uzun': () => page('/uzun?a=1&b=2&c=3&d=4'),
   // Sprint 2

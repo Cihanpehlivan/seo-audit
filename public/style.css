@@ -560,3 +560,12 @@ details.q p { position: absolute; z-index: 5; top: 24px; left: -8px; width: 280p
   .ln-row details.q p { left: 12px; right: 12px; width: auto; top: auto; margin-top: 6px; }
 }
 .mrow button:disabled { opacity: .45; cursor: default; }
+
+/* v0.10.1: time of the last address check and the button to check again */
+.recheck { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: -10px 0 22px; font-size: 13px; color: var(--stone); }
+.recheck .ghost.small { padding: 5px 10px; }
+.recheck-err { color: var(--red); flex-basis: 100%; }
+@media (max-width: 900px) {
+  .recheck details.q { position: static; }
+  .recheck details.q p { left: 0; right: 0; width: auto; top: 100%; margin-top: 6px; }
+}

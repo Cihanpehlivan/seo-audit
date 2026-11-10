@@ -7,7 +7,7 @@ import robotsParser from 'robots-parser';
 import { RULES, CATEGORIES } from './definitions.js';
 import { isOk, isHtml, isIndexable } from './helpers.js';
 
-export const AUDIT_VERSION = 2;
+export const AUDIT_VERSION = 3;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const SEVERITY = { critical: { label: 'Kritik', rank: 0 }, warning: { label: 'Uyarı', rank: 1 }, notice: { label: 'Bilgi', rank: 2 } };
 

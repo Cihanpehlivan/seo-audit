@@ -15,6 +15,7 @@ import { isBroken, isOk } from './rules/helpers.js';
 import { buildTodo } from './todo.js';
 import { buildLaunch } from './launch.js';
 import os from 'node:os';
+import net from 'node:net';
 import { makeGuard } from './netguard.js';
 import { readFileSync } from 'node:fs';
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -41,13 +42,36 @@ const JOB_LIMIT = PUBLIC_MODE ? YAYIN.maxJobs : MAX_JOBS;
 const URL_LIMIT = PUBLIC_MODE ? YAYIN.maxUrls : 50000;
 const startGuard = PUBLIC_MODE ? makeGuard() : null;
 
+// v0.10.1: request checks for the browser.
+// Host: on a local server the Host header must be localhost, an IP address or a name in ALLOWED_HOSTS. A foreign
+// name means DNS rebinding: a web page reads the local crawls through its own domain. A public server skips this check.
+// Origin: a write request (POST, PUT, DELETE) from a browser must come from the page of this server, not from another site.
+const ALLOWED_HOSTS = new Set((process.env.ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean));
+const hostName = (h) => String(h || '').toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+function hostAllowed(req) {
+  if (PUBLIC_MODE) return true;
+  const h = hostName(req.headers.host);
+  return h === 'localhost' || net.isIP(h) !== 0 || ALLOWED_HOSTS.has(h);
+}
+function originAllowed(req) {
+  const origin = req.headers.origin;
+  if (!origin || !['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) return true;
+  try {
+    const o = new URL(origin).host.toLowerCase();
+    return o === String(req.headers.host || '').toLowerCase() || ALLOWED_HOSTS.has(hostName(o));
+  } catch { return false; }
+}
+
 // Comparison results are cached per crawl pair: probing old paths on the new host takes time.
 const cmpCache = new Map();
 // The cache key holds the crawl ids and the rules, so a new rule set runs a new comparison.
 // live: { crawl host → live host } of the target sites (project only).
-async function compareWithProbe(a, ids, oldRes, newList, rules, cc, live = {}) {
+// v0.10.1: a result is used for compare.probeCacheMin minutes. fresh: true asks every address again
+// (the developer set up the 301s, the user wants the new state without a new crawl).
+async function compareWithProbe(a, ids, oldRes, newList, rules, cc, live = {}, { fresh = false } = {}) {
   const key = `${a}|${ids.join(',')}|${JSON.stringify(rules.map((r) => r.text))}|${JSON.stringify(live)}`;
-  if (cmpCache.has(key)) return cmpCache.get(key);
+  const hit = cmpCache.get(key);
+  if (hit && !fresh && Date.now() - hit.at < (cc.probeCacheMin ?? 30) * 60_000) return hit.cmp;
   const cmp = compareCrawls(oldRes, newList, {
     rules, live, suggest: { minPages: cc.suggestMinPages, minRatio: cc.suggestMinRatio, max: cc.maxSuggestions },
   });
@@ -65,7 +89,9 @@ async function compareWithProbe(a, ids, oldRes, newList, rules, cc, live = {}) {
     finally { clearTimeout(t); }
   };
   await probeLost(cmp, request, { concurrency: cfg.concurrency });
-  cmpCache.set(key, cmp);
+  cmp.checkedAt = new Date().toISOString();
+  cmpCache.delete(key);
+  cmpCache.set(key, { cmp, at: Date.now() });
   if (cmpCache.size > 20) cmpCache.delete(cmpCache.keys().next().value);
   return cmp;
 }
@@ -85,10 +111,21 @@ function send(res, code, data, type = 'application/json; charset=utf-8') {
   res.end(type.startsWith('application/json') ? JSON.stringify(data) : data);
 }
 
+// The size limit is in config/rules.json → server.maxBodyKb. A project file with many 301 decisions is large.
 async function readJson(req) {
-  let raw = '';
-  for await (const chunk of req) { raw += chunk; if (raw.length > 1e5) throw new Error('İstek çok büyük'); }
-  return raw ? JSON.parse(raw) : {};
+  const max = (loadConfig().server?.maxBodyKb ?? 4096) * 1024;
+  const chunks = []; let size = 0;
+  // A request over the limit is read to its end without keeping it: the browser gets the answer, the connection stays usable.
+  // A request far over the limit is cut.
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > max * 4) { req.destroy(); break; }
+    if (size <= max) chunks.push(chunk);
+  }
+  if (size > max) throw Object.assign(new Error(`İstek çok büyük. Sınır ${Math.round(max / 1024)} KB.`), { code: 413 });
+  if (!size) return {};
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { throw Object.assign(new Error('İstek okunamadı. Geçerli bir JSON gönderin.'), { code: 400 }); }
 }
 
 function broadcast(job, event, data) {
@@ -171,7 +208,7 @@ function siteNames(p) {
 }
 
 // Matching of a project: old site → heir and other sites. Sections without a decision get the suggested move.
-async function projectMatch(p) {
+async function projectMatch(p, { fresh = false } = {}) {
   const cc = loadConfig().compare;
   const status = await projectStatus(p);
   const old = p.sites.find((s) => s.role === 'old'), heir = p.sites.find((s) => s.role === 'heir');
@@ -196,7 +233,7 @@ async function projectMatch(p) {
   const first = compareCrawls(oldRes, newList, { rules: userRules, live, suggest });
   const auto = first.suggestions.filter((x) => !x.notFound).map(({ from, host, to }) => ({ from, host, to }));
   const rules = parseRules([...userRules.map(({ from, host, to, drop }) => ({ from, host, to, drop })), ...auto], cc.maxRules + cc.maxSuggestions);
-  const cmp = await compareWithProbe(status[old.key].crawlId, ids, oldRes, newList, rules, cc, live);
+  const cmp = await compareWithProbe(status[old.key].crawlId, ids, oldRes, newList, rules, cc, live, { fresh });
   const autoFrom = new Set(auto.map((a) => a.from));
   const sections = sectionTable(cmp, { minPages: cc.suggestMinPages, pageLimit: cc.sectionPageLimit, langMinShare: cc.langMinShare }).map((sec) => ({
     ...sec, auto: autoFrom.has(sec.from),
@@ -238,7 +275,11 @@ async function startJob(body) {
   const label = String(body.label || '').replace(/[^\w-]/g, '').slice(0, 20);
   const host = new URL(url).hostname;
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const id = [host, label, stamp].filter(Boolean).join('_');
+  // v0.10.1: the id is a file name. An IPv6 host ("[::1]") has characters a file name must not have.
+  // Two crawls of one host in the same second get different ids.
+  const safeHost = (host.includes(':') ? 'ipv6-' : '') + (host.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'site');
+  let id = [safeHost, label, stamp].filter(Boolean).join('_');
+  for (let n = 2; jobs.has(id) || store.has(id); n++) id = [safeHost, label, stamp, n].filter(Boolean).join('_');
   const o = body.options || {};
   const num = (v, d, min, max) => Math.min(max, Math.max(min, Number.isFinite(+v) && v !== '' ? +v : d));
 
@@ -321,6 +362,8 @@ const server = http.createServer(async (req, res) => {
         return res.end('Giriş gerekli');
       }
     }
+    if (!hostAllowed(req)) return send(res, 403, { error: 'Bu adres ile giriş kapalı. Sunucuyu localhost veya IP adresi ile açın. Başka bir ad için ALLOWED_HOSTS ayarını kullanın.' });
+    if (!originAllowed(req)) return send(res, 403, { error: 'Başka bir siteden gelen istek kabul edilmez.' });
     const u = new URL(req.url, 'http://local');
     const parts = u.pathname.split('/').filter(Boolean);
 
@@ -397,7 +440,8 @@ const server = http.createServer(async (req, res) => {
       }
       if ((action === 'match' || action === 'excel') && req.method === 'GET') {
         let m;
-        try { m = await projectMatch(await projects.get(pid)); }
+        // ?fresh=1 (v0.10.1): ask every old address again, do not use the saved result.
+        try { m = await projectMatch(await projects.get(pid), { fresh: action === 'match' && u.searchParams.get('fresh') === '1' }); }
         catch (e) { if (e.code === 409) return send(res, 409, { error: e.message, need: e.need }); throw e; }
         if (action === 'match') {
           const { cmp, sections, targets, status, map, todo, launch } = m;

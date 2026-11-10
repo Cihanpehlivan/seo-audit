@@ -1,5 +1,6 @@
 // Saves crawl results to disk and keeps a small index for the history list.
 import { mkdir, readFile, writeFile, readdir, unlink } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 export const ID_RE = /^[\w.-]+$/;
@@ -56,6 +57,8 @@ export class Store {
     return items.filter(Boolean).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
 
+  // Sync on purpose: the server picks a free id and takes it in the same tick.
+  has(id) { return existsSync(this.file(id, 'meta.json')) || existsSync(this.file(id, 'json')); }
   async meta(id) { try { return JSON.parse(await readFile(this.file(id, 'meta.json'), 'utf8')); } catch { return null; } }
   async load(id) { return JSON.parse(await readFile(this.file(id, 'json'), 'utf8')); }
 

@@ -2,11 +2,10 @@
 // Groups by time: critical (fix before launch), decide (the 301 map), switch (change at launch: normal on staging),
 // check (compare with the old site). A site crawled on its live domain is not staging: its checks come in Part 3b.
 import robotsParser from 'robots-parser';
-import { isOk, isNoindex, isStagingHost } from './rules/helpers.js';
+import { isOk, isNoindex, isStagingHost, blocksIndex } from './rules/helpers.js';
 
 const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
 const hostOf = (u) => { try { return new URL(u).hostname.toLowerCase(); } catch { return ''; } };
-const NOINDEX = /noindex|none/;
 
 export const LAUNCH_GROUPS = [
   { key: 'critical', title: 'Kritik: çıkıştan önce düzeltin' },
@@ -110,8 +109,8 @@ export function buildLaunch({ oldRes, sites, map, cfg = {} }) {
 
     // Switch at launch: normal on staging, wrong on the live site.
     if (noindex.length) {
-      const meta = noindex.filter((p) => NOINDEX.test(String(p.metaRobots || '').toLowerCase())).length;
-      const head = noindex.filter((p) => NOINDEX.test(String(p.xRobotsTag || '').toLowerCase())).length;
+      const meta = noindex.filter((p) => blocksIndex(p.metaRobots)).length;
+      const head = noindex.filter((p) => blocksIndex(p.xRobotsTag)).length;
       add({ group: 'switch', kind: 'noindex', site: s.key, team: 'Backend', title: 'noindex', n: noindex.length, unit: 'sayfa', detail: { meta, header: head },
         note: 'Canlıya çıkışta noindex etiketini ve X-Robots-Tag başlığını kaldırın.',
         list: noindex.map((p) => ({ what: [p.metaRobots && 'meta robots', p.xRobotsTag && 'X-Robots-Tag'].filter(Boolean).join(', '), page: p.url, value: [p.metaRobots, p.xRobotsTag].filter(Boolean).join(' · ') })) });

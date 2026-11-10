@@ -1,7 +1,7 @@
 // All audit rules. Each rule returns a list of { url, detail }.
 // severity: critical | warning | notice    team: SEO | İçerik | Frontend | Backend
 import robotsParser from 'robots-parser';
-import { isOk, isHtml, isNoindex, isCanonicalized, isIndexable, titlePx, isStagingHost, hostOf, sameSite, groupBy, short, isBroken, resLabel, tlsErrorText, isTlsError } from './helpers.js';
+import { isOk, isHtml, isNoindex, isCanonicalized, isIndexable, titlePx, isStagingHost, hostOf, sameSite, groupBy, short, isBroken, resLabel, tlsErrorText, isTlsError, safeDecode } from './helpers.js';
 import { hamming } from '../fingerprint.js';
 
 export const CATEGORIES = [
@@ -519,11 +519,11 @@ rule({ id: 'favicon-missing', category: 'a11y', severity: 'notice', team: 'Front
 rule({ id: 'url-format', category: 'url', severity: 'notice', team: 'Backend',
   title: 'URL biçimi sorunlu', description: 'URL\'de büyük harf, boşluk veya alt çizgi var.',
   fix: 'Küçük harf ve tire (-) kullanın. Eski URL\'ler için 301 ekleyin.',
-  run: (c) => each(c.indexable, (p) => { const path = decodeURIComponent(new URL(p.url).pathname); const m = [/[A-ZÇĞİÖŞÜ]/.test(path) && 'büyük harf', /\s|%20/.test(p.url) && 'boşluk', /_/.test(path) && 'alt çizgi'].filter(Boolean); return m.length && m.join(', '); }) });
+  run: (c) => each(c.indexable, (p) => { const path = safeDecode(new URL(p.url).pathname); const m = [/[A-ZÇĞİÖŞÜ]/.test(path) && 'büyük harf', /\s|%20/.test(p.url) && 'boşluk', /_/.test(path) && 'alt çizgi'].filter(Boolean); return m.length && m.join(', '); }) });
 rule({ id: 'url-non-ascii', category: 'url', severity: 'notice', team: 'Backend',
   title: 'URL\'de Türkçe / özel karakter', description: 'Paylaşımda URL %C3%BC gibi kodlara dönüşür.',
   fix: 'ç→c, ğ→g, ı→i, ö→o, ş→s, ü→u dönüşümü ile slug üretin.',
-  run: (c) => each(c.indexable, (p) => /%[89A-F][0-9A-F]|[^\x00-\x7F]/i.test(new URL(p.url).pathname) && decodeURIComponent(new URL(p.url).pathname)) });
+  run: (c) => each(c.indexable, (p) => /%[89A-F][0-9A-F]|[^\x00-\x7F]/i.test(new URL(p.url).pathname) && safeDecode(new URL(p.url).pathname)) });
 rule({ id: 'url-long', category: 'url', severity: 'notice', team: 'Backend',
   title: 'URL çok uzun veya çok parametreli', description: 'Uzun ve parametreli URL\'ler kötü görünür ve kopya sayfa üretebilir.',
   fix: 'Kısa, anlamlı slug kullanın. Filtre parametrelerini canonical ile yönetin.',
