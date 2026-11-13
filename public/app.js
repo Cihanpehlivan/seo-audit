@@ -904,7 +904,7 @@ function watchCrawls() {
 const LIST_RESULT = {
   crawl: ['Taramada vardı', 'idle'], found: ['Yeni bulundu', 'ok'], gone: ['Eski sitede hata', 'warn'], redirect: ['Eski sitede yönleniyor', 'warn'],
   nothtml: ['HTML değil', 'idle'], error: ['Yanıt yok', 'warn'], blocked: ['robots.txt engeli', 'warn'], pending: ['İstenmedi', 'idle'],
-  limit: ['İstenmedi (sınır)', 'idle'], late: ['Çıkıştan sonra geldi', 'idle'],
+  limit: ['İstenmedi (sınır)', 'idle'], late: ['Canlıda kontrol edilir', 'idle'],
 };
 const UL_COLS = [['url', 'Adres'], ['clicks', 'Tıklama'], ['impressions', 'Gösterim'], ['views', 'Görüntüleme'], ['links', 'Link veren alan adı']];
 const UL_EMPTY = () => ({ open: false, text: '', file: '', preview: null, header: null, chosen: null, err: '', busy: false, msg: '' });
@@ -919,6 +919,12 @@ function trafficText(t) {
   return '';
 }
 const trafficTag = (t) => (trafficText(t) ? `<span class="tag-s click">${esc(trafficText(t))}</span>` : '');
+// v0.12.1: traffic label under an address in the lists (Yapılacaklar, Canlıya çıkış, Canlı doğrulama).
+const trafficLine = (t) => (trafficText(t) ? `<span class="u-traffic">${trafficTag(t)}</span>` : '');
+// Same order as the server: clicks, impressions, views, linking domains. Rows without traffic keep their order.
+const tv = (t) => (t ? [t.c ?? -1, t.i ?? -1, t.v ?? -1, t.l ?? -1] : [-1, -1, -1, -1]);
+const byTraffic = (a, b) => { const x = tv(a), y = tv(b); for (let k = 0; k < 4; k++) if (x[k] !== y[k]) return y[k] - x[k]; return 0; };
+const sortByTraffic = (list) => list.map((x, i) => [x, i]).sort((a, b) => byTraffic(a[0].traffic, b[0].traffic) || a[1] - b[1]).map(([x]) => x);
 async function loadList() {
   const id = prj.id;
   try { const v = await api(`/api/projects/${id}/urllist`); if (prj.id === id) prj.list = v; } catch { if (prj.id === id) prj.list = null; }
@@ -1004,10 +1010,10 @@ function listResultHtml(L, ls, launched, c) {
   const tiles = [
     [L.addresses, 'eski alan adında adres', ''], [c.crawl, 'taramada vardı', ''], [c.found, 'yeni bulundu · eski sayfa oldu', 'ok'],
     [c.gone, 'eski sitede hata (404, 410)', 'warn'], [c.redirect, 'eski sitede yönleniyor', 'warn'], [odd, 'HTML değil, yanıt yok veya engelli', ''],
-    [c.pending + c.limit, 'taramada yok · istenmedi', launched ? '' : 'warn'], [c.late, 'çıkıştan sonra geldi', ''], [L.otherCount, 'başka alan adında · ayrıldı', ''],
+    [c.pending + c.limit, 'taramada yok · istenmedi', launched ? '' : 'warn'], [c.late, 'canlıda kontrol edilir', ''], [L.otherCount, 'başka alan adında · ayrıldı', ''],
   ].filter(([n], i) => n || i < 2);
   let act = '';
-  if (launched) act = `<p class="note small">Site ${esc(fmtDay(prj.project.launch.at))} tarihinde canlıya çıktı. Eski alan adı yeni siteyi sunar. Araç eski sitede istek atmaz.${c.late ? ' Çıkıştan sonra gelen adresler henüz kontrol edilmez (sonraki sürüm).' : ''}</p>`;
+  if (launched) act = `<p class="note small">Site ${esc(fmtDay(prj.project.launch.at))} tarihinde canlıya çıktı. Eski alan adı yeni siteyi sunar. Araç eski sitede istek atmaz.${c.late ? ` ${nf(c.late)} adres eski sitede istenmedi. Araç bu adresleri içeriksiz eski sayfa sayar: 301 haritası adres benzerliği ile öneri verir, Canlı doğrulama canlı alan adında kontrol eder.` : ''}</p>`;
   else if (ls.state === 'running') act = `<div class="ul-acts"><span class="tag-s run">İsteniyor · ${nf(ls.done)} / ${nf(ls.total)}</span><a class="ghost small" href="#/live/${esc(ls.jobId)}">İzle</a></div>`;
   else if (L.needOld) act = '<p class="small muted">Önce eski siteyi tarayın. Araç listeyi eski site taraması ile karşılaştırır.</p>';
   else if (L.open) act = `<div class="ul-acts"><button type="button" class="ghost small strong" data-ul-fetch>Eski sitede isteyin · ${nf(L.toAsk)} adres</button><span class="small muted">İstekler sadece eski siteye gider. robots.txt ayarı tarama ayarlarından gelir.</span></div>`;
@@ -1366,7 +1372,9 @@ function renderMap() {
 function mapRowHtml(r) {
   const p = esc(r.path);
   // v0.12.0: traffic from the old address list and the mark of a page found only by the list.
-  const tags = r.traffic || r.fromList ? `<span class="mrow-tags">${trafficTag(r.traffic)}${r.fromList ? `<span class="tag-s idle" title="Taramada yoktu. Eski adres listesi buldu.">Listeden</span>` : ''}</span>` : '';
+  // v0.12.1: a late address (came after launch, never asked on the old site) has no content: the suggestion uses the address only.
+  const lateTag = r.late ? `<span class="tag-s idle" title="${esc(TERMS.lateRow)}">İçerik yok</span>` : '';
+  const tags = r.traffic || r.fromList || r.late ? `<span class="mrow-tags">${trafficTag(r.traffic)}${r.fromList ? `<span class="tag-s idle" title="Taramada yoktu. Eski adres listesi buldu.">Listeden</span>` : ''}${lateTag}</span>` : '';
   const head = `<div class="mrow-old"><code>${p}</code>${tags}${r.oldTitle ? `<span class="small">Eski title: ${esc(r.oldTitle)}</span>` : ''}</div><span class="cmp-arrow" aria-hidden="true">→</span>`;
   if (r.status === 'rule') {
     return `<div class="mrow" data-mpath="${p}">${head}<div class="mrow-to"><span title="${esc(r.target.url)}">${mapTarget(r.target)}</span>
@@ -1454,6 +1462,7 @@ const TERMS = {
   liveUrl: 'Canlıya çıkıştan sonraki adres. 301 her zaman bu adrese gider. Canlı adresi staging adresine asla yönlendirmeyin.',
   checkUrl: 'Aracın kontrol ettiği adres (genelde staging). Sayfayı açıp görmek içindir. 301 hedefi değildir.',
   noLive: 'Bu sitenin canlı alan adı projede yok. Proje adımında "canlı alan adı" alanını doldurun.',
+  lateRow: 'Adres çıkıştan sonra listeden geldi. Araç eski sitede istemedi: title, H1 ve içerik yok. Öneri sadece adres benzerliğidir. Kontrol edip karar verin.',
 };
 const todoState = { open: null };
 const placeSite = (p) => (p.kind === 'site' ? siteByKey(p.site) : null);
@@ -1500,14 +1509,15 @@ function renderPlaces() {
 }
 function placeList(p, t) {
   const thin = p.ready?.state === 'thin';
-  const list = t.items.filter((i) => (thin ? i.held && i.site === p.site : i.placeKey === p.key && !i.held));
+  // v0.12.1: the server sorts by place, then traffic. The held list of a thin site mixes places: sort it here.
+  const list = thin ? sortByTraffic(t.items.filter((i) => i.held && i.site === p.site)) : t.items.filter((i) => i.placeKey === p.key && !i.held);
   const max = t.listLimit || 200;
   const shown = list.slice(0, max);
   const head = list.length > max ? `<p class="small">${list.length} iş var. İlk ${max} satır görünüyor. Bütün liste Excel'de.</p>` : '';
   // v0.9.1: the live address and the checked (staging) address are separate columns. A 301 goes to the live address only.
   const live = (i) => (i.liveUrl ? `<span class="u-live">${esc(i.liveUrl)}</span>` : i.checkUrl ? `<span class="small">Canlı alan adı yok ${help(TERMS.noLive)}</span>` : '<span class="small">—</span>');
   return `<div class="plist">${head}<div class="table-wrap"><table><thead><tr><th>İş</th><th>Eski adres</th><th>Canlı adres ${help(TERMS.liveUrl)}</th><th>Kontrol edilen adres ${help(TERMS.checkUrl)}</th><th>Not</th></tr></thead><tbody>${
-    shown.map((i) => `<tr><td>${esc(i.label)}</td><td class="u">${cmpLink(i.oldUrl, i.path)}</td><td class="u">${live(i)}</td><td class="u">${i.checkUrl ? cmpLink(i.checkUrl) : '<span class="small">—</span>'}</td><td>${esc(i.note)}</td></tr>`).join('')
+    shown.map((i) => `<tr><td>${esc(i.label)}</td><td class="u">${cmpLink(i.oldUrl, i.path)}${trafficLine(i.traffic)}</td><td class="u">${live(i)}</td><td class="u">${i.checkUrl ? cmpLink(i.checkUrl) : '<span class="small">—</span>'}</td><td>${esc(i.note)}</td></tr>`).join('')
   }</tbody></table></div></div>`;
 }
 $('#todoPlaces').addEventListener('click', (e) => {
@@ -1618,7 +1628,7 @@ function launchList(it) {
   const head = it.list.length > max ? `<p class="small">${it.list.length} satır var. İlk ${max} satır görünüyor. Bütün liste Excel'de.</p>` : '';
   const addr = (u) => (/^https?:\/\/\S+$/.test(u || '') ? cmpLink(u) : esc(u || '—'));
   return `<div class="plist">${head}<div class="table-wrap"><table><thead><tr><th>Tür</th><th>Adres</th><th>Değer</th></tr></thead><tbody>${
-    shown.map((x) => `<tr><td>${esc(x.what)}</td><td class="u">${addr(x.page)}</td><td class="u">${addr(x.value)}</td></tr>`).join('')
+    shown.map((x) => `<tr><td>${esc(x.what)}</td><td class="u">${addr(x.page)}${trafficLine(x.traffic)}</td><td class="u">${addr(x.value)}</td></tr>`).join('')
   }</tbody></table></div></div>`;
 }
 $('#lnGroups').addEventListener('click', (e) => {
@@ -1644,6 +1654,7 @@ const VF_TERMS = {
   unknown: 'Araç bu satırları kontrol edemedi. Bu satırlar tamam sayılmaz. Nedeni satırda yazılı.',
   ok: 'Canlı istekte doğru çıkan adresler ve kontroller.',
   site: 'Araç her siteyi canlı alan adında ayrıca tarar. Bu tarama staging taramasının yerini almaz. Staging ayarı, etiket ve sitemap kontrolü bu taramadan gelir.',
+  'late-unproven': 'Adres çıkıştan sonra listeden geldi ve listede trafik yok. Adres hiç var olmamış olabilir (bozuk liste). Bu satır tamam sayılmaz. Eşik: rules.json → urlList.lateProof.',
   'ok-open': 'Haritada bu sayfa için karar yok. Adres canlıda açılıyor veya tek adımda yönleniyor. Kararı haritaya yazın: liste sonra da doğru kalsın.',
   'live-noindex': LN_TERMS.noindex,
   'live-disallow': LN_TERMS.disallow,
@@ -1819,7 +1830,7 @@ function vfList(it) {
   const head = it.list.length > max ? `<p class="small">${it.list.length} satır var. İlk ${max} satır görünüyor. Bütün liste Excel'de.</p>` : '';
   const addr = (u) => (/^https?:\/\/\S+$/.test(u || '') ? cmpLink(u) : esc(u || '—'));
   const table = it.listKind === 'redirect'
-    ? `<thead><tr><th>Eski adres</th><th>Beklenen</th><th>Canlıda</th><th>Kaynak</th></tr></thead><tbody>${shown.map((x) => `<tr><td class="u">${addr(x.old)}</td><td class="u">${addr(x.expect)}</td><td class="u">${esc(x.got || '—')}${x.final ? `<br>${addr(x.final)}` : ''}</td><td>${esc(x.src || '')}</td></tr>`).join('')}</tbody>`
+    ? `<thead><tr><th>Eski adres</th><th>Beklenen</th><th>Canlıda</th><th>Kaynak</th></tr></thead><tbody>${shown.map((x) => `<tr><td class="u">${addr(x.old)}${trafficLine(x.traffic)}</td><td class="u">${addr(x.expect)}</td><td class="u">${esc(x.got || '—')}${x.final ? `<br>${addr(x.final)}` : ''}</td><td>${esc(x.src || '')}</td></tr>`).join('')}</tbody>`
     : `<thead><tr><th>Tür</th><th>Adres</th><th>Değer</th></tr></thead><tbody>${shown.map((x) => `<tr><td>${esc(x.what)}</td><td class="u">${addr(x.page)}</td><td class="u">${addr(x.value)}</td></tr>`).join('')}</tbody>`;
   return `<div class="plist">${head}<div class="table-wrap"><table>${table}</table></div></div>`;
 }

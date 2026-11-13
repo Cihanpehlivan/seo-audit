@@ -303,6 +303,8 @@ export function buildRedirectMap(cmp, oldRes, sites, decisions = {}, cfg, traffi
     const t = traffic?.get(row.path);
     if (t) row.traffic = trafficOf(t);
     if (oldPage.get(row.path)?.discoveredBy === 'list') row.fromList = true;
+    // v0.12.1: a late address (never asked on the old site) has no title, H1 or content: the suggestion uses the address only.
+    if (oldPage.get(row.path)?.late) row.late = true;
   }
   const tr = (r) => traffic?.get(r.path) || null;
   const order = { pending: 0, none: 1, approved: 2, gone: 3, rule: 4 };

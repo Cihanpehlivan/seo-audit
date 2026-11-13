@@ -3,6 +3,7 @@
 // content (title, meta, H1, noindex) and decisions (the user).
 // A site with too few pages is "not ready": its tasks are held and not counted, because they are not real work yet.
 import { FIX } from './compare.js';
+import { trafficOf, byTraffic } from './urllist.js';
 
 const TASK = {
   '301': '301 kurun',
@@ -33,7 +34,7 @@ export function siteReadiness(cmp, sites, readyOk = {}, cfg = {}) {
   const R = cmp.rows;
   // Old pages expected on each site. Pages of a removed section are not expected anywhere.
   for (const k of ['lost', 'redirected', 'changed', 'unlinked', 'unknown', 'moved', 'no301', 'notarget']) {
-    for (const r of R[k] || []) { const key = keyOfHost(r.site); if (key) old[key]++; }
+    for (const r of R[k] || []) { if (r.late) continue; const key = keyOfHost(r.site); if (key) old[key]++; } // v0.12.1: a late address is no proof of an old page
   }
   if (sites[0]) old[sites[0].key] += R.same || 0; // "same" = same path on the heir
   const out = {};
@@ -47,7 +48,9 @@ export function siteReadiness(cmp, sites, readyOk = {}, cfg = {}) {
 
 // cmp: comparison with probe. map: 301 map. sections: section table (alerts). sites: target sites, heir first
 // ({ key, role, name, host, okPages, crawlId }). oldHost: host of the old site (its server gets the 301s).
-export function buildTodo({ cmp, map, sections = [], sites, oldHost, readyOk = {}, cfg = {} }) {
+// traffic (v0.12.1): path → { clicks, impressions, views, links } from the old address list. Inside every place the
+// task with more traffic comes first (same order as the 301 map). Tasks without traffic keep their order at the end.
+export function buildTodo({ cmp, map, sections = [], sites, oldHost, readyOk = {}, cfg = {}, traffic = null }) {
   const R = cmp.rows;
   const keyOfHost = (h) => sites.find((s) => bare(s.host) === bare(h))?.key || null;
   const ready = siteReadiness(cmp, sites, readyOk, cfg);
@@ -144,6 +147,14 @@ export function buildTodo({ cmp, map, sections = [], sites, oldHost, readyOk = {
   places.push({ key: 'decide', kind: 'decide', title: 'Karar bekleyen', team: 'Siz', tasks: tasks('decide', decide), n: decide.length });
 
   const placeOf = (it) => (it.place === 'site' ? `site:${it.site}` : it.place);
-  for (const it of items) it.placeKey = placeOf(it);
+  for (const it of items) {
+    it.placeKey = placeOf(it);
+    const t = it.path && traffic?.get(it.path);
+    if (t) it.traffic = trafficOf(t);
+  }
+  // Place order (as the cards), then traffic. A stable sort: tasks without traffic keep the order of their kind.
+  const pi = new Map(places.map((p, i) => [p.key, i]));
+  const at = new Map(items.map((it, i) => [it, i]));
+  items.sort((a, b) => ((pi.get(a.placeKey) ?? 99) - (pi.get(b.placeKey) ?? 99)) || byTraffic(a.traffic, b.traffic) || at.get(a) - at.get(b));
   return { places, items, ready, total: live.length, held: items.length - live.length, listLimit: cfg.listLimit ?? 200 };
 }

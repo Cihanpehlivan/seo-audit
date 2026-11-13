@@ -210,14 +210,15 @@ export async function exportCompareExcel(cmp, file, { map, todo, launch, verify,
   if (todo?.items.length) {
     const place = new Map(todo.places.map((p) => [p.key, p]));
     const where = (p) => (p.kind === 'site' ? `${p.title} (${p.role === 'heir' ? 'eski alan adına geçecek site' : p.name || 'ek site'})` : p.title);
+    // v0.12.1: traffic columns of the old address list. The rows come by place, then by traffic (buildTodo).
     sheet(wb, 'Yapılacaklar', [
       { header: 'Yer', key: 'where', width: 40 }, { header: 'Ekip', key: 'team', width: 10 }, { header: 'İş', key: 'label', width: 36 },
-      { header: 'Eski URL', key: 'oldUrl', width: 60 }, { header: 'Canlı URL', key: 'liveUrl', width: 60 },
+      { header: 'Eski URL', key: 'oldUrl', width: 60 }, ...trafficColumns(todo.items), { header: 'Canlı URL', key: 'liveUrl', width: 60 },
       { header: 'Kontrol edilen URL (staging)', key: 'checkUrl', width: 60 }, { header: 'Not', key: 'note', width: 70 },
       { header: 'Durum', key: 'state', width: 34 },
     ], todo.items.map((it) => {
       const p = place.get(it.placeKey);
-      return { ...it, where: p ? where(p) : '', team: p?.team || '', state: it.held ? 'Bekliyor: site hazır değil gibi görünüyor' : '' };
+      return { ...it, ...trafficCells(it.traffic), where: p ? where(p) : '', team: p?.team || '', state: it.held ? 'Bekliyor: site hazır değil gibi görünüyor' : '' };
     }));
   }
   // v0.10.0: launch list. One row per address; an item without a list gets one row.
@@ -227,12 +228,13 @@ export async function exportCompareExcel(cmp, file, { map, todo, launch, verify,
       for (const it of g.items) {
         const base = { group: g.title, site: it.site ? siteNames[it.site] || it.site : '', team: it.team, task: it.title, note: it.note, state: it.info ? 'Bilgi' : '' };
         if (!it.list.length) rows.push(base);
-        for (const x of it.list) rows.push({ ...base, what: x.what, page: x.page, value: x.value });
+        for (const x of it.list) rows.push({ ...base, what: x.what, page: x.page, value: x.value, traffic: x.traffic, ...trafficCells(x.traffic) });
       }
     }
+    // v0.12.1: "Karar bekleyen" rows carry the traffic of the old address list (traffic order).
     sheet(wb, 'Canlıya çıkış', [
       { header: 'Grup', key: 'group', width: 30 }, { header: 'Site', key: 'site', width: 30 }, { header: 'Ekip', key: 'team', width: 10 },
-      { header: 'İş', key: 'task', width: 36 }, { header: 'Tür', key: 'what', width: 20 }, { header: 'Adres', key: 'page', width: 60 },
+      { header: 'İş', key: 'task', width: 36 }, { header: 'Tür', key: 'what', width: 20 }, { header: 'Adres', key: 'page', width: 60 }, ...trafficColumns(rows),
       { header: 'Değer', key: 'value', width: 60 }, { header: 'Not', key: 'note', width: 70 }, { header: 'Durum', key: 'state', width: 10 },
     ], rows);
   }
@@ -246,14 +248,15 @@ export async function exportCompareExcel(cmp, file, { map, todo, launch, verify,
         if (!it.list.length) rows.push(base);
         for (const x of it.list) {
           rows.push(it.listKind === 'redirect'
-            ? { ...base, type: TYPE[x.type] || '', addr: x.old, expect: x.expect, got: x.got, final: x.final, src: x.src }
+            ? { ...base, type: TYPE[x.type] || '', addr: x.old, traffic: x.traffic, ...trafficCells(x.traffic), expect: x.expect, got: x.got, final: x.final, src: x.src }
             : { ...base, type: x.what, addr: x.page, got: x.value });
         }
       }
     }
+    // v0.12.1: traffic columns after the address. Inside every item the rows come in traffic order (buildVerify).
     sheet(wb, 'Canlı doğrulama', [
       { header: 'Grup', key: 'group', width: 18 }, { header: 'İş', key: 'task', width: 36 }, { header: 'Site', key: 'site', width: 28 },
-      { header: 'Ekip', key: 'team', width: 10 }, { header: 'Tür', key: 'type', width: 18 }, { header: 'Adres', key: 'addr', width: 60 },
+      { header: 'Ekip', key: 'team', width: 10 }, { header: 'Tür', key: 'type', width: 18 }, { header: 'Adres', key: 'addr', width: 60 }, ...trafficColumns(rows),
       { header: 'Beklenen', key: 'expect', width: 55 }, { header: 'Canlıda', key: 'got', width: 40 }, { header: 'Son adres', key: 'final', width: 55 },
       { header: 'Kaynak', key: 'src', width: 22 }, { header: 'Not', key: 'note', width: 70 }, { header: 'Durum', key: 'state', width: 10 },
     ], rows);
@@ -310,10 +313,10 @@ export async function exportCompareExcel(cmp, file, { map, todo, launch, verify,
       { header: 'Eski URL', key: 'oldUrl', width: 60 }, ...tcols, { header: 'Yeni URL', key: 'to', width: 60 }, { header: 'Durum', key: 'st', width: 18 },
       { header: 'Kaynak', key: 'src', width: 24 }, { header: 'Araç önerisi', key: 'sug', width: 60 },
       { header: 'Güven', key: 'conf', width: 10 }, { header: 'Puan', key: 'score', width: 8 }, { header: 'Neden', key: 'why', width: 70 }, { header: 'Uyarı', key: 'warn', width: 40 },
-      { header: 'Eski sayfa nereden', key: 'found', width: 20 },
+      { header: 'Eski sayfa nereden', key: 'found', width: 32 },
     ], map.rows.map((r) => {
       const best = r.candidates?.[0];
-      return { oldUrl: r.oldUrl, ...trafficCells(r.traffic), found: r.fromList ? 'Eski adres listesi' : 'Tarama', to: r.target?.url || '', st: ST[r.status], src: mapSource(r), sug: best?.url || '',
+      return { oldUrl: r.oldUrl, ...trafficCells(r.traffic), found: r.late ? 'Liste (çıkıştan sonra, içerik yok)' : r.fromList ? 'Eski adres listesi' : 'Tarama', to: r.target?.url || '', st: ST[r.status], src: mapSource(r), sug: best?.url || '',
         conf: best ? CONF[best.conf] : '', score: best ? best.score : null, why: best?.why || r.why || '', warn: r.warn || '' };
     }));
   }

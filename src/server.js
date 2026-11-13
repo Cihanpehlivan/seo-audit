@@ -15,7 +15,7 @@ import { isBroken, isOk } from './rules/helpers.js';
 import { buildTodo } from './todo.js';
 import { buildLaunch, makeIsStaging } from './launch.js';
 import { expectedList, checkRedirects, buildVerify, makeRequest, hostKey } from './verify.js';
-import { readList, cleanList, makeSource, mergeSources, validateList, rowCount, toFetch, withListPages, listResults, sourceSummary, KIND_NAME } from './urllist.js';
+import { readList, cleanList, makeSource, mergeSources, validateList, rowCount, toFetch, withListPages, latePaths, withLatePages, listResults, sourceSummary, KIND_NAME } from './urllist.js';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import net from 'node:net';
@@ -389,10 +389,13 @@ async function listInputs(p, oldCrawl) {
   const id = p.urlList?.crawlId || null;
   let listRes = null;
   if (id && merged.size) { try { listRes = await store.load(id); } catch {} }
-  const oldRes = withListPages(oldCrawl, listRes, merged);
+  // v0.12.1 (decision 7b): after launch the list addresses the old site never answered join as old pages without
+  // content (late: true). No step sends them to the old site or to staging; the live check asks the live domain.
+  const late = p.launch && merged.size ? latePaths(merged, oldCrawl, listRes) : new Set();
+  const oldRes = withLatePages(withListPages(oldCrawl, listRes, merged), late);
   const added = oldRes.pages.length - oldCrawl.pages.length;
-  const key = added ? createHash('sha1').update(oldRes.pages.slice(oldCrawl.pages.length).map((x) => x.url).join('\n')).digest('hex').slice(0, 12) : '';
-  return { list, merged, listRes, oldCrawl, oldRes, added, key };
+  const key = added ? createHash('sha1').update(oldRes.pages.slice(oldCrawl.pages.length).map((x) => (x.late ? `late ${x.url}` : x.url)).join('\n')).digest('hex').slice(0, 12) : '';
+  return { list, merged, listRes, oldCrawl, oldRes, added, key, late };
 }
 
 // Matching of a project: old site → heir and other sites. Sections without a decision get the suggested move.
@@ -415,7 +418,8 @@ async function projectMatch(p, { fresh = false } = {}) {
   const map = buildRedirectMap(cmp, oldRes, mapSites, p.map || {}, loadConfig().redirectMap, list.merged.size ? list.merged : null);
   map.noLive = mapSites.filter((s) => !s.liveOrigin).map((s) => s.key);
   // Work list by place (v0.9.0). A thin site (few pages) is "not ready" until the user accepts its crawl.
-  const todo = buildTodo({ cmp, map, sections, oldHost: oldRes.meta.host, readyOk: p.readyOk || {}, cfg: loadConfig().todo || {},
+  const traffic = list.merged.size ? list.merged : null;
+  const todo = buildTodo({ cmp, map, sections, oldHost: oldRes.meta.host, readyOk: p.readyOk || {}, cfg: loadConfig().todo || {}, traffic,
     sites: targets.map((s, i) => ({ key: s.key, role: s.role, name: s.name, host: newList[i].meta.host, origin: mapSites[i].origin, liveOrigin: mapSites[i].liveOrigin,
       okPages: newList[i].pages.filter(isOk).length, crawlId: status[s.key].crawlId })) });
   // Launch list (v0.10.0): staging checks of every target site, the 301 list and the tags of the old site.
@@ -435,15 +439,16 @@ async function projectVerify(p, { fresh = false } = {}) {
   if (!p.launch) throw Object.assign(new Error('Çıkış işaretlenmedi. Site canlıya çıkınca "Canlıya çıktık" düğmesine basın.'), { code: 409, need: ['launch'] });
   const cfg = loadConfig();
   const status = await projectStatus(p);
-  const { targets, oldRes, newList, rules, live, mapSites } = await projectInputs(p, status);
-  const { rows } = expectedList({ oldRes, newList, sites: mapSites, rules, live, decisions: p.map || {}, cfg });
+  const { targets, oldRes, newList, rules, live, mapSites, list } = await projectInputs(p, status);
+  const { rows } = expectedList({ oldRes, newList, sites: mapSites, rules, live, decisions: p.map || {}, cfg, traffic: list.merged.size ? list.merged : null });
   const info = targets.map((s, i) => {
     const host = bareHost(newList[i].meta.host), liveHost = mapSites[i].liveOrigin ? bareHost(new URL(mapSites[i].liveOrigin).hostname) : '';
     return { host, liveHost, staging: !liveHost || host !== liveHost };
   });
   const isStg = makeIsStaging(info, cfg);
   const allowed = new Set([hostKey(oldRes.meta.startUrl), ...mapSites.filter((s) => s.liveOrigin).map((s) => hostKey(s.liveOrigin))]);
-  const key = createHash('sha1').update(JSON.stringify([rows.map((r) => [r.oldUrl, r.expect, r.target || '', !!r.noLive]), [...allowed]])).digest('hex');
+  // v0.12.1: the key does not depend on the row order or the traffic. A new list source changes the order, not the answers.
+  const key = createHash('sha1').update(JSON.stringify([rows.map((r) => [r.oldUrl, r.expect, r.target || '', !!r.noLive, r.late ? !!r.proof : null]).sort((a, b) => a[0].localeCompare(b[0])), [...allowed].sort()])).digest('hex');
   const hit = verifyCache.get(p.id);
   let checked, at;
   if (hit && !fresh && hit.key === key && Date.now() - hit.at < (cfg.compare.probeCacheMin ?? 30) * 60_000) ({ checked, at } = hit);
@@ -456,6 +461,9 @@ async function projectVerify(p, { fresh = false } = {}) {
     verifyCache.set(p.id, { key, at, checked });
     if (verifyCache.size > 20) verifyCache.delete(verifyCache.keys().next().value);
   }
+  // The answers in the current row order with the current traffic (a cached answer may come from another order).
+  const answer = new Map(checked.map((c) => [c.oldUrl, c]));
+  checked = rows.map((r) => ({ ...answer.get(r.oldUrl), traffic: r.traffic }));
   // Every target site gets a card, also one without a crawl before launch.
   const origins = await liveOrigins(p);
   const liveSites = await Promise.all(p.sites.filter((s) => s.role !== 'old').map(async (s) => {

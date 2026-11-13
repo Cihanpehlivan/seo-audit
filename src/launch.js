@@ -4,6 +4,7 @@
 // (v0.11.0, src/verify.js), which uses the shared functions below.
 import robotsParser from 'robots-parser';
 import { isOk, isNoindex, isStagingHost, blocksIndex } from './rules/helpers.js';
+import { sortByTraffic } from './urllist.js';
 
 const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
 const hostOf = (u) => { try { return new URL(u).hostname.toLowerCase(); } catch { return ''; } };
@@ -177,11 +178,13 @@ export function buildLaunch({ oldRes, sites, map, cfg = {} }) {
   }
 
   // ---- Decide: open rows of the 301 map ----
-  const open = (map?.rows || []).filter((r) => r.status === 'pending' || r.status === 'none');
+  // v0.12.1: traffic order (the old address list). A row without an open decision and more traffic comes first,
+  // "Onay bekliyor" and "Öneri yok" mixed. Rows without traffic keep the map order at the end.
+  const open = sortByTraffic((map?.rows || []).filter((r) => r.status === 'pending' || r.status === 'none'));
   if (open.length) {
     add({ group: 'decide', kind: 'map-pending', team: 'Siz', title: '301 haritasında karar bekleyen satır', n: open.length, unit: 'satır',
       note: 'Karar yoksa sayfa canlıda 404 verir.', action: { type: 'map' },
-      list: open.map((r) => ({ what: r.status === 'pending' ? 'Onay bekliyor' : 'Öneri yok', page: r.oldUrl, value: r.target?.url || '' })) });
+      list: open.map((r) => ({ what: r.status === 'pending' ? 'Onay bekliyor' : 'Öneri yok', page: r.oldUrl, value: r.target?.url || '', ...(r.traffic ? { traffic: r.traffic } : {}) })) });
   }
 
   // ---- Check: tags of the old site ----

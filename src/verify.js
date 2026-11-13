@@ -13,6 +13,7 @@ import { compareCrawls, pathKey } from './compare.js';
 import { buildRedirectMap } from './redirectmap.js';
 import { isOk } from './rules/helpers.js';
 import { stagingAddresses, indexBlockers, tagCheck, hasTagData } from './launch.js';
+import { trafficOf, sortByTraffic, hasProof } from './urllist.js';
 
 const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
 // Host with port: test sites differ only by port. Real sites have no port, so this is the host.
@@ -40,6 +41,7 @@ const R = {
   'temp': ['fix', 'Geçici yönlendirme (302, 307)', 'Geçici yönlendirme sıralamayı taşımaz. 301 kullanın.'],
   'no410': ['fix', '410 bekleniyordu, gelmedi', 'Haritada 410 kararı var. Sunucu başka yanıt veriyor. 410 kurun.'],
   'moved-page': ['fix', 'Sayfa yönleniyor · aynı adreste olmalıydı', 'Sayfa staging\'de bu adreste açılıyordu. Canlıda başka adrese gidiyor. Kontrol edin.'],
+  'late-unproven': ['unknown', 'Eski sitede var mıydı bilinmiyor', 'Adres çıkıştan sonra listeden geldi. Araç eski sitede istemedi ve listede trafik yok. Liste bozuk olabilir. Sayfa vardıysa 301 haritasında karar verin, yoksa adresi listeden çıkarın.'],
   'blocked': ['unknown', 'İç ağ adresi', 'Yayın modunda araç iç ağ adreslerine istek atmaz. Doğrulamayı yerel kurulumda çalıştırın.'],
   'outside': ['unknown', 'Hedef proje dışında', 'Hedef bu projenin canlı alan adlarında değil. Araç başka alan adına istek atmaz. Elle kontrol edin.'],
   'auth': ['unknown', 'Erişim engeli (401, 403)', 'Sunucu aracı engelledi. Güvenlik duvarını veya bot korumasını kontrol edin.'],
@@ -55,14 +57,19 @@ const ORDER = Object.keys(R);
 // ---------- A. The expected list (no requests) ----------
 // oldRes: old site crawl (before launch). newList: target site crawls (staging, before launch), heir first.
 // sites: [{ key, host, origin, liveOrigin, pages }] same order. rules, live: as in the project matching.
-// decisions: project.map. Returns { rows: [{ path, oldUrl, expect, target, site, src, hint }], map }.
-export function expectedList({ oldRes, newList, sites, rules = [], live = {}, decisions = {}, cfg = {} }) {
+// decisions: project.map. Returns { rows: [{ path, oldUrl, expect, target, site, src, hint, traffic }], map }.
+// traffic (v0.12.1): path → { clicks, impressions, views, links } from the old address list. The map gets it (same
+// order as the matching screen) and every row carries it. Rows come in traffic order: in public mode the request limit
+// (yayin.maxUrls) then leaves the pages with less traffic unchecked.
+// v0.12.1: a late page (old address list, never asked on the old site) gets late: true and proof (the list has a number
+// at or over urlList.lateProof). An open late row that fails on the live site is "Kayıp sayfa" only with proof.
+export function expectedList({ oldRes, newList, sites, rules = [], live = {}, decisions = {}, cfg = {}, traffic = null }) {
   const cmp = compareCrawls(oldRes, newList, { rules, live });
   // Without requests a moved page whose target is in the crawl stays in "moving": it is a rule row of the map.
   // Without the target in the crawl the map suggests a page (the same as the matching screen before the 301 exists).
   for (const r of cmp.rows.moving) (r.pendingTarget ? cmp.rows.moved : cmp.rows.notarget).push(r);
   cmp.rows.moving = [];
-  const map = buildRedirectMap(cmp, oldRes, sites, decisions, cfg.redirectMap || {});
+  const map = buildRedirectMap(cmp, oldRes, sites, decisions, cfg.redirectMap || {}, traffic);
   const noLive = new Set(sites.filter((s) => !s.liveOrigin).map((s) => s.key));
   const byStagingHost = new Map(sites.map((s) => [bare(s.host), s]));
   const mapRow = new Map(map.rows.map((r) => [r.path, r]));
@@ -75,7 +82,7 @@ export function expectedList({ oldRes, newList, sites, rules = [], live = {}, de
     const path = pathKey(p.url);
     if (seen.has(path)) continue;
     seen.add(path);
-    const base = { path, oldUrl: p.url };
+    const base = { path, oldUrl: p.url, ...(p.late ? { late: true, proof: hasProof(traffic?.get(path), cfg.urlList?.lateProof || {}) } : {}) };
     const r = mapRow.get(path);
     if (r) {
       if (r.status === 'gone') { rows.push({ ...base, expect: '410', src: '410' }); continue; }
@@ -85,7 +92,7 @@ export function expectedList({ oldRes, newList, sites, rules = [], live = {}, de
         rows.push({ ...base, expect: '301', src, site, target: site && noLive.has(site) ? null : r.target.url, noLive: !!(site && noLive.has(site)) });
         continue;
       }
-      rows.push({ ...base, expect: 'open', src: 'Karar yok', hint: r.target?.url || '' });
+      rows.push({ ...base, expect: 'open', src: p.late ? 'Karar yok · liste' : 'Karar yok', hint: r.target?.url || '' });
       continue;
     }
     // A decision of the user for a page the map does not list (staging already redirects it): the decision wins.
@@ -106,11 +113,12 @@ export function expectedList({ oldRes, newList, sites, rules = [], live = {}, de
       rows.push({ ...base, expect: '301', src: 'Staging yönlendirmesi', site: s?.key || null, target: t });
       continue;
     }
-    if (unknown.has(path)) { rows.push({ ...base, expect: 'open', src: 'Karar yok' }); continue; }
+    if (unknown.has(path)) { rows.push({ ...base, expect: 'open', src: p.late ? 'Karar yok · liste' : 'Karar yok' }); continue; }
     // The page is on the heir at the same path: the live old domain gives the page itself.
     rows.push({ ...base, expect: '200', src: 'Aynı adres' });
   }
-  return { rows, map };
+  if (traffic) for (const r of rows) { const t = traffic.get(r.path); if (t) r.traffic = trafficOf(t); }
+  return { rows: sortByTraffic(rows), map };
 }
 
 // ---------- Requests ----------
@@ -168,7 +176,8 @@ export function classify(e, f, isStg) {
     const st = f.final.status;
     if (e.expect === '301') return st >= 200 && st < 300 ? 'no301-open' : 'no301';
     if (e.expect === '200') return st >= 200 && st < 300 ? 'ok-200' : 'page-gone';
-    return st >= 200 && st < 300 ? 'ok-open' : 'lost';
+    if (st >= 200 && st < 300) return 'ok-open';
+    return e.late && !e.proof ? 'late-unproven' : 'lost';
   }
   // A redirect.
   if (f.left) {
@@ -279,7 +288,7 @@ export function buildVerify({ checked, liveSites, oldRes, isStg, cfg = {} }) {
     if (!list) continue;
     const [group, title, note] = R[kind];
     add({ group, kind, site: 'server', team: group === 'ok' ? '' : 'Backend', title, note, n: list.length, unit: 'adres', listKind: 'redirect',
-      list: list.map((r) => ({ old: r.oldUrl, expect: expectText(r), got: r.got, final: r.final, src: r.src, type: r.expect })) });
+      list: sortByTraffic(list).map((r) => ({ old: r.oldUrl, expect: expectText(r), got: r.got, final: r.final, src: r.src, type: r.expect, ...(r.traffic ? { traffic: r.traffic } : {}) })) });
   }
 
   // Sites: a card for each, and the work that blocks the check.
@@ -292,7 +301,7 @@ export function buildVerify({ checked, liveSites, oldRes, isStg, cfg = {} }) {
     if (!s.liveOrigin) {
       add({ group: 'unknown', kind: 'nolive', site: s.key, team: 'Siz', title: 'Canlı alan adı yok', n: rows.length, unit: 'adres', listKind: 'redirect', action: { type: 'project', site: s.key },
         note: 'Projede bu sitenin canlı alan adı yok. 301 listesi ve canlı site kontrol edilemez. Proje adımında canlı alan adını yazın.',
-        list: rows.map((r) => ({ old: r.oldUrl, expect: 'Canlı alan adı yok', got: '', final: '', src: r.src, type: r.expect })) });
+        list: sortByTraffic(rows).map((r) => ({ old: r.oldUrl, expect: 'Canlı alan adı yok', got: '', final: '', src: r.src, type: r.expect, ...(r.traffic ? { traffic: r.traffic } : {}) })) });
       continue;
     }
     if (s.state === 'done' && s.res) { items.push(...liveFindings({ site: s, res: s.res, oldRes, liveHost: hostName(s.liveOrigin), isStg }).map((x) => ({ team: '', note: '', n: 0, unit: '', ...x }))); continue; }

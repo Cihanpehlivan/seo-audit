@@ -72,6 +72,8 @@
     "_aciklama": "Eski adres listesi (v0.12.0). Search Console, Analytics, backlink aracı dışa aktarımı veya düz liste. columns: sütun adları (küçük harf, ilk bulunan kullanılır). Ad bulunamazsa kullanıcı sütunu seçer. Sütun adları Claude'un bilgisinden yazıldı: gerçek dışa aktarım ile ilk denemede kontrol edin ve eksik adı buraya ekleyin. maxSources: bir projede en fazla kaç kaynak olur. maxRows: bütün kaynaklarda en fazla kaç adres saklanır (liste \"Projeyi indir\" ile taşınır, server.maxBodyKb sınırına sığmalı). listLimit: ekranda en fazla kaç satır görünür (bütün liste Excel'de). İstekler sadece eski alan adına gider. Yayın modunda en fazla yayin.maxUrls adres istenir (trafiği yüksek olan önce). İstek sayısı ve süre: checks.concurrency ve checks.timeoutMs.",
     "maxSources": 5,
     "maxRows": 30000,
+    "_lateProof": "v0.12.1. Çıkıştan önce eski sitede istenmeyen liste adresi canlıda içeriksiz eski sayfa olarak kontrol edilir. Canlıda hata verirse: listede bu sayılardan biri eşik veya üstündeyse kritik \"Kayıp sayfa\" olur, değilse \"Kontrol edilemedi\" (adres hiç var olmamış olabilir: bozuk liste). Düz liste sayı taşımaz, bu yüzden kanıt değildir. Bir ölçüyü kanıt saymamak için değerini null yapın.",
+    "lateProof": { "clicks": 1, "impressions": 1, "views": 1, "links": 1 },
     "listLimit": 200,
     "columns": {
       "url": ["top pages", "popüler sayfalar", "en çok tıklanan sayfalar", "sayfalar", "page", "sayfa", "landing page", "açılış sayfası", "page path and screen class", "sayfa yolu ve ekran sınıfı", "page path", "sayfa yolu", "target url", "hedef url", "url", "address", "adres"],

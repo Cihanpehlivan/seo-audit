@@ -388,6 +388,7 @@ details.q p { position: absolute; z-index: 5; top: 24px; left: -8px; width: 280p
 .ul-det { display: block; overflow-wrap: anywhere; }
 .tag-s.click { background: #1F2D3D; color: #A9C8EA; border-color: #2D4A6B; }
 .mrow-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+.u-traffic { display: block; margin-top: 4px; }
 .crawl-row { display: grid; grid-template-columns: minmax(200px, 1.2fr) minmax(220px, 1.4fr) auto; gap: 16px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
 .crawl-main { display: grid; min-width: 0; }
 .crawl-main b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -26,6 +26,8 @@ export function startMigrationSites() {
     '/eski-indirim': [301, '', { location: '/about' }],
     '/disari': [301, '', { location: 'http://baska.example/x' }], // another host: list mode must not ask it
     '/notlar': [200, 'düz metin', { 'content-type': 'text/plain; charset=utf-8' }],
+    // v0.12.1: a page without links that only a list added after launch names (late address, test/urllist-test.js).
+    '/gec-sayfa': [200, page('Geç sayfa')],
     // /eski-katalog: 404
   });
   const heir = serve({

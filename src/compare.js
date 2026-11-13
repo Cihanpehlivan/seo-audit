@@ -98,6 +98,8 @@ const LOST_TODO = 'Bu adresi yeni sitede en yakın sayfaya 301 ile yönlendirin.
 const lostTodo = (r) => (r.indexable ? LOST_TODO : `Sayfa indexlenmiyordu. ${LOST_TODO}`);
 const REMOVED_TODO = 'Bölüm bilerek kaldırıldı. Sayfayı en yakın karşılığa 301 ile yönlendirin veya 410 verin.';
 const FOUND = new Set(['same', 'changed', 'redirected', 'unlinked', 'moved', 'no301', 'moving-found']);
+// v0.12.1: a late address of the old address list (never asked on the old site).
+export const LATE_REASON = 'Çıkıştan sonra gelen liste adresi: araç istek atmadı. Canlı doğrulama canlı alan adında kontrol eder.';
 const MOVE_TODO = (path, url) => `Eski alan adına geçecek sitede 301 kurun: ${path} → ${url}`;
 
 // v0.8.1: language of a page from <html lang> (primary subtag: tr-TR → tr). Empty when unknown.
@@ -212,14 +214,19 @@ export function compareCrawls(oldRes, newList, { rules = [], suggest = {}, live 
   const rows = { lost: [], redirected: [], changed: [], same: 0, unlinked: [], unknown: [], removed: [], added: [], moved: [], no301: [], notarget: [], moving: [] };
   const seen = new Set();
 
+  // v0.12.1: a late page (old address list, never asked on the old site, src/urllist.js → withLatePages) has no content
+  // and is not proof of an old page. It is not an old key: the counts, the section table and the rule suggestions do
+  // not see it. It gets no request (staging may be closed after launch; the live check asks the live domain).
+  let late = 0;
   for (const o of oldRes.pages.filter(isOk)) {
     const key = pathKey(o.url);
     if (seen.has(key)) continue;
-    seen.add(key); oldKeys.push(key);
+    seen.add(key);
+    if (o.late) late++; else oldKeys.push(key);
     const rule = parsed.find((r) => ruleMatches(r, key)) || null;
     ruleByKey.set(key, rule);
     const target = rule?.drop ? heir : rule ? findTarget(rule.host) : heir;
-    const base = { path: key, oldUrl: o.url, oldTitle: o.title || '', indexable: isIndexable(o), inlinks: o.inlinks || 0, rule: rule ? ruleLabel(rule) : '' };
+    const base = { path: key, oldUrl: o.url, oldTitle: o.title || '', indexable: isIndexable(o), inlinks: o.inlinks || 0, rule: rule ? ruleLabel(rule) : '', ...(o.late ? { late: true } : {}) };
     const put = (kind, row) => { kindByKey.set(key, kind); if (kind === 'same') rows.same++; else rows[kind.startsWith('moving') ? 'moving' : kind].push(row); };
     if (!target) {
       put('unknown', { ...base, site: rule.host, newPath: applyRule(rule, key), reason: `Kural hedefi ${rule.host} taranmadı`, todo: `${rule.host} sitesini tarayın. Sonra tekrar eşleştirin.` });
@@ -240,11 +247,22 @@ export function compareCrawls(oldRes, newList, { rules = [], suggest = {}, live 
       const h = heirFromCrawl(heir.byKey.get(key), bareHost(heir.host));
       // Both answers are in the crawls (or the target is already missing): no request needed.
       if (t && (t.state !== 'ok' || h)) { const [kind, r] = resolveMove(row, t, h, acceptOf(target)); put(kind, r); continue; }
+      if (o.late) {
+        // No request. Target in the crawl: a rule row (the 301 still to set up). Else: the target is missing.
+        if (!t) { put('notarget', { ...row, newStatus: null, reason: 'Hedef sayfa yeni taramada yok', todo: `Hedef sitede ${row.checkUrl} sayfasını oluşturun. Sayfa bu sitede olmayacaksa 301 haritasında başka sayfa seçin.` }); continue; }
+        put('no301', { ...row, newUrl: t.url, newTitle: t.title || '', changes: [], lostCount: 0, reason: LATE_REASON, todo: MOVE_TODO(row.path, row.expectUrl) });
+        continue;
+      }
       put(t ? 'moving-found' : 'moving', { ...row, probe: true, probeTarget: !t, probeHeir: !h, pendingTarget: t, pendingHeir: h });
       continue;
     }
 
-    if (!n) { put('lost', { ...base, reason: 'Yeni taramada yok', newStatus: null, probe: true, todo: lostTodo(base) }); continue; }
+    if (!n) {
+      // A late page in a removed section: removed at once (no request decides it).
+      if (o.late && rule?.drop) { put('removed', { ...base, reason: `Bölüm kaldırıldı. ${LATE_REASON}`, newStatus: null, todo: REMOVED_TODO }); continue; }
+      put('lost', { ...base, reason: o.late ? `Yeni taramada yok. ${LATE_REASON}` : 'Yeni taramada yok', newStatus: null, probe: !o.late, todo: lostTodo(base) });
+      continue;
+    }
     const at = { ...base, newUrl: n.url };
     if (n.blockedByRobots) { put('unknown', { ...at, reason: 'robots.txt engeli, taranmadı', todo: 'Yeni siteyi robots.txt engeli olmadan tarayın.' }); continue; }
     if (n.status === 0) { put('unknown', { ...at, reason: `Bağlantı hatası (${n.error || 'yanıt yok'})`, todo: 'Yeni siteye erişimi kontrol edin. Sonra tekrar tarayın.' }); continue; }
@@ -258,6 +276,8 @@ export function compareCrawls(oldRes, newList, { rules = [], suggest = {}, live 
       continue;
     }
     if (!isOk(n)) { put('unknown', { ...at, reason: `HTML değil (${n.status}, ${n.contentType || 'tür yok'})`, todo: 'Adresin bir HTML sayfası verdiğini kontrol edin.' }); continue; }
+    // A late page has no old content: nothing to compare. The page is on the heir at the same path. Not counted as same.
+    if (o.late) { kindByKey.set(key, 'late-same'); continue; }
     const changes = diffPage(o, n);
     if (!changes.length) { put('same'); continue; }
     const lostOnes = changes.filter((c) => c.kind === 'lost');
@@ -287,7 +307,7 @@ export function compareCrawls(oldRes, newList, { rules = [], suggest = {}, live 
   const cmp = {
     old: side(oldRes), new: side(list[0]), targets: targets.map((t) => side(t.res)),
     rules: parsed.map((r) => ({ from: r.from, host: r.host, to: r.to, drop: r.drop, text: ruleLabel(r) })),
-    baseWarnings: warnings, rows, probed: 0,
+    baseWarnings: warnings, rows, probed: 0, late,
   };
   const oldLang = new Map();
   for (const p of oldRes.pages) { const k = pathKey(p.url); if (isOk(p) && !oldLang.has(k)) oldLang.set(k, langCode(p.htmlLang)); }
@@ -314,7 +334,7 @@ function summarize(cmp) {
     changed: rows.changed.length, contentLost: rows.changed.filter((r) => r.lostCount).length + rows.moved.filter((r) => r.lostCount).length,
     same: rows.same, unknown: rows.unknown.length, removed: rows.removed.length, added: rows.added.length,
     moved: rows.moved.length, moveFix: rows.moved.filter((r) => r.todo).length, no301: rows.no301.length, notarget: rows.notarget.length,
-    pending: rows.moving.length,
+    pending: rows.moving.length, late: cmp.late || 0,
     kept: oldPages ? Math.round(((rows.same + rows.changed.length + rows.unlinked.length + rows.moved.length) / oldPages) * 100) : 0,
   };
   // Per rule: how many old pages it took and how many it found on the new site.

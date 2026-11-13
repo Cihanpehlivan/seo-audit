@@ -229,12 +229,39 @@ export function withListPages(oldRes, listRes, merged) {
   return add.length ? { ...oldRes, pages: [...oldRes.pages, ...add] } : oldRes;
 }
 
+// v0.12.1 (decision 7b): addresses of the list that the old site never answered: not in the old crawl and not asked
+// by the list crawl. Only after launch: before launch they are still to ask ("İstenmedi"). After launch the old domain
+// serves the new site, so the tool can never ask the old site again. Both a source added after launch and an address
+// added before launch but not asked go here.
+export function latePaths(merged, oldRes, listRes) {
+  const known = crawlPaths(oldRes);
+  for (const p of listRes?.pages || []) { try { known.add(pathKey(p.url)); } catch {} }
+  return new Set([...merged.keys()].filter((p) => !known.has(p)));
+}
+// Old pages without content for the late addresses. late: true marks them everywhere. status 200 only lets the
+// steps use them as old pages: no step writes that the old site answered 200 (the tool never asked it).
+// The comparison asks nothing for them (no staging request) and the 301 map can only use the address.
+export function withLatePages(oldRes, late) {
+  if (!late?.size) return oldRes;
+  const origin = new URL(oldRes.meta.startUrl).origin;
+  const add = [...late].sort().map((p) => ({ url: new URL(p, origin).href, status: 200, contentType: 'text/html', late: true, discoveredBy: 'late',
+    title: '', h1: [], metaDescription: '', depth: null, inlinks: 0, orphan: false, foundOn: null, simhash: null }));
+  return { ...oldRes, pages: [...oldRes.pages, ...add] };
+}
+// Proof that a late address was a real page: a number of the list at or over its threshold (urlList.lateProof).
+// A Search Console row has clicks or impressions, so it is almost always proof. A plain list is never proof.
+export function hasProof(m, proof = {}) {
+  if (!m) return false;
+  return METRICS.some((k) => m[k] != null && proof[k] != null && m[k] >= proof[k]);
+}
+
 // Result of every list address. Groups: crawl (in the old crawl), found (new old page), gone (4xx/5xx on the old
 // site), redirect (the old site redirects it), nothtml (not an HTML page), error (no answer), blocked (robots.txt),
-// pending (not asked yet), limit (not asked: request limit), late (came after launch: no request).
+// pending (not asked yet), limit (not asked: request limit), late (not asked before launch: v0.12.1 checks it on the
+// live domain only, as an old page without content).
 export const RESULT = {
   crawl: 'Taramada vardı', found: 'Yeni bulundu', gone: 'Eski sitede hata', redirect: 'Eski sitede yönleniyor',
-  nothtml: 'HTML değil', error: 'Yanıt yok', blocked: 'robots.txt engeli', pending: 'İstenmedi', limit: 'İstenmedi (sınır)', late: 'Çıkıştan sonra geldi',
+  nothtml: 'HTML değil', error: 'Yanıt yok', blocked: 'robots.txt engeli', pending: 'İstenmedi', limit: 'İstenmedi (sınır)', late: 'Canlıda kontrol edilir',
 };
 export function listResults({ list, merged, oldRes, listRes, launched = false, limitPaths = null }) {
   const m = merged || mergeSources(list?.sources);
@@ -262,6 +289,10 @@ export function listResults({ list, merged, oldRes, listRes, launched = false, l
   return { rows, counts };
 }
 const expand = (t) => (t ? { clicks: t.c, impressions: t.i, views: t.v, links: t.l } : null);
+// v0.12.1: traffic order of rows with short traffic ({ c, i, v, l }). The work list, the launch list and the live check.
+export const byTraffic = (a, b) => trafficCompare(expand(a), expand(b));
+// Stable sort of a list by traffic. get: the short traffic of a row. Rows without traffic keep their order at the end.
+export const sortByTraffic = (list, get = (x) => x.traffic) => list.map((x, i) => [x, i]).sort((a, b) => byTraffic(get(a[0]), get(b[0])) || a[1] - b[1]).map(([x]) => x);
 
 // Summary of the sources for the screen: rows, other hosts, invalid lines.
 export function sourceSummary(list) {

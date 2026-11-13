@@ -7,7 +7,8 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readList, cleanList, mergeSources, toFetch, trafficCompare, validateList, withListPages, listResults, makeSource } from '../src/urllist.js';
+import { readList, cleanList, mergeSources, toFetch, trafficCompare, validateList, withListPages, listResults, makeSource, latePaths, withLatePages, hasProof } from '../src/urllist.js';
+import { compareCrawls } from '../src/compare.js';
 import { loadConfig } from '../src/rules/index.js';
 import { startMigrationSites } from './fixture-migration.js';
 
@@ -85,6 +86,33 @@ await check('eski sayfa kümesi: listeden 200 HTML sayfa eklenir, taramadaki say
   assert.deepEqual(R.rows.map((r) => [r.path, r.result]), [['/n', 'found'], ['/a', 'crawl'], ['/g', 'gone']]);
 });
 
+// ---------- v0.12.1: late addresses (decision 7b) ----------
+await check('geç adres: eski taramada ve liste taramasında olmayan yol; içeriksiz sayfa; kanıt eşiği', () => {
+  const oldRes = { meta: { startUrl: 'https://eski.com/', host: 'eski.com' }, pages: [{ url: 'https://eski.com/a', status: 200, contentType: 'text/html', title: 'A' }] };
+  const listRes = { pages: [{ url: 'https://eski.com/g', status: 404, contentType: 'text/html' }] };
+  const m = new Map([['/a', {}], ['/g', {}], ['/b', { clicks: 3 }], ['/c', {}]]);
+  const late = latePaths(m, oldRes, listRes);
+  assert.deepEqual([...late].sort(), ['/b', '/c']);
+  const out = withLatePages(oldRes, late);
+  const b = out.pages.find((p) => p.url === 'https://eski.com/b');
+  assert.deepEqual([b.late, b.title, b.simhash, b.inlinks], [true, '', null, 0]);
+  const P = cfg.lateProof;
+  assert.deepEqual([hasProof({ clicks: 3 }, P), hasProof({ impressions: 0 }, P), hasProof({}, P), hasProof(null, P), hasProof({ views: 2 }, { ...P, views: null })], [true, false, false, false, false]);
+});
+await check('geç adres karşılaştırmada: içerik farkı yok, sayılara girmez, staging isteği işareti yok', () => {
+  const o = (p, x = {}) => ({ url: `https://eski.com${p}`, status: 200, contentType: 'text/html', title: p, ...x });
+  const oldRes = withLatePages({ meta: { startUrl: 'https://eski.com/', host: 'eski.com' }, pages: [o('/a'), o('/b')] }, new Set(['/c', '/d']));
+  const heir = { meta: { startUrl: 'https://yeni.test/', host: 'yeni.test' }, pages: [
+    { url: 'https://yeni.test/a', status: 200, contentType: 'text/html', title: '/a' }, { url: 'https://yeni.test/c', status: 200, contentType: 'text/html', title: 'Yeni C', h1: ['C'] }] };
+  const cmp = compareCrawls(oldRes, [heir]);
+  // /c is on the heir: an old page without content is no \"İçerik değişti\". /d is missing: lost, no request.
+  assert.equal(cmp.rows.changed.length, 0);
+  const d = cmp.rows.lost.find((r) => r.path === '/d');
+  assert.deepEqual([d.late, !!d.probe], [true, false]);
+  assert.equal(cmp.rows.lost.find((r) => r.path === '/b').probe, true);
+  assert.deepEqual([cmp.summary.oldPages, cmp.summary.late, cmp.summary.same, cmp.summary.kept], [2, 2, 1, 50]);
+});
+
 // ---------- API: the old site, a list, the requests, the map ----------
 const [oldSrv, heirSrv] = await startMigrationSites();
 const OLD = `http://127.0.0.1:${oldSrv.address().port}`;
@@ -92,6 +120,8 @@ const HEIR = `http://localhost:${heirSrv.address().port}/`;
 // The old site counts every request: a list request must never leave the old host.
 const seen = [];
 oldSrv.on('request', (req) => seen.push(req.url));
+const seenHeir = []; // v0.12.1: staging requests (a late address must not get one)
+heirSrv.on('request', (req) => seenHeir.push(req.url));
 const dir = await mkdtemp(path.join(os.tmpdir(), 'seo-list-'));
 const freePort = () => new Promise((ok) => { const s = http.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const port = await freePort();
@@ -215,6 +245,62 @@ await check('Projeyi indir listeyi taşır, Proje yükle listeyi geri getirir', 
   const v = (await api(`/api/projects/${data.id}/urllist`)).data;
   assert.deepEqual([v.sources.length, v.addresses, v.state.state, v.counts.found], [1, 7, 'done', 1]);
 });
+// ---------- v0.12.1: traffic order in the work list, the launch list and the live check ----------
+// A second source gives traffic to more old pages (crawled pages: no new request).
+const sortedByTraffic = (list, get = (x) => x.traffic) => {
+  const val = (t) => (t ? [t.c ?? -1, t.i ?? -1, t.v ?? -1, t.l ?? -1] : [-1, -1, -1, -1]);
+  for (let i = 1; i < list.length; i++) {
+    const [a, b] = [val(get(list[i - 1])), val(get(list[i]))];
+    const j = a.findIndex((x, k) => x !== b[k]);
+    if (j >= 0 && a[j] < b[j]) return `${list[i - 1].path || list[i - 1].page || list[i - 1].old} → ${list[i].path || list[i].page || list[i].old}`;
+  }
+  return '';
+};
+const CSV2 = ['Top pages,Clicks', `http://${host}/fr/x,5`, `http://${host}/fr/y,80`, `http://${host}/tr/c,15`, `http://${host}/tr/a,300`].join('\n');
+await check('Yapılacaklar: her yerde işler trafiğe göre sıralı, satır trafik taşır', async () => {
+  const add = await api(`/api/projects/${pid}/urllist`, { method: 'POST', body: { text: CSV2, name: 'Search Console 2' } });
+  assert.equal(add.status, 201, JSON.stringify(add.data));
+  // The heir of the test has few pages: its tasks wait ("hazır değil"). Accept it, so the decisions get their own card.
+  assert.equal((await api(`/api/projects/${pid}/ready`, { method: 'POST', body: { site: 'heir', ok: true } })).status, 200);
+  const t = (await api(`/api/projects/${pid}/match`)).data.todo;
+  let withTraffic = 0;
+  for (const pl of t.places) {
+    const list = t.items.filter((i) => i.placeKey === pl.key && !i.held);
+    assert.equal(sortedByTraffic(list), '', `${pl.key}: ${sortedByTraffic(list)}`);
+    if (list.filter((i) => i.traffic).length >= 2) withTraffic++;
+  }
+  assert.ok(withTraffic >= 1, 'iki trafikli işi olan yer yok');
+  const fr = t.items.find((i) => i.path === '/fr/y');
+  assert.deepEqual(fr?.traffic, { c: 80 });
+});
+await check('Canlıya çıkış: \"Karar bekleyen\" satırları trafiğe göre sıralı', async () => {
+  const L = (await api(`/api/projects/${pid}/match`)).data.launch;
+  const it = L.groups.find((g) => g.key === 'decide').items.find((i) => i.kind === 'map-pending');
+  assert.ok(it && it.list.filter((x) => x.traffic).length >= 2, 'trafikli satır yok');
+  assert.equal(sortedByTraffic(it.list), '');
+  assert.equal(it.list[0].page.endsWith('/fr/z'), true, it.list[0].page);
+});
+await check('Excel: \"Yapılacaklar\" sayfasında trafik sütunu, satırlar yere ve trafiğe göre', async () => {
+  const r = await fetch(`${base}/api/projects/${pid}/excel`);
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(Buffer.from(await r.arrayBuffer()));
+  const ws = wb.getWorksheet('Yapılacaklar');
+  const head = ws.getRow(1).values;
+  const ci = head.indexOf('Tıklama'), wi = head.indexOf('Yer'), ui = head.indexOf('Eski URL');
+  assert.ok(ci > 0, head.join(','));
+  const rows = [];
+  ws.eachRow((row, n) => { if (n > 1) rows.push({ where: row.values[wi], old: row.values[ui], traffic: row.values[ci] == null ? null : { c: row.values[ci] } }); });
+  const places = [...new Set(rows.map((x) => x.where))];
+  for (const w of places) {
+    const list = rows.filter((x) => x.where === w);
+    assert.equal(sortedByTraffic(list), '', w);
+    // One block per place: the rows of a place are not mixed with other places.
+    assert.equal(rows.findIndex((x) => x.where === w) + list.length - 1, rows.map((x) => x.where).lastIndexOf(w), w);
+  }
+  assert.ok(rows.some((x) => x.old?.endsWith('/fr/y') && x.traffic?.c === 80));
+  const ln = wb.getWorksheet('Canlıya çıkış');
+  assert.ok(ln.getRow(1).values.includes('Tıklama'), 'Canlıya çıkış sayfasında Tıklama yok');
+});
 await check('çıkıştan sonra: istek yok (409), liste taraması kilitli, yeni kaynak "çıkıştan sonra geldi"', async () => {
   const L = await api(`/api/projects/${pid}/launch`, { method: 'POST', body: { at: '2026-11-20' } });
   assert.equal(L.data.project.launch.crawls.list, listCrawl);
@@ -231,6 +317,82 @@ await check('çıkıştan sonra: istek yok (409), liste taraması kilitli, yeni 
   const vr = await api(`/api/projects/${pid}/verify`);
   assert.equal(vr.status, 200);
   assert.ok(JSON.stringify(vr.data).includes('/eski-kampanya'));
+});
+await check('Canlı doğrulama: her grupta satırlar trafiğe göre sıralı, satır trafik taşır', async () => {
+  const V = (await api(`/api/projects/${pid}/verify`)).data;
+  let n = 0;
+  for (const g of V.groups) for (const it of g.items.filter((x) => x.listKind === 'redirect')) {
+    assert.equal(sortedByTraffic(it.list), '', `${it.kind}: ${sortedByTraffic(it.list)}`);
+    if (it.list.filter((x) => x.traffic).length >= 2) n++;
+  }
+  assert.ok(n >= 1, 'iki trafikli satırı olan liste yok');
+  const all = V.groups.flatMap((g) => g.items.flatMap((i) => i.list));
+  assert.deepEqual(all.find((x) => x.old?.endsWith('/fr/y'))?.traffic, { c: 80 });
+});
+await check('Excel: \"Canlı doğrulama\" sayfasında trafik sütunu', async () => {
+  const r = await fetch(`${base}/api/projects/${pid}/excel`);
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(Buffer.from(await r.arrayBuffer()));
+  const ws = wb.getWorksheet('Canlı doğrulama');
+  const head = ws.getRow(1).values;
+  const ci = head.indexOf('Tıklama'), ai = head.indexOf('Adres');
+  assert.ok(ci > 0, head.join(','));
+  let found = false;
+  ws.eachRow((row, n) => { if (n > 1 && String(row.values[ai] || '').endsWith('/fr/z')) found = row.values[ci] === 200; });
+  assert.ok(found, '/fr/z satırında 200 tıklama yok');
+});
+// Late addresses after launch: /about-eski (404, clicks: proof), /gec-sayfa (200 on the live domain), /sonra-gelen
+// (plain list of the launch test above: no proof). In the test the live old domain is still the old server (no DNS switch).
+let lateSrc;
+await check('çıkıştan sonra gelen adres: 301 haritasında \"İçerik yok\" satırı, adres benzerliği ile öneri, staging isteği yok', async () => {
+  const add = await api(`/api/projects/${pid}/urllist`, { method: 'POST', body: { text: ['Top pages,Clicks', `http://${host}/about-eski,25`, `http://${host}/gec-sayfa,9`].join('\n'), name: 'Search Console 3' } });
+  assert.equal(add.status, 201, JSON.stringify(add.data));
+  lateSrc = add.data?.added && (await api(`/api/projects/${pid}/urllist`)).data.sources.at(-1).id;
+  const v = (await api(`/api/projects/${pid}/urllist`)).data;
+  assert.deepEqual(['/about-eski', '/gec-sayfa', '/sonra-gelen'].map((p) => v.rows.find((x) => x.path === p)?.result), ['late', 'late', 'late']);
+  seenHeir.length = 0; seen.length = 0;
+  const m = (await api(`/api/projects/${pid}/match?fresh=1`)).data;
+  for (const p of ['/about-eski', '/gec-sayfa', '/sonra-gelen']) {
+    assert.ok(!seenHeir.includes(p), `staging isteği: ${p}`);
+    assert.ok(!seen.includes(p), `eski site isteği: ${p}`);
+  }
+  assert.ok(seenHeir.length > 0, 'eşleştirme hiç istek atmadı: test anlamsız');
+  const row = m.map.rows.find((r) => r.path === '/about-eski');
+  assert.equal(row.late, true);
+  assert.equal(row.candidates[0]?.path, '/about');
+  assert.match(row.candidates[0].why, /Slug ortak: about/);
+  assert.deepEqual(row.traffic, { c: 25 });
+  assert.equal(m.map.rows.find((r) => r.path === '/sonra-gelen')?.late, true);
+  // The counts do not see the late addresses.
+  assert.deepEqual([m.summary.oldPages, m.summary.late], [10, 3]);
+});
+await check('canlı doğrulama: geç adres canlıda istenir; kanıt varsa kritik, yoksa kontrol edilemedi, açılıyorsa tamam', async () => {
+  seen.length = 0;
+  const V = (await api(`/api/projects/${pid}/verify?fresh=1`)).data;
+  for (const p of ['/about-eski', '/gec-sayfa', '/sonra-gelen']) assert.ok(seen.includes(p), `canlıda istenmedi: ${p}`);
+  const kindOf = (p) => V.groups.flatMap((g) => g.items).find((i) => i.listKind === 'redirect' && i.list.some((x) => x.old.endsWith(p)));
+  assert.deepEqual([kindOf('/about-eski')?.kind, kindOf('/about-eski')?.group], ['lost', 'critical']);
+  assert.deepEqual([kindOf('/sonra-gelen')?.kind, kindOf('/sonra-gelen')?.group], ['late-unproven', 'unknown']);
+  assert.equal(kindOf('/gec-sayfa')?.kind, 'ok-open');
+  assert.equal(kindOf('/about-eski').list.find((x) => x.old.endsWith('/about-eski')).src, 'Karar yok · liste');
+});
+await check('geç adres: karar canlı beklentiyi değiştirir; liste kalkınca karar kalır; Excel \"İçerik yok\"', async () => {
+  await api(`/api/projects/${pid}/map`, { method: 'POST', body: { set: { '/about-eski': { site: 'heir', path: '/about', src: 'oneri' } } } });
+  const V = (await api(`/api/projects/${pid}/verify?fresh=1`)).data;
+  const it = V.groups.flatMap((g) => g.items).find((i) => i.listKind === 'redirect' && i.list.some((x) => x.old.endsWith('/about-eski')));
+  assert.equal(it.kind, 'no301'); // a 301 is expected; the live domain gives 404
+  const r = await fetch(`${base}/api/projects/${pid}/excel`);
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(Buffer.from(await r.arrayBuffer()));
+  const ws = wb.getWorksheet('301 haritası');
+  const head = ws.getRow(1).values, fi = head.indexOf('Eski sayfa nereden'), oi = head.indexOf('Eski URL');
+  let found = '';
+  ws.eachRow((row, n) => { if (n > 1 && String(row.values[oi]).endsWith('/about-eski')) found = row.values[fi]; });
+  assert.equal(found, 'Liste (çıkıştan sonra, içerik yok)');
+  await api(`/api/projects/${pid}/urllist/${lateSrc}`, { method: 'DELETE' });
+  const m = (await api(`/api/projects/${pid}/match`)).data;
+  assert.ok(!m.map.rows.some((x) => x.path === '/about-eski'));
+  assert.deepEqual((await api(`/api/projects/${pid}`)).data.project.map['/about-eski'], { site: 'heir', path: '/about', src: 'oneri' });
 });
 await check('API: hatalar açık mesaj verir (boş liste, adres yok, geçersiz kaynak)', async () => {
   assert.match((await api(`/api/projects/${pid}/urllist`, { method: 'POST', body: { text: '  ' } })).data.error, /boş/);
