@@ -15,7 +15,7 @@ import { isBroken, isOk } from './rules/helpers.js';
 import { buildTodo } from './todo.js';
 import { buildLaunch, makeIsStaging } from './launch.js';
 import { expectedList, checkRedirects, buildVerify, makeRequest, hostKey } from './verify.js';
-import { readList, cleanList, makeSource, mergeSources, validateList, rowCount, toFetch, withListPages, latePaths, withLatePages, listResults, sourceSummary, KIND_NAME } from './urllist.js';
+import { readList, cleanList, makeSource, mergeSources, validateList, rowCount, toFetch, withListPages, latePaths, withLatePages, listResults, sourceSummary, oldRedirects, KIND_NAME } from './urllist.js';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import net from 'node:net';
@@ -395,7 +395,10 @@ async function listInputs(p, oldCrawl) {
   const oldRes = withLatePages(withListPages(oldCrawl, listRes, merged), late);
   const added = oldRes.pages.length - oldCrawl.pages.length;
   const key = added ? createHash('sha1').update(oldRes.pages.slice(oldCrawl.pages.length).map((x) => (x.late ? `late ${x.url}` : x.url)).join('\n')).digest('hex').slice(0, 12) : '';
-  return { list, merged, listRes, oldCrawl, oldRes, added, key, late };
+  // v0.12.2: redirects of the old site (old crawl and list crawl, before launch). Not old pages: they get 301 map rows
+  // that follow their target. No request: the data comes from the crawls.
+  const redirects = oldRedirects(oldCrawl, listRes, merged);
+  return { list, merged, listRes, oldCrawl, oldRes, added, key, late, redirects };
 }
 
 // Matching of a project: old site → heir and other sites. Sections without a decision get the suggested move.
@@ -415,7 +418,7 @@ async function projectMatch(p, { fresh = false } = {}) {
       ? { notFound: true, hits: sec.suggestion.hits, why: sec.suggestion.why, ...(sec.suggestion.to ? { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to } : {}) }
       : { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to, why: sec.suggestion.why }),
   }));
-  const map = buildRedirectMap(cmp, oldRes, mapSites, p.map || {}, loadConfig().redirectMap, list.merged.size ? list.merged : null);
+  const map = buildRedirectMap(cmp, oldRes, mapSites, p.map || {}, loadConfig().redirectMap, list.merged.size ? list.merged : null, { redirects: list.redirects, staging: loadConfig() });
   map.noLive = mapSites.filter((s) => !s.liveOrigin).map((s) => s.key);
   // Work list by place (v0.9.0). A thin site (few pages) is "not ready" until the user accepts its crawl.
   const traffic = list.merged.size ? list.merged : null;
@@ -440,7 +443,7 @@ async function projectVerify(p, { fresh = false } = {}) {
   const cfg = loadConfig();
   const status = await projectStatus(p);
   const { targets, oldRes, newList, rules, live, mapSites, list } = await projectInputs(p, status);
-  const { rows } = expectedList({ oldRes, newList, sites: mapSites, rules, live, decisions: p.map || {}, cfg, traffic: list.merged.size ? list.merged : null });
+  const { rows } = expectedList({ oldRes, newList, sites: mapSites, rules, live, decisions: p.map || {}, cfg, traffic: list.merged.size ? list.merged : null, redirects: list.redirects });
   const info = targets.map((s, i) => {
     const host = bareHost(newList[i].meta.host), liveHost = mapSites[i].liveOrigin ? bareHost(new URL(mapSites[i].liveOrigin).hostname) : '';
     return { host, liveHost, staging: !liveHost || host !== liveHost };

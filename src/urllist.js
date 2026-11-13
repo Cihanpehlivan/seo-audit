@@ -255,12 +255,64 @@ export function hasProof(m, proof = {}) {
   return METRICS.some((k) => m[k] != null && proof[k] != null && m[k] >= proof[k]);
 }
 
+// v0.12.2: what an old redirect did on the old site (from the crawls before launch, no request).
+// off: the first hop that left the old host (the old site sent the address to another domain). to: off or the last
+// address on the old host. broken: the last address on the old host did not answer with 2xx (404, loop, no answer).
+// same: the redirect only changed the scheme, the host variant or the last "/" (same path): no 301 row is needed.
+export function redirectInfo(p, oldHost) {
+  if (!p?.redirectChain?.length) return null;
+  const host = bareHost(oldHost);
+  let off = null;
+  for (const h of p.redirectChain) {
+    if (!h.to) break;
+    try { if (bareHost(new URL(h.to).hostname) !== host) { off = h.to; break; } } catch { break; }
+  }
+  if (off) return { to: off, toPath: null, off: true, broken: false, same: false, hops: p.redirectChain.length };
+  const to = p.finalUrl || '';
+  let toPath = null;
+  try { toPath = pathKey(to); } catch {}
+  const broken = !toPath || !!p.error || !(p.finalStatus >= 200 && p.finalStatus < 300);
+  let same = false;
+  try { same = !!toPath && toPath === pathKey(p.url); } catch {}
+  return { to, toPath, off: false, broken, same, hops: p.redirectChain.length, html: /html/i.test(p.contentType || '') };
+}
+
+// v0.12.2: redirects of the old site that need a 301 on the new site. Before this version (decision 5 of v0.12.0)
+// they did not enter the 301 map, so the address gave 404 after launch when the old server rules were lost.
+// Sources: the old crawl (a link found the redirect) and the list crawl (an address of the list; only while it is
+// still in the list). A redirect to the same path (http → https, www, last "/") is not one: the new site does it.
+// The redirects are not old pages: the counts and the comparison never see them.
+export function oldRedirects(oldCrawl, listRes, merged) {
+  const out = new Map();
+  const host = oldCrawl?.meta?.host;
+  const add = (p, src) => {
+    if (p.blockedByRobots) return;
+    const info = redirectInfo(p, host);
+    if (!info || info.same) return;
+    let path;
+    try { path = pathKey(p.url); } catch { return; }
+    if (out.has(path)) return;
+    out.set(path, { path, oldUrl: p.url, src, inlinks: p.inlinks || 0, ...info });
+  };
+  for (const p of oldCrawl?.pages || []) add(p, 'crawl');
+  if (merged?.size) {
+    const known = crawlPaths(oldCrawl);
+    for (const p of listRes?.pages || []) {
+      let k;
+      try { k = pathKey(p.url); } catch { continue; }
+      if (!known.has(k) && merged.has(k)) add(p, 'list');
+    }
+  }
+  return [...out.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
 // Result of every list address. Groups: crawl (in the old crawl), found (new old page), gone (4xx/5xx on the old
-// site), redirect (the old site redirects it), nothtml (not an HTML page), error (no answer), blocked (robots.txt),
+// site), redirect (the old site redirects it; v0.12.2: a 301 row follows its target), redirectBad (it redirects to an
+// address that fails), nothtml (not an HTML page), error (no answer), blocked (robots.txt),
 // pending (not asked yet), limit (not asked: request limit), late (not asked before launch: v0.12.1 checks it on the
 // live domain only, as an old page without content).
 export const RESULT = {
-  crawl: 'Taramada vardı', found: 'Yeni bulundu', gone: 'Eski sitede hata', redirect: 'Eski sitede yönleniyor',
+  crawl: 'Taramada vardı', found: 'Yeni bulundu', gone: 'Eski sitede hata', redirect: 'Eski sitede yönleniyor', redirectBad: 'Yönleniyor · hedef hata',
   nothtml: 'HTML değil', error: 'Yanıt yok', blocked: 'robots.txt engeli', pending: 'İstenmedi', limit: 'İstenmedi (sınır)', late: 'Canlıda kontrol edilir',
 };
 export function listResults({ list, merged, oldRes, listRes, launched = false, limitPaths = null }) {
@@ -275,7 +327,12 @@ export function listResults({ list, merged, oldRes, listRes, launched = false, l
     else if (asked.has(path)) {
       const p = asked.get(path);
       if (p.blockedByRobots) result = 'blocked';
-      else if (p.redirectChain?.length) { result = 'redirect'; detail = p.finalUrl || ''; }
+      else if (p.redirectChain?.length) {
+        // v0.12.2: the redirect gets a 301 row (the target's new address). A broken target gets none.
+        const info = redirectInfo(p, oldRes?.meta?.host || new URL(p.url).hostname);
+        result = info?.broken ? 'redirectBad' : 'redirect';
+        detail = info?.broken ? `${p.finalUrl || ''} · ${p.finalStatus || p.error || 'yanıt yok'}` : info?.off ? info.to : p.finalUrl || '';
+      }
       else if (!p.status) { result = 'error'; detail = p.error || ''; }
       else if (p.status >= 400) { result = 'gone'; detail = String(p.status); }
       else if (!isOk(p)) { result = 'nothtml'; detail = `${p.status} ${p.contentType || ''}`.trim(); }

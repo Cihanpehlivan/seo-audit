@@ -502,7 +502,7 @@ const HELP = {
   root: 'Ana sayfa, kökteki sayfalar ve az sayfalı bölümler. Satırı açın ve sayfaları görün.',
 };
 const prj = { id: null, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, loading: false, step: 'proje', poll: null, saveTimer: null, openSecs: new Set(),
-  mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100, mapSaving: false, vf: null, vfKey: '', vfErr: null, vfLoading: false };
+  mapTab: null, mapChoice: {}, mapManual: {}, mapOwn: {}, mapShow: 100, mapSaving: false, vf: null, vfKey: '', vfErr: null, vfLoading: false };
 let projectList = [];
 const help = (text) => `<details class="q"><summary aria-label="Açıklama">?</summary><p>${esc(text)}</p></details>`;
 const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
@@ -557,7 +557,7 @@ $('#prjUpload2').addEventListener('change', (e) => { if (e.target.files[0]) uplo
 async function openProject(id, step) {
   currentId = null; es?.close();
   show('projectView');
-  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, openSecs: new Set(), mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100, vf: null, vfKey: '', vfErr: null, list: null, listState: null });
+  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, openSecs: new Set(), mapTab: null, mapChoice: {}, mapManual: {}, mapOwn: {}, mapShow: 100, vf: null, vfKey: '', vfErr: null, list: null, listState: null });
   if (ul.pid !== id) Object.assign(ul, UL_EMPTY(), { pid: id });
   prj.step = PANES[step] ? step : prj.step && prj.id === id ? prj.step : null;
   loadHistory();
@@ -902,7 +902,7 @@ function watchCrawls() {
 // Sources (Search Console, Analytics, backlink, plain list) → cleaned on the server → addresses that are not in the
 // old crawl are asked on the old site → pages that answer join the old page set. Before launch only.
 const LIST_RESULT = {
-  crawl: ['Taramada vardı', 'idle'], found: ['Yeni bulundu', 'ok'], gone: ['Eski sitede hata', 'warn'], redirect: ['Eski sitede yönleniyor', 'warn'],
+  crawl: ['Taramada vardı', 'idle'], found: ['Yeni bulundu', 'ok'], gone: ['Eski sitede hata', 'warn'], redirect: ['Eski sitede yönleniyor', 'idle'], redirectBad: ['Yönleniyor · hedef hata', 'warn'],
   nothtml: ['HTML değil', 'idle'], error: ['Yanıt yok', 'warn'], blocked: ['robots.txt engeli', 'warn'], pending: ['İstenmedi', 'idle'],
   limit: ['İstenmedi (sınır)', 'idle'], late: ['Canlıda kontrol edilir', 'idle'],
 };
@@ -1009,7 +1009,7 @@ function listResultHtml(L, ls, launched, c) {
   const odd = c.nothtml + c.error + c.blocked;
   const tiles = [
     [L.addresses, 'eski alan adında adres', ''], [c.crawl, 'taramada vardı', ''], [c.found, 'yeni bulundu · eski sayfa oldu', 'ok'],
-    [c.gone, 'eski sitede hata (404, 410)', 'warn'], [c.redirect, 'eski sitede yönleniyor', 'warn'], [odd, 'HTML değil, yanıt yok veya engelli', ''],
+    [c.gone, 'eski sitede hata (404, 410)', 'warn'], [c.redirect, 'eski sitede yönleniyor · 301 haritasında', ''], [c.redirectBad || 0, 'yönleniyor · hedef hata, haritada yok', 'warn'], [odd, 'HTML değil, yanıt yok veya engelli', ''],
     [c.pending + c.limit, 'taramada yok · istenmedi', launched ? '' : 'warn'], [c.late, 'canlıda kontrol edilir', ''], [L.otherCount, 'başka alan adında · ayrıldı', ''],
   ].filter(([n], i) => n || i < 2);
   let act = '';
@@ -1294,9 +1294,10 @@ $('#ruleSave').addEventListener('click', async () => {
 // ---------- Step 4: 301 haritası (v0.8.0) ----------
 // Every old page that needs a new address: suggestion (pending), no suggestion (none), approved or 410, rule.
 // Only decisions are saved (POST /map). Suggestions come again with every match.
-const MAP_TABS = [['pending', 'Onay bekliyor'], ['none', 'Öneri yok'], ['approved', 'Onaylandı'], ['rule', 'Kuraldan']];
+const MAP_TABS = [['pending', 'Onay bekliyor'], ['none', 'Öneri yok'], ['approved', 'Onaylandı'], ['rule', 'Kuraldan'], ['follow', 'Eski yönlendirme']];
 const CONF = { high: ['Yüksek', 'ok'], mid: ['Orta', 'warn'], low: ['Düşük', 'warn low'] };
-const mapTabOf = (r) => (r.status === 'gone' ? 'approved' : r.status);
+// v0.12.2: an old redirect that follows its target (or waits for it) has its own tab. With its own decision it is approved.
+const mapTabOf = (r) => (r.status === 'gone' ? 'approved' : r.status === 'wait' ? 'follow' : r.status);
 const mapRowByPath = (p) => prj.match?.map?.rows.find((r) => r.path === p);
 // Address of a target, short: site name + path (the full live URL is in the title).
 function mapTarget(t) {
@@ -1306,7 +1307,7 @@ function mapTarget(t) {
   return `<span class="small">${esc(siteName(s, true))}</span> <code>${esc(t.path)}</code>`;
 }
 // Value of the select: a candidate (site|path), __other (written address), __410, or '' (nothing chosen).
-const candVal = (c) => `${c.site}|${c.path}`;
+const candVal = (c) => (c.ext ? `url|${c.url}` : `${c.site}|${c.path}`);
 function mapChoice(r) {
   return prj.mapChoice[r.path] ?? (r.candidates?.length ? candVal(r.candidates[0]) : '');
 }
@@ -1329,7 +1330,7 @@ async function saveMap(set, msg) {
   renderMap();
   try {
     await api(`/api/projects/${prj.id}/map`, { method: 'POST', body: JSON.stringify({ set }) });
-    for (const k of Object.keys(set)) { delete prj.mapChoice[k]; delete prj.mapManual[k]; }
+    for (const k of Object.keys(set)) { delete prj.mapChoice[k]; delete prj.mapManual[k]; delete prj.mapOwn[k]; }
     prj.mapMsg = msg || '';
     prj.matchKey = '';
     await loadMatch();
@@ -1356,11 +1357,13 @@ function renderMap() {
     noLive.length ? `${noLive.join(', ')} için canlı alan adı yok. Listede bu sitenin tarama adresi yazar. Canlı alan adını Proje adımında yazın.` : '',
     s.stale ? `${s.stale} karar artık gerekli değil: eski sayfa taramada yok veya yeni sitede bulundu. Bu kararlar listeye girmez.` : '',
   ].filter(Boolean).map((w) => `<p class="warn">${esc(w)}</p>`).join('') + (prj.mapMsg ? `<p class="small map-msg" role="status">${esc(prj.mapMsg)}</p>` : '');
-  const tiles = [[s.total, '301 gerekli', ''], [s.rule, 'Bölüm kuralından (hazır)', ''], [s.approved + s.gone, 'Onaylandı', 'ok'], [s.pending, 'Onay bekliyor', 'warn'], [s.none, 'Öneri yok', 'warn']];
+  const fw = (s.follow || 0) + (s.wait || 0);
+  const tiles = [[s.total, '301 gerekli', ''], [s.rule, 'Bölüm kuralından (hazır)', ''], [s.approved + s.gone, 'Onaylandı', 'ok'], [s.pending, 'Onay bekliyor', 'warn'], [s.none, 'Öneri yok', 'warn'],
+    ...(fw ? [[fw, 'Eski yönlendirmeden', s.wait ? 'warn' : '']] : [])];
   $('#mapTiles').innerHTML = tiles.map(([n, label, cls]) => `<div class="map-tile ${n && cls ? cls : ''}"><b>${n}</b><span>${esc(label)}</span></div>`).join('');
-  const counts = { pending: s.pending, none: s.none, approved: s.approved + s.gone, rule: s.rule };
+  const counts = { pending: s.pending, none: s.none, approved: s.approved + s.gone, rule: s.rule, follow: fw };
   if (!prj.mapTab || (!counts[prj.mapTab] && prj.mapTab !== 'approved')) prj.mapTab = MAP_TABS.find(([k]) => counts[k])?.[0] || 'approved';
-  $('#mapTabs').innerHTML = MAP_TABS.map(([k, label]) => `<button type="button" role="tab" data-mtab="${k}" aria-selected="${prj.mapTab === k}">${esc(label)} · ${counts[k]}</button>`).join('');
+  $('#mapTabs').innerHTML = MAP_TABS.filter(([k]) => k !== 'follow' || fw).map(([k, label]) => `<button type="button" role="tab" data-mtab="${k}" aria-selected="${prj.mapTab === k}">${esc(label)} · ${counts[k]}</button>`).join('');
   const list = m.rows.filter((r) => mapTabOf(r) === prj.mapTab);
   const shown = list.slice(0, prj.mapShow);
   $('#mapRows').innerHTML = (shown.map(mapRowHtml).join('') || '<p class="map-empty">Bu listede satır yok.</p>')
@@ -1374,8 +1377,20 @@ function mapRowHtml(r) {
   // v0.12.0: traffic from the old address list and the mark of a page found only by the list.
   // v0.12.1: a late address (came after launch, never asked on the old site) has no content: the suggestion uses the address only.
   const lateTag = r.late ? `<span class="tag-s idle" title="${esc(TERMS.lateRow)}">İçerik yok</span>` : '';
-  const tags = r.traffic || r.fromList || r.late ? `<span class="mrow-tags">${trafficTag(r.traffic)}${r.fromList ? `<span class="tag-s idle" title="Taramada yoktu. Eski adres listesi buldu.">Listeden</span>` : ''}${lateTag}</span>` : '';
-  const head = `<div class="mrow-old"><code>${p}</code>${tags}${r.oldTitle ? `<span class="small">Eski title: ${esc(r.oldTitle)}</span>` : ''}</div><span class="cmp-arrow" aria-hidden="true">→</span>`;
+  // v0.12.2: an old redirect of the old site. The row takes the new address of its target.
+  const redirTag = r.kind === 'follow' ? `<span class="tag-s idle" title="${esc(TERMS.oldRedirect)}">Eski yönlendirme</span>` : '';
+  const tags = r.traffic || r.fromList || r.late || redirTag ? `<span class="mrow-tags">${trafficTag(r.traffic)}${r.fromList ? `<span class="tag-s idle" title="Taramada yoktu. Eski adres listesi buldu.">Listeden</span>` : ''}${lateTag}${redirTag}</span>` : '';
+  const via = r.follow ? `<span class="small">Eski sitede → <code>${esc(r.follow.off ? r.follow.url : r.follow.path)}</code>${r.follow.hops > 1 ? ` · ${r.follow.hops} adım` : ''}</span>` : '';
+  const head = `<div class="mrow-old"><code>${p}</code>${tags}${r.oldTitle ? `<span class="small">Eski title: ${esc(r.oldTitle)}</span>` : ''}${via}</div><span class="cmp-arrow" aria-hidden="true">→</span>`;
+  if ((r.status === 'follow' || r.status === 'wait') && !prj.mapOwn[r.path]) {
+    const fp = esc(r.follow.path);
+    const stg = r.staging === 'installed' ? '<span class="small">Staging\'de kurulu.</span>' : r.staging === 'other' ? `<span class="small warn-t">Staging başka adrese gidiyor: ${esc(r.stagingTo)}</span>` : '';
+    const to = r.status === 'wait' ? `<span class="small warn-t">Önce <code>${fp}</code> için karar verin.</span>`
+      : r.gone ? '<span>410 · sayfa kalıcı olarak kaldırıldı</span>' : `<span title="${esc(r.target.url)}">${mapTarget(r.target)}</span>`;
+    const note = r.status === 'wait' ? `Satır <code>${fp}</code> kararını izler. Karar gelince bu satır da değişir.` : `Bu satır <code>${fp}</code> kararını izler. Eski sunucu kuralı canlıda kalmaz: tek adımda kurulur.`;
+    return `<div class="mrow" data-mpath="${p}">${head}<div class="mrow-to">${to}<span class="small">${note}</span>${stg}${r.warn ? `<span class="small warn-t">${esc(r.warn)}</span>` : ''}</div>
+      <div class="mrow-act"><span class="tag-s ${r.status === 'wait' ? 'warn' : 'ok'}">${r.status === 'wait' ? 'Bekliyor' : 'İzliyor'}</span><button type="button" class="linkbtn" data-mown="${p}">Başka adres seç</button></div></div>`;
+  }
   if (r.status === 'rule') {
     return `<div class="mrow" data-mpath="${p}">${head}<div class="mrow-to"><span title="${esc(r.target.url)}">${mapTarget(r.target)}</span>
       <span class="small">${esc(r.why)} · ${r.installed ? '301 kurulu' : '301 henüz kurulmadı'}</span></div>
@@ -1385,12 +1400,12 @@ function mapRowHtml(r) {
     const to = r.status === 'gone' ? '<span>410 · sayfa kalıcı olarak kaldırıldı</span>' : `<span title="${esc(r.target.url)}">${mapTarget(r.target)}</span>`;
     return `<div class="mrow" data-mpath="${p}">${head}<div class="mrow-to">${to}
       <span class="small">${r.status === 'gone' ? 'Siz 410 seçtiniz. Sunucu bu adres için 410 verir.' : r.decision?.src === 'elle' ? 'Adresi siz yazdınız.' : 'Öneriyi onayladınız.'}</span>${r.warn ? `<span class="small warn-t">${esc(r.warn)}</span>` : ''}</div>
-      <div class="mrow-act"><span class="tag-s ${r.warn ? 'warn' : 'ok'}">${r.status === 'gone' ? '410' : 'Onaylandı'}</span><button type="button" class="linkbtn" data-mundo="${p}">Geri al</button></div></div>`;
+      <div class="mrow-act"><span class="tag-s ${r.warn ? 'warn' : 'ok'}">${r.status === 'gone' ? '410' : 'Onaylandı'}</span><button type="button" class="linkbtn" data-mundo="${p}"${r.kind === 'follow' && !r.candidates?.length ? ' title="Satır hedefi tekrar izler."' : ''}>Geri al</button></div></div>`;
   }
   const ch = mapChoice(r);
   const cands = r.candidates || [];
   const opts = (r.status === 'none' || !cands.length ? `<option value=""${ch === '' ? ' selected' : ''}>Yeni adres seçin…</option>` : '')
-    + cands.map((c) => `<option value="${esc(candVal(c))}"${ch === candVal(c) ? ' selected' : ''}>${esc(siteName(siteByKey(c.site), true))} · ${esc(c.path)} · puan ${c.score}</option>`).join('')
+    + cands.map((c) => `<option value="${esc(candVal(c))}"${ch === candVal(c) ? ' selected' : ''}>${c.ext ? `Dış adres · ${esc(c.url)}` : `${esc(siteName(siteByKey(c.site), true))} · ${esc(c.path)} · puan ${c.score}`}</option>`).join('')
     + `<option value="__other"${ch === '__other' ? ' selected' : ''}>Başka adres yazın…</option><option value="__410"${ch === '__410' ? ' selected' : ''}>410 ver (sayfa kalıcı olarak kaldırıldı)</option>`;
   const pick = cands.find((c) => candVal(c) === ch);
   const why = pick ? pick.why : ch === '__410' ? 'Sayfa yeni sitede olmayacak ve yakın bir karşılığı yok. Sunucu 410 verir.' : ch === '__other' ? 'Yol (/ornek) veya tam adres yazın. Yol yazarsanız araç önerilen siteyi kullanır.' : r.why;
@@ -1400,7 +1415,7 @@ function mapRowHtml(r) {
       <label><span class="sr">${p} için yeni adres</span><select data-mchoice="${p}">${opts}</select></label>${manual}
       <span class="small">${esc(why || '')}</span><span class="small warn-t" data-merr></span></div>
     <div class="mrow-act">${conf ? `<span class="tag-s ${conf[1]}">${conf[0]}</span>` : r.status === 'none' ? '<span class="tag-s warn">Öneri yok</span>' : ''}
-      <button type="button" class="ghost small strong" data-mok="${p}"${ch === '' ? ' disabled' : ''}>Onayla</button></div></div>`;
+      <button type="button" class="ghost small strong" data-mok="${p}"${ch === '' ? ' disabled' : ''}>Onayla</button>${prj.mapOwn[r.path] ? `<button type="button" class="linkbtn" data-mownx="${p}">Vazgeç</button>` : ''}</div></div>`;
 }
 $('#mapTabs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-mtab]');
@@ -1417,6 +1432,10 @@ $('#mapRows').addEventListener('input', (e) => {
 });
 $('#mapRows').addEventListener('click', (e) => {
   if (e.target.closest('[data-mmore]')) { prj.mapShow += 100; renderMap(); return; }
+  const own = e.target.closest('[data-mown]');
+  if (own) { prj.mapOwn[own.dataset.mown] = true; renderMap(); document.querySelector(`[data-mpath="${CSS.escape(own.dataset.mown)}"] select`)?.focus(); return; }
+  const ownx = e.target.closest('[data-mownx]');
+  if (ownx) { delete prj.mapOwn[ownx.dataset.mownx]; delete prj.mapChoice[ownx.dataset.mownx]; renderMap(); return; }
   const undo = e.target.closest('[data-mundo]');
   if (undo) { saveMap({ [undo.dataset.mundo]: null }, 'Karar geri alındı.'); return; }
   const ok = e.target.closest('[data-mok]');
@@ -1432,7 +1451,7 @@ $('#mapRows').addEventListener('click', (e) => {
   } else {
     const c = r.candidates.find((x) => candVal(x) === ch);
     if (!c) return;
-    d = { site: c.site, path: c.path, src: 'oneri' };
+    d = c.ext ? { url: c.url, src: 'oneri' } : { site: c.site, path: c.path, src: 'oneri' };
   }
   saveMap({ [r.path]: d }, '');
 });
@@ -1462,6 +1481,7 @@ const TERMS = {
   liveUrl: 'Canlıya çıkıştan sonraki adres. 301 her zaman bu adrese gider. Canlı adresi staging adresine asla yönlendirmeyin.',
   checkUrl: 'Aracın kontrol ettiği adres (genelde staging). Sayfayı açıp görmek içindir. 301 hedefi değildir.',
   noLive: 'Bu sitenin canlı alan adı projede yok. Proje adımında "canlı alan adı" alanını doldurun.',
+  oldRedirect: 'Eski site bu adresi başka bir adrese yönlendiriyordu. Canlıdan sonra eski sunucu kuralları kalmaz ve adres 404 verir. Satır hedefin yeni adresine tek adımda gider ve hedefin kararını izler. İsterseniz başka adres veya 410 seçin.',
   lateRow: 'Adres çıkıştan sonra listeden geldi. Araç eski sitede istemedi: title, H1 ve içerik yok. Öneri sadece adres benzerliğidir. Kontrol edip karar verin.',
 };
 const todoState = { open: null };

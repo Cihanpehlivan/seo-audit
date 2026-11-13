@@ -6,10 +6,12 @@
 //   rule     the section rule already moves the page and the target page exists (moved, no301).
 //   approved the user approved a suggestion or wrote an address.      gone: the user chose 410.
 //   pending  a suggestion waits for approval.                          none: no suggestion (score too low).
+//   follow   v0.12.2: an old redirect (kind 'follow'). It takes the new address of its target (or its 410).
+//   wait     v0.12.2: an old redirect whose target has no decision yet. It follows when the target gets one.
 // Only user decisions are saved in the project (project.map). Suggestions are computed again on every match.
 import { trafficCompare, trafficOf } from './urllist.js';
 import { pathKey, langCode } from './compare.js';
-import { isOk, isNoindex } from './rules/helpers.js';
+import { isOk, isNoindex, isStagingHost } from './rules/helpers.js';
 
 const TR = { ğ: 'g', ü: 'u', ş: 's', ı: 'i', ö: 'o', ç: 'c', İ: 'i' };
 export function words(text, stop = new Set()) {
@@ -249,7 +251,8 @@ export function suggestTargets(olds, sites, cfg) {
 // Builds the map rows. cmp: the project comparison (after the requests). oldRes: old crawl.
 // sites: [{ key, host, origin, liveOrigin, pages }] (heir first). decisions: project.map.
 // traffic (v0.12.0): path → { clicks, impressions, views, links } from the old address list. Rows show it and sort by it.
-export function buildRedirectMap(cmp, oldRes, sites, decisions = {}, cfg, traffic = null) {
+// redirects (v0.12.2): old redirects (src/urllist.js → oldRedirects). staging: { stagingHosts, stagingSuffixes }.
+export function buildRedirectMap(cmp, oldRes, sites, decisions = {}, cfg, traffic = null, { redirects = [], staging = null } = {}) {
   const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
   const siteOfHost = (h) => sites.find((s) => bare(s.host) === bare(h));
   const byKey = new Map(sites.map((s) => [s.key, s]));
@@ -276,43 +279,127 @@ export function buildRedirectMap(cmp, oldRes, sites, decisions = {}, cfg, traffi
     return { path: r.path, title: r.oldTitle || p.title || '', h1: first(p.h1), simhash: p.simhash || null, prefer,
       lang: langCode(p.htmlLang), dropped: !!r.dropped, home: isHomeLike(r.path, cfg) };
   });
-  const sug = suggestTargets(olds, sites, cfg);
+  // v0.12.2: an old redirect to an address that is not an old page (a page without links that the list crawl did not
+  // keep, a file) has no target row to follow: it gets its own suggestion from the target's address.
+  const R0 = new Set(need.map((r) => r.path));
+  const follows = redirects.filter((rd) => !oldPage.has(rd.path) && !R0.has(rd.path) && !rd.broken);
+  const extra = new Map();
+  for (const rd of follows) {
+    if (rd.off || oldPage.has(rd.toPath) || extra.has(rd.toPath)) continue;
+    extra.set(rd.toPath, { path: rd.toPath, title: '', h1: '', simhash: null, prefer: null, lang: '', dropped: false, home: isHomeLike(rd.toPath, cfg) });
+  }
+  const sug = suggestTargets([...olds, ...extra.values()], sites, cfg);
   for (const r of need) {
     const cands = (sug.get(r.path) || []).map((c) => ({ ...c, url: liveUrl(c.site, c.path) }));
     rows.push({ path: r.path, oldUrl: r.oldUrl, oldTitle: r.oldTitle, kind: 'suggest', candidates: cands, from: r.dropped ? 'removed' : r.targetBroken ? 'broken' : r.moved ? 'notarget' : 'lost' });
   }
 
   // User decisions win over rules and suggestions.
-  for (const row of rows) {
+  const decide = (row) => {
     const d = decisions[row.path];
-    if (d?.gone) { Object.assign(row, { status: 'gone', target: null, decision: d }); continue; }
+    if (d?.gone) { Object.assign(row, { status: 'gone', target: null, decision: d }); return true; }
     if (d && (d.site || d.url)) {
       const t = d.url ? { site: null, path: '', url: d.url } : { site: d.site, path: d.path, url: liveUrl(d.site, d.path) };
       const warn = d.site && !byKey.has(d.site) ? 'Hedef site projede yok. Adresi tekrar seçin.'
         : d.site && !inCrawl.has(`${d.site}|${d.path}`) ? 'Hedef sayfa son taramada yok. Sayfayı kontrol edin.' : '';
       Object.assign(row, { status: 'approved', target: t, decision: d, warn });
+      return true;
+    }
+    return false;
+  };
+  const suggestState = (row) => {
+    const best = row.candidates[0];
+    if (best) Object.assign(row, { status: 'pending', target: best.ext ? { site: null, path: '', url: best.url } : { site: best.site, path: best.path, url: best.url }, score: best.score, conf: best.conf, why: best.why });
+    else Object.assign(row, { status: 'none', target: null, why: row.noneWhy || 'Benzer sayfa yok. En yakın sayfayı seçin veya 410 verin. Ana sayfaya toplu 301 vermeyin: Google bunu soft 404 sayar.' });
+  };
+  for (const row of rows) {
+    if (decide(row)) continue;
+    if (row.kind === 'rule') { row.status = 'rule'; continue; }
+    suggestState(row);
+  }
+
+  // v0.12.2: old redirects (/indirim → /kampanya on the old site). After launch the old server rules are gone. The row
+  // takes the new address of its target in one step (/indirim → /yeni/kampanya): no chain. The row saves nothing:
+  // it follows the target on every match. A decision of the user on the row wins (another address or 410).
+  // Not a row: a redirect to an address that fails on the old site (the list screen shows it), and an address that
+  // the heir already serves as a page (the new site owns the address).
+  const stgCfg = staging || { stagingHosts: [], stagingSuffixes: [] };
+  const isStg = (h) => sites.some((s) => bare(s.host) === bare(h) && (!s.liveOrigin || bare(new URL(s.liveOrigin).hostname) !== bare(h))) || isStagingHost(bare(h), stgCfg);
+  const heirPage = new Map();
+  for (const p of sites[0]?.pages || []) { try { const k = pathKey(p.url); if (!heirPage.has(k) || isOk(p)) heirPage.set(k, p); } catch {} }
+  const mapRow = new Map(rows.map((r) => [r.path, r]));
+  const redirected = new Map(R.redirected.filter((r) => !r.targetBroken && r.target).map((r) => [r.path, r]));
+  const unknownKeys = new Set([...R.unknown, ...(R.moving || [])].map((r) => r.path));
+  const heirKey = sites[0]?.key;
+  for (const rd of follows) {
+    if (mapRow.has(rd.path)) continue;
+    const hp = heirPage.get(rd.path);
+    if (hp && isOk(hp)) continue;
+    const row = { path: rd.path, oldUrl: rd.oldUrl, oldTitle: '', kind: 'follow', candidates: [],
+      follow: { path: rd.toPath, url: rd.to, off: rd.off, hops: rd.hops, src: rd.src } };
+    rows.push(row);
+    mapRow.set(rd.path, row);
+    if (rd.off) {
+      // Another domain: the old site sent the address there on purpose. The tool does not carry it over by itself.
+      const h = new URL(rd.to).hostname;
+      if (isStg(h)) row.noneWhy = 'Eski site bu adresi staging alan adına yönlendiriyordu. 301 hedefi canlı alan adıdır. Adres seçin veya 410 verin.';
+      else row.candidates = [{ ext: true, site: null, path: '', url: rd.to, score: null, conf: null, why: 'Eski site bu adresi başka alan adına yönlendiriyordu. Aynı adresi onaylayın veya başka adres seçin.' }];
+      if (!decide(row)) suggestState(row);
       continue;
     }
-    if (row.kind === 'rule') { row.status = 'rule'; continue; }
-    const best = row.candidates[0];
-    if (best) Object.assign(row, { status: 'pending', target: { site: best.site, path: best.path, url: best.url }, score: best.score, conf: best.conf, why: best.why });
-    else Object.assign(row, { status: 'none', target: null, why: 'Benzer sayfa yok. En yakın sayfayı seçin veya 410 verin. Ana sayfaya toplu 301 vermeyin: Google bunu soft 404 sayar.' });
+    if (!oldPage.has(rd.toPath)) {
+      // The target is not an old page: no decision to follow. Suggestion from the target's address.
+      row.candidates = (sug.get(rd.toPath) || []).map((c) => ({ ...c, url: liveUrl(c.site, c.path), why: `Eski hedef ${rd.toPath}: ${c.why}` }));
+      row.noneWhy = `Eski hedef ${rd.toPath} eski sayfa değil. Benzer sayfa yok. Adres seçin veya 410 verin.`;
+      if (!decide(row)) suggestState(row);
+      continue;
+    }
+    if (decide(row)) continue;
+    const m = mapRow.get(rd.toPath);
+    if (m && (m.status === 'rule' || m.status === 'approved')) Object.assign(row, { status: 'follow', target: { ...m.target } });
+    else if (m && m.status === 'gone') Object.assign(row, { status: 'follow', gone: true, target: null });
+    else if (m) Object.assign(row, { status: 'wait', target: null, hint: m.target?.url || '' });
+    else if (redirected.has(rd.toPath)) {
+      // Staging already redirects the target: the same page, with its live address.
+      const t = redirected.get(rd.toPath).target;
+      const s = siteOfHost(new URL(t).hostname);
+      Object.assign(row, { status: 'follow', target: s ? { site: s.key, path: pathKey(t), url: liveUrl(s.key, pathKey(t)) } : { site: null, path: '', url: t } });
+    } else if (unknownKeys.has(rd.toPath)) Object.assign(row, { status: 'wait', target: null, hint: '' });
+    // The target is on the heir at the same path: the live old domain serves it.
+    else Object.assign(row, { status: 'follow', target: { site: heirKey, path: rd.toPath, url: liveUrl(heirKey, rd.toPath) } });
+    if (row.status === 'follow' && row.target && (rd.toPath === '/' || isHomeLike(rd.toPath, cfg))) row.warn = 'Eski site bu adresi ana sayfaya yönlendiriyordu. Google bunu soft 404 sayabilir. Daha yakın bir sayfa varsa onu seçin.';
+  }
+  // Staging state of a redirect row: the heir crawl found the address as a redirect (no new request).
+  for (const row of rows) {
+    if (row.kind !== 'follow' || !row.target?.url) continue;
+    const hp = heirPage.get(row.path);
+    if (!hp?.redirectChain?.length || !hp.finalUrl) continue;
+    const s = row.target.site ? byKey.get(row.target.site) : null;
+    let ok;
+    try {
+      const fh = bare(new URL(hp.finalUrl).hostname);
+      const hosts = s ? [s.host, s.liveOrigin ? new URL(s.liveOrigin).hostname : ''].map(bare) : [bare(new URL(row.target.url).hostname)];
+      ok = pathKey(hp.finalUrl) === pathKey(row.target.url) && hosts.includes(fh);
+    } catch { ok = false; }
+    Object.assign(row, ok ? { staging: 'installed' } : { staging: 'other', stagingTo: hp.finalUrl });
   }
   // v0.12.0: inside every state, the page with more traffic comes first. A page from the old address list is marked.
   for (const row of rows) {
     const t = traffic?.get(row.path);
     if (t) row.traffic = trafficOf(t);
-    if (oldPage.get(row.path)?.discoveredBy === 'list') row.fromList = true;
+    if (oldPage.get(row.path)?.discoveredBy === 'list' || row.follow?.src === 'list') row.fromList = true;
     // v0.12.1: a late address (never asked on the old site) has no title, H1 or content: the suggestion uses the address only.
     if (oldPage.get(row.path)?.late) row.late = true;
   }
   const tr = (r) => traffic?.get(r.path) || null;
-  const order = { pending: 0, none: 1, approved: 2, gone: 3, rule: 4 };
+  const order = { pending: 0, none: 1, approved: 2, gone: 3, rule: 4, wait: 5, follow: 6 };
   rows.sort((a, b) => (order[a.status] - order[b.status]) || trafficCompare(tr(a), tr(b)) || ((b.score || 0) - (a.score || 0)) || a.path.localeCompare(b.path));
   const count = (st) => rows.filter((r) => r.status === st).length;
   const summary = {
     total: rows.length, rule: count('rule'), approved: count('approved'), gone: count('gone'), pending: count('pending'), none: count('none'),
     high: rows.filter((r) => r.status === 'pending' && r.conf === 'high').length, warn: rows.filter((r) => r.warn).length,
+    // v0.12.2: old redirects: rows that follow their target, rows that wait for the target's decision, all redirect rows.
+    follow: count('follow'), wait: count('wait'), redirects: rows.filter((r) => r.kind === 'follow').length,
     // Decisions for pages that no longer need a new address (the old page is gone or now found).
     stale: Object.keys(decisions).filter((k) => !rows.some((r) => r.path === k)).length,
   };
@@ -322,11 +409,12 @@ export function buildRedirectMap(cmp, oldRes, sites, decisions = {}, cfg, traffi
 // Final list for the developer: rule rows, approved rows (301) and gone rows (410).
 const CSV_SAFE = (v) => { const s = String(v ?? ''); const t = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s; return /[",\n;]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
 export function mapCsv(map) {
-  const src = (r) => (r.status === 'rule' ? 'Kural' : r.decision?.src === 'elle' ? 'Elle' : 'Onay');
+  const src = (r) => (r.status === 'rule' ? 'Kural' : r.status === 'follow' ? 'Eski yönlendirme' : r.decision?.src === 'elle' ? 'Elle' : 'Onay');
   const lines = [['eski_url', 'yeni_url', 'durum', 'kaynak'].join(',')];
   for (const r of map.rows) {
-    if (!['rule', 'approved', 'gone'].includes(r.status)) continue;
-    lines.push([r.oldUrl, r.status === 'gone' ? '' : r.target.url, r.status === 'gone' ? '410' : '301', src(r)].map(CSV_SAFE).join(','));
+    if (!['rule', 'approved', 'gone', 'follow'].includes(r.status)) continue;
+    const gone = r.status === 'gone' || (r.status === 'follow' && r.gone);
+    lines.push([r.oldUrl, gone ? '' : r.target.url, gone ? '410' : '301', src(r)].map(CSV_SAFE).join(','));
   }
   return '\ufeff' + lines.join('\r\n') + '\r\n';
 }

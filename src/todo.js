@@ -78,6 +78,12 @@ export function buildTodo({ cmp, map, sections = [], sites, oldHost, readyOk = {
     if (r.status === 'rule' && !r.installed) add('server', '301', r, { url: r.target.url, site: r.target.site, note: cmpNo301.get(r.path)?.todo || r.why });
     if (r.status === 'approved') add('server', '301', r, { url: r.target.url, site: r.target.site || null, note: r.decision?.src === 'elle' ? 'Haritada elle yazıldı.' : 'Haritada onaylandı.' });
     if (r.status === 'gone') add('server', '410', r, { note: 'Haritada 410 seçildi.' });
+    // v0.12.2: an old redirect. The old server rule does not stay after launch: set it up again in one step.
+    if (r.status === 'follow' && r.staging !== 'installed') {
+      const note = `Eski sitede ${r.follow.path} adresine yönleniyordu. Eski sunucu kuralı canlıda kalmaz. Tek adımda kurun.`;
+      if (r.gone) add('server', '410', r, { note: `${note} Hedef için 410 seçildi.` });
+      else add('server', '301', r, { url: r.target.url, site: r.target.site || null, note: r.staging === 'other' ? `${note} Staging başka adrese gidiyor: ${r.stagingTo}` : note });
+    }
   }
   for (const r of R.redirected || []) {
     const fix = !r.targetBroken && redirectFix(r);

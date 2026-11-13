@@ -130,7 +130,7 @@ export function buildLaunch({ oldRes, sites, map, cfg = {} }) {
   const noLive = new Set(map?.noLive || []);
   const bySite = new Map();
   for (const r of map?.rows || []) {
-    if (!['rule', 'approved'].includes(r.status) || !r.target?.url || !isStg(hostOf(r.target.url))) continue;
+    if (!['rule', 'approved', 'follow'].includes(r.status) || !r.target?.url || !isStg(hostOf(r.target.url))) continue;
     const k = r.target.site || '';
     (bySite.get(k) || bySite.set(k, []).get(k)).push({ what: '301', page: r.oldUrl, value: r.target.url });
   }

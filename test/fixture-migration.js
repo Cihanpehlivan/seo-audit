@@ -40,3 +40,37 @@ export function startMigrationSites() {
   });
   return Promise.all([listen(old), listen(heir)]);
 }
+
+// v0.12.2: old redirects (test/redirects-test.js). Old site: redirects found by links and redirects only a list names.
+// Heir (staging): the campaign page has a new address; some old redirect addresses are already set up there.
+export const STG_HOST = 'staging.ornek.test'; // a staging host (suffix .test): the old site must not send a 301 there
+export function startRedirectSites() {
+  const links = ['/kampanya', '/urun', '/hakkimizda', '/eski-link', '/eski-zincir', '/eski-kirik', '/eski-dis', '/eski-stg',
+    '/eski-ana', '/eski-sil', '/eski-var', '/eski-kurulu', '/eski-yanlis'].map((p) => `<a href="${p}">${p}</a>`).join(' ');
+  const r301 = (to) => [301, '', { location: to }];
+  const old = serve({
+    '/': [200, page('Ana sayfa', links)], '/kampanya': [200, page('Kampanya')], '/urun': [200, page('Ürün')], '/hakkimizda': [200, page('Hakkımızda')],
+    '/eski-link': r301('/kampanya'), // found by a link
+    '/eski-zincir': r301('/ara'), '/ara': [302, '', { location: '/urun' }], // chain of two hops
+    '/eski-kirik': r301('/yok'), // the target gives 404: no row
+    '/eski-dis': r301('http://baska.invalid/x'), // another domain
+    '/eski-stg': r301(`http://${STG_HOST}/x`), // a staging domain
+    '/eski-ana': r301('/'), // the home page
+    '/eski-sil': r301('/hakkimizda'), // the target gets 410 in the map
+    '/eski-var': r301('/urun'), // the heir serves this address as a page: no row
+    '/eski-kurulu': r301('/kampanya'), '/eski-yanlis': r301('/kampanya'), // the heir already redirects them
+    // Without links: only the old address list names them.
+    '/eski-indirim': r301('/kampanya'),
+    '/eski-gizli': r301('/gizli'), '/gizli': [200, page('Gizli kampanya')], // the target is no old page
+    '/eski-dis-liste': r301('http://baska.example/y'), // list mode does not ask another domain
+    '/robots.txt': [200, '', { 'content-type': 'text/plain' }],
+  });
+  const hlinks = ['/yeni/kampanya', '/urun', '/gizli-kampanya', '/eski-var', '/eski-kurulu', '/eski-yanlis'].map((p) => `<a href="${p}">${p}</a>`).join(' ');
+  const heir = serve({
+    '/': [200, page('Ana sayfa', hlinks)], '/yeni/kampanya': [200, page('Kampanya')], '/urun': [200, page('Ürün')],
+    '/gizli-kampanya': [200, page('Gizli kampanya')], '/eski-var': [200, page('Eski var')],
+    '/eski-kurulu': [301, '', { location: '/yeni/kampanya' }], '/eski-yanlis': [301, '', { location: '/urun' }],
+    '/robots.txt': [200, '', { 'content-type': 'text/plain' }],
+  });
+  return Promise.all([listen(old), listen(heir)]);
+}

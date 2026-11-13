@@ -178,7 +178,7 @@ await check('API: eski sitede istek; sadece taramada olmayan adresler, sadece es
   assert.equal(r.status, 201, JSON.stringify(r.data));
   await wait(async () => (await api(`/api/projects/${pid}`)).data.listState.state === 'done');
   const v = (await api(`/api/projects/${pid}/urllist`)).data;
-  assert.deepEqual(v.counts, { crawl: 2, found: 1, gone: 1, redirect: 2, nothtml: 1, error: 0, blocked: 0, pending: 0, limit: 0, late: 0 });
+  assert.deepEqual(v.counts, { crawl: 2, found: 1, gone: 1, redirect: 2, redirectBad: 0, nothtml: 1, error: 0, blocked: 0, pending: 0, limit: 0, late: 0 });
   // The five list addresses and the hop of the same-site redirect (/eski-indirim → /about). Nothing from the old crawl again.
   const asked = seen.filter((u) => u !== '/robots.txt').sort();
   assert.deepEqual(asked, ['/about', '/disari', '/eski-indirim', '/eski-kampanya', '/eski-katalog', '/notlar']);
@@ -196,8 +196,10 @@ await check('eski sayfa kümesi: linksiz sayfa 301 haritasına girer, trafik ve 
   assert.equal(row.fromList, true); assert.deepEqual(row.traffic, { c: 120, i: 900 });
   assert.ok(row.candidates.some((c) => c.path === '/about'), 'öneri /about değil');
   assert.equal(m.summary.oldPages, 10);
-  // Redirecting, 404 and text addresses are not old pages.
-  for (const p of ['/eski-indirim', '/eski-katalog', '/disari', '/notlar']) assert.ok(!m.map.rows.some((r) => r.path === p), p);
+  // 404 and text addresses are not old pages and get no row. v0.12.2 (decision 5 changed): a redirecting address
+  // is not an old page (oldPages above), but it gets a redirect row (test/redirects-test.js).
+  for (const p of ['/eski-katalog', '/notlar']) assert.ok(!m.map.rows.some((r) => r.path === p), p);
+  for (const p of ['/eski-indirim', '/disari']) assert.equal(m.map.rows.find((r) => r.path === p)?.kind, 'follow', p);
 });
 await check('301 haritası: her durumda trafiği olan satır önce, yüksek trafik önce', async () => {
   const rows = (await api(`/api/projects/${pid}/match`)).data.map.rows;

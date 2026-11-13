@@ -306,7 +306,9 @@ export async function exportCompareExcel(cmp, file, { map, todo, launch, verify,
   // v0.8.1: every row also shows the source of the decision and the tool's best suggestion (address, confidence,
   // score, reason), also after approval or 410. So the quality of the suggestions can be measured.
   if (map?.rows.length) {
-    const ST = { rule: 'Kural (301)', approved: 'Onaylandı (301)', gone: '410', pending: 'Onay bekliyor', none: 'Öneri yok' };
+    const ST = { rule: 'Kural (301)', approved: 'Onaylandı (301)', gone: '410', pending: 'Onay bekliyor', none: 'Öneri yok', follow: 'Hedefi izler (301)', wait: 'Hedefin kararı bekleniyor' };
+    const found = (r) => (r.kind === 'follow' ? `Eski yönlendirme (${r.follow.src === 'list' ? 'liste' : 'tarama'})` : r.late ? 'Liste (çıkıştan sonra, içerik yok)' : r.fromList ? 'Eski adres listesi' : 'Tarama');
+    const oldTo = (r) => (r.kind === 'follow' ? `Eski sitede → ${r.follow.off ? r.follow.url : r.follow.path}${r.follow.hops > 1 ? ` (${r.follow.hops} adım)` : ''}` : '');
     const CONF = { high: 'Yüksek', mid: 'Orta', low: 'Düşük' };
     const tcols = trafficColumns(map.rows);
     sheet(wb, '301 haritası', [
@@ -316,8 +318,9 @@ export async function exportCompareExcel(cmp, file, { map, todo, launch, verify,
       { header: 'Eski sayfa nereden', key: 'found', width: 32 },
     ], map.rows.map((r) => {
       const best = r.candidates?.[0];
-      return { oldUrl: r.oldUrl, ...trafficCells(r.traffic), found: r.late ? 'Liste (çıkıştan sonra, içerik yok)' : r.fromList ? 'Eski adres listesi' : 'Tarama', to: r.target?.url || '', st: ST[r.status], src: mapSource(r), sug: best?.url || '',
-        conf: best ? CONF[best.conf] : '', score: best ? best.score : null, why: best?.why || r.why || '', warn: r.warn || '' };
+      const st = r.status === 'follow' && r.gone ? '410 (hedefi izler)' : ST[r.status];
+      return { oldUrl: r.oldUrl, ...trafficCells(r.traffic), found: found(r), to: r.target?.url || '', st, src: mapSource(r), sug: best?.url || '',
+        conf: best?.conf ? CONF[best.conf] : '', score: best ? best.score : null, why: [oldTo(r), best?.why || r.why || ''].filter(Boolean).join('. '), warn: r.warn || '' };
     }));
   }
   // v0.12.0: every address of the old address list and its result. Traffic order.
@@ -339,6 +342,10 @@ export async function exportCompareExcel(cmp, file, { map, todo, launch, verify,
 export function mapSource(r) {
   const best = r.candidates?.[0];
   if (r.status === 'rule') return 'Bölüm kuralı';
+  // v0.12.2: an old redirect that follows its target (or waits for the target's decision).
+  if (r.status === 'follow') return 'Eski yönlendirme';
+  if (r.status === 'wait') return 'Eski yönlendirme · hedef bekliyor';
+  if (r.kind === 'follow' && r.status === 'pending' && best?.ext) return 'Eski yönlendirme (dış adres)';
   if (r.status === 'pending') return 'Araç önerisi';
   if (r.status === 'none') return '';
   if (r.status === 'gone') return best ? '410 (araç öneri vermişti)' : '410';

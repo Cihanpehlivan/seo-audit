@@ -49,7 +49,7 @@ Bu işlerin kodu ve testi tamamdır. Gerçek sitelerde ölçüm sürüyor (bkz. 
 | Şifreli staging'de 301 kontrolü | Araç şifreyi saklamaz. Şifreli sitede bu kontrol "Kontrol edilemedi" sonucunu verir. |
 | Büyük site | Varsayılan sınır 5.000 URL, en fazla 50.000. Araç bütün taramayı bellekte tutar: çok büyük sitede yavaşlar. |
 | Title genişliği | Piksel değeri tahmindir. |
-| Eski adres listesi | Dosya ile çalışır: Search Console ve Analytics hesabına bağlanmaz (API yok). Search Console zip dosyası açılmaz: içindeki `Pages.csv` dosyasını seçin. Sütun adları gerçek bir dışa aktarım ile henüz denenmedi: bulunamayan sütunu siz seçersiniz. Çıkıştan sonra eklenen adres eski sitede istenmez: içeriksiz eski sayfa olur, 301 önerisi sadece adres benzerliğidir. Eski sitede yönlenen adres 301 haritasına girmez. |
+| Eski adres listesi | Dosya ile çalışır: Search Console ve Analytics hesabına bağlanmaz (API yok). Search Console zip dosyası açılmaz: içindeki `Pages.csv` dosyasını seçin. Sütun adları gerçek bir dışa aktarım ile henüz denenmedi: bulunamayan sütunu siz seçersiniz. Çıkıştan sonra eklenen adres eski sitede istenmez: içeriksiz eski sayfa olur, 301 önerisi sadece adres benzerliğidir. Eski sitede yönlenen adres 301 haritasına girer, ama zincirin ara adımları satır almaz ve staging durumu sadece staging taraması o adresi bulduysa görünür (yeni istek yok). |
 
 ### Yapmadığı işler
 
@@ -134,7 +134,7 @@ Giriş ekranında "Taşıma projesi" seçin ve proje adını yazın. Araç yedi 
 | Proje | "Yeni yapı nasıl?" sorusunu cevaplayın: "Tek alan adı" veya "Diller ayrı alan adlarına". Siteleri yazın: eski site (canlı), eski alan adına geçecek site (staging olabilir), ek siteler (en fazla 3; örnek: Türkçe site ayrı alan adında). Ek site için canlı alan adını yazın. |
 | Tarama | Her site için "Tara" düğmesi vardır. Var olan bir taramayı da bağlayabilirsiniz. Staging şifresini tarama ayarlarına yazın. Araç şifreyi saklamaz. İsteğe bağlı: "Eski adres listesi" kartı (aşağıda). |
 | Eşleştirme | Eski sitenin her bölümü (`/tr/`, `/fr/`…) bir satırdır. Araç yeni yeri önerir ve seçili getirir. Bulamadığı bölüm "Bulunamadı" der: satırı açın ve sayfaları görün. Karar yanlış görünürse (dil farkı, sıfır sayfa) araç uyarır ve daha iyi seçimi söyler. Serbest kural "Gelişmiş" altındadır. |
-| 301 haritası | Adresi değişen her sayfa için araç yeni sayfa önerir. Güven: Yüksek, Orta, Düşük. Öneriyi onaylayın, başka sayfa seçin, adres yazın veya 410 verin. Araç Türkçe sayfaya Türkçe sayfa önerir. Eski ana sayfaya doğru sitenin ana sayfasını önerir. Ana sayfaya toplu yönlendirme önermez (soft 404). "CSV indir" son listeyi verir. Kararlar projede saklanır. |
+| 301 haritası | Adresi değişen her sayfa için araç yeni sayfa önerir. Güven: Yüksek, Orta, Düşük. Öneriyi onaylayın, başka sayfa seçin, adres yazın veya 410 verin. Araç Türkçe sayfaya Türkçe sayfa önerir. Eski ana sayfaya doğru sitenin ana sayfasını önerir. Ana sayfaya toplu yönlendirme önermez (soft 404). Eski sitede yönlenen adres "Eski yönlendirme" sekmesinde durur ve hedefinin kararını izler (aşağıda). "CSV indir" son listeyi verir. Kararlar projede saklanır. |
 | Yapılacaklar | İşler yapıldığı yere göre kartlardır: eski alan adı sunucusu (301, yönlendirme düzeltmesi, 410), her yeni site (sayfa oluşturun, link verin), İçerik (title, meta, H1, noindex) ve Karar bekleyen. Her kart ekibi gösterir. Listede "Canlı adres" (301 hedefi) ve "Kontrol edilen adres" (staging) ayrı sütunlardır. Yeni sitede çok az sayfa varsa araç "hazır değil gibi görünüyor" der ve o sitenin işlerini saymaz. Site gerçekten küçükse uyarıyı kapatın. |
 | Canlıya çıkış | Staging taramalarından çıkış öncesi liste. Dört grup: **Kritik** (301 listesinde veya sitede açık yazılmış staging adresi; şifresiz ve Google'a açık staging), **Karar bekleyen** (301 haritasında açık satır), **Çıkış anında değiştirin** (noindex, X-Robots-Tag, `Disallow: /`: staging'de normaldir), **Kontrol edin** (Analytics/GTM kimliği ve Search Console etiketi yeni sitede var mı). Göreli adres sorun değildir. Durum her zaman taramadan gelir: düzeltin, sonra tekrar tarayın. |
 | Canlı doğrulama | Site canlıya çıkınca "Canlıya çıktık" düğmesi ile çıkış gününü işaretleyin. Araç eski site ve staging taramalarını kilitler. Sonra her siteyi "Canlıda tara" ile tarayın. Dört grup: **Kritik** (301 yok ve hata, hedef hatalı, staging'e giden 301, kayıp sayfa, canlıda noindex, `Disallow: /`, staging adresi), **Düzeltin** (zincir, 302/307, yanlış hedef, 410 yerine başka yanıt, eksik etiket, sitemap hatası), **Kontrol edilemedi** (canlı alan adı yok, canlı tarama yok, erişim engeli; tamam sayılmaz), **Tamam**. |
@@ -152,7 +152,7 @@ Araç eski sayfaları link ve sitemap ile bulur. Hiçbir sayfanın link vermedi�
 | Liste ekleyin | Tarama adımında "Eski adres listesi" kartını açın. CSV seçin veya adresleri yapıştırın. Kaynak: Search Console (Performans → Sayfalar → Dışa aktar, `Pages.csv`), Analytics (sayfa yolu), backlink aracı (hedef adres) veya her satırda bir adres. Ayırıcı virgül veya noktalı virgül. Araç sütunları tanır (Türkçe ve İngilizce adlar). Bulamazsa sütunu siz seçersiniz. En fazla 5 liste. |
 | Temizlik | www ve http/https aynı sitedir. İzleme parametreleri (utm_, gclid…) silinir. Aynı adres birleşir: tıklama ve gösterim toplanır. Başka alan adındaki adres ayrılır ve kontrol edilmez. Dosya adresleri (pdf, görsel) atlanır. |
 | Eski sitede isteyin | Araç sadece taramada olmayan adresleri ister. İstek sadece eski siteye gider. Başka alan adına giden yönlendirme izlenmez. robots.txt ayarı tarama ayarlarından gelir. Yayın modunda en fazla `yayin.maxUrls` adres istenir: trafiği yüksek olan önce. |
-| Sonuç | Taramada vardı, Yeni bulundu (HTML 200: eski sayfa olur), Eski sitede hata (404, 410), Eski sitede yönleniyor, HTML değil, Yanıt yok, robots.txt engeli. Yeni bulunan sayfa eşleştirmeye, 301 haritasına, yapılacaklara, canlıya çıkış listesine ve canlı doğrulamaya girer. |
+| Sonuç | Taramada vardı, Yeni bulundu (HTML 200: eski sayfa olur), Eski sitede hata (404, 410), Eski sitede yönleniyor (301 haritasında satır alır), Yönleniyor · hedef hata (haritaya girmez), HTML değil, Yanıt yok, robots.txt engeli. Yeni bulunan sayfa eşleştirmeye, 301 haritasına, yapılacaklara, canlıya çıkış listesine ve canlı doğrulamaya girer. |
 | Trafik | Sıra: tıklama, sonra gösterim, sonra görüntüleme, sonra link veren alan adı. Trafiği olmayan satır sonra gelir. 301 haritasında her durum sekmesi, Yapılacaklar'da her yer kartı, Canlıya çıkış listesinde "Karar bekleyen" satırları ve Canlı doğrulamada her grup bu sıradadır. Satır "1.240 tıklama" etiketi taşır. Excel'de bu sayfalarda Tıklama, Gösterim, Görüntüleme ve Link veren alan adı sütunları vardır (listede olan ölçüler). Listeden gelen sayfa "Listeden" işareti taşır. |
 
 Liste değişince 301 kararları kalır. Bir listeyi kaldırırsanız onun sayfaları haritadan düşer, karar "artık gerekli değil" sayılır. Liste geri gelince karar tekrar kullanılır.
@@ -166,6 +166,23 @@ Eski sitede hiç istenmeyen adres (çıkıştan sonra eklenen veya çıkıştan 
 | Eşleştirme | Adres içeriksiz eski sayfa olur. Araç staging'e istek atmaz. Sayılara (eski sayfa sayısı, korunan oran) girmez. |
 | 301 haritası | Satır "İçerik yok" etiketi taşır. Öneri sadece adres benzerliğidir (title, H1 ve içerik yok). Kontrol edip karar verin. |
 | Canlı doğrulama | Araç adresi canlı alan adında ister. Açılıyor veya tek adımda yönleniyorsa Tamam. Hata veriyorsa: listede trafik varsa Kritik "Kayıp sayfa", yoksa Kontrol edilemedi "Eski sitede var mıydı bilinmiyor" (liste bozuk olabilir). Eşik: `rules.json` → `urlList.lateProof`. |
+
+### Eski sitede yönlenen adres
+
+Eski site bir adresi başka adrese yönlendiriyorsa (`/indirim → /kampanya`), canlıdan sonra eski sunucu kuralları kalmaz ve adres 404 verir. Araç bu adres için 301 haritasına satır ekler. Satır son hedefin yeni adresine tek adımda gider (`/indirim → /yeni/kampanya`, zincir yok). Kaynak: eski taramada link ile bulunan yönlendirme ve listedeki yönlenen adres. Yönlenen adres eski sayfa sayılmaz.
+
+| Son hedefin durumu | Satır |
+|---|---|
+| Kural, onaylı karar veya yeni sitede aynı yolda | 301 → hedefin canlı adresi ("İzliyor"). CSV kaynağı "Eski yönlendirme" |
+| 410 kararı | 410 |
+| Karar yok veya kontrol edilemedi | "Bekliyor". Hedef karar alınca satır da değişir. Ayrıca karar saymaz |
+| Ana sayfa | 301 → ana sayfa, soft 404 uyarısı ile |
+| Eski sayfa değil (linksiz hedef, dosya) | Hedefin adresinden öneri. Onay bekler |
+| Başka alan adı | Aynı dış adres önerilir. Onay bekler. Staging alan adı ise öneri yok |
+| Eski sitede hata veriyor | Satır yok. Liste "Yönleniyor · hedef hata" der |
+| Yeni sitede aynı adreste sayfa var | Satır yok |
+
+Satır kendi kararını saklamaz. Hedefin kararı değişince satır da değişir. "Başka adres seç" ile satıra kendi kararınızı verirsiniz. "Geri al" satırı tekrar izlemeye döndürür. Staging taraması bu adresi yönlendirme olarak bulduysa satır "Staging'de kurulu" veya "Staging başka adrese gidiyor" der. Yapılacaklar'da satır sunucu işidir ("301 kurun"). Canlı doğrulamada beklenen hedef tek adımdır. Onaylı dış adres canlıda Location ile karşılaştırılır: araç dış alan adına istek atmaz ("301 doğru · dış hedef").
 
 Liste müşteri verisidir. Sunucuda `crawls/projects/lists/` klasöründe durur ve depoya girmez. "Projeyi indir" listeyi (adres ve trafik) taşır. Sayfa içeriği taşınmaz.
 
@@ -335,7 +352,7 @@ Durum: komut hazır. Gerçek sitelerdeki ilk ölçüm bekliyor.
 
 ### Testler
 
-`npm test` on iki test dosyası çalıştırır. Testler internete çıkmaz: yerel test siteleri kullanır.
+`npm test` on üç test dosyası çalıştırır. Testler internete çıkmaz: yerel test siteleri kullanır.
 
 | Test | Kontrol | Kapsam |
 |---|---|---|
@@ -351,6 +368,7 @@ Durum: komut hazır. Gerçek sitelerdeki ilk ölçüm bekliyor.
 | Doğrulama | 8 | CSV okuyucu, referans sütunları, alan karşılaştırması |
 | Canlı doğrulama | 12 | Bozuk ve temiz canlı site. Her sonuç türü, SSRF, kontrol sınırı. Temiz canlı site hiçbir iş üretmemeli. |
 | Eski adres listesi | 30 | Search Console (TR, EN), Analytics, backlink ve düz liste okuma, temizlik, birleştirme, linksiz sayfanın eski sitede bulunması, sadece eski siteye istek, trafik sırası (301 haritası, Yapılacaklar, Canlıya çıkış, Canlı doğrulama), Excel, proje dosyası, karar korunur, çıkıştan sonra eski siteye ve staging'e istek yok, çıkıştan sonra gelen adres canlıda kontrol edilir (kanıtlı ve kanıtsız). Örnek CSV test içinde üretilir. |
+| Eski yönlendirme | 13 | Yönlendirme verisi (aynı yol, dış adres, kırık hedef, zincir), tarama ve listeden gelen yönlendirme, hedefin kararını izleme (301, 410, bekler, kendi kararı ve geri alma), ana sayfa uyarısı, dış adres ve staging adresi, staging durumu, Yapılacaklar, CSV ve Excel, liste değişince karar kalır, canlı doğrulama beklentisi, staging'e ve çıkıştan sonra eski siteye istek yok |
 
 Kurallar:
 
@@ -383,14 +401,14 @@ Tamamlanan:
 - Taşıma projesi: eşleştirme, 301 haritası, yapılacaklar, canlıya çıkış listesi, canlı doğrulama
 - Kod incelemesi ve güvenlik düzeltmeleri, doğrulama komutu
 - Eski adres listesi (dosya ile): linksiz eski sayfaları bulma, bütün listeler trafiğe göre sıralı, çıkıştan sonra gelen adresler canlı doğrulamada
+- Eski sitede yönlenen adres için 301: son hedefin yeni adresine tek adım
 
 Sıradaki işler (sıra ile):
 
 1. Doğrulama: üç gerçek taramada Screaming Frog ile karşılaştırma
-2. Eski sitede yönlenen adres için 301 önerisi (`/indirim → /kampanya`: son hedefin yeni adresine 301)
-3. JavaScript render (Playwright)
-4. Paylaşılabilir rapor ve ClickUp işi
-5. Canlıdan sonra izleme (1, 7 ve 30 gün)
+2. JavaScript render (Playwright)
+3. Paylaşılabilir rapor ve ClickUp işi
+4. Canlıdan sonra izleme (1, 7 ve 30 gün)
 
 Sonra konuşulacak: AI önerileri (title, meta, alt metin, anlam benzerliği ile 301 eşleştirme), Core Web Vitals.
 

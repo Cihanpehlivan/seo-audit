@@ -48,6 +48,7 @@ const R = {
   'error': ['unknown', 'İstenemedi', 'Bağlantı hatası veya zaman aşımı. Sonra tekrar kontrol edin.'],
   'limit': ['unknown', 'Kontrol sınırı', 'Yayın modunda kontrol edilen adres sayısı sınırlıdır. Kalan adresleri yerel kurulumda kontrol edin.'],
   'ok-301': ['ok', '301 doğru', ''],
+  'ok-left': ['ok', '301 doğru · dış hedef', 'Yönlendirme beklenen dış adrese gidiyor. Araç başka alan adına istek atmaz: hedefin açıldığını kontrol etmedi.'],
   'ok-410': ['ok', '410 doğru', ''],
   'ok-200': ['ok', 'Aynı adreste açılıyor', ''],
   'ok-open': ['ok', 'Haritada karar yok, sayfa açılıyor', 'Adres açılıyor veya tek adımda yönleniyor. Haritada karar verin: liste sonra da doğru kalsın.'],
@@ -63,13 +64,14 @@ const ORDER = Object.keys(R);
 // (yayin.maxUrls) then leaves the pages with less traffic unchecked.
 // v0.12.1: a late page (old address list, never asked on the old site) gets late: true and proof (the list has a number
 // at or over urlList.lateProof). An open late row that fails on the live site is "Kayıp sayfa" only with proof.
-export function expectedList({ oldRes, newList, sites, rules = [], live = {}, decisions = {}, cfg = {}, traffic = null }) {
+// redirects (v0.12.2): old redirects of the old site (src/urllist.js → oldRedirects). Their 301 map rows join the list.
+export function expectedList({ oldRes, newList, sites, rules = [], live = {}, decisions = {}, cfg = {}, traffic = null, redirects = [] }) {
   const cmp = compareCrawls(oldRes, newList, { rules, live });
   // Without requests a moved page whose target is in the crawl stays in "moving": it is a rule row of the map.
   // Without the target in the crawl the map suggests a page (the same as the matching screen before the 301 exists).
   for (const r of cmp.rows.moving) (r.pendingTarget ? cmp.rows.moved : cmp.rows.notarget).push(r);
   cmp.rows.moving = [];
-  const map = buildRedirectMap(cmp, oldRes, sites, decisions, cfg.redirectMap || {}, traffic);
+  const map = buildRedirectMap(cmp, oldRes, sites, decisions, cfg.redirectMap || {}, traffic, { redirects, staging: cfg });
   const noLive = new Set(sites.filter((s) => !s.liveOrigin).map((s) => s.key));
   const byStagingHost = new Map(sites.map((s) => [bare(s.host), s]));
   const mapRow = new Map(map.rows.map((r) => [r.path, r]));
@@ -116,6 +118,21 @@ export function expectedList({ oldRes, newList, sites, rules = [], live = {}, de
     if (unknown.has(path)) { rows.push({ ...base, expect: 'open', src: p.late ? 'Karar yok · liste' : 'Karar yok' }); continue; }
     // The page is on the heir at the same path: the live old domain gives the page itself.
     rows.push({ ...base, expect: '200', src: 'Aynı adres' });
+  }
+  // v0.12.2: old redirects. The row expects the new address of its target in one step (or 410). A row that waits
+  // for the target's decision has no expectation yet: as an old page without a decision (404 = lost page).
+  for (const r of map.rows.filter((x) => x.kind === 'follow')) {
+    if (seen.has(r.path)) continue;
+    seen.add(r.path);
+    const base = { path: r.path, oldUrl: r.oldUrl, redirect: true };
+    if (r.status === 'gone' || (r.status === 'follow' && r.gone)) { rows.push({ ...base, expect: '410', src: r.status === 'gone' ? '410' : 'Eski yönlendirme · 410' }); continue; }
+    if ((r.status === 'follow' || r.status === 'approved') && r.target) {
+      const src = r.status === 'follow' ? 'Eski yönlendirme' : r.decision?.src === 'elle' ? 'Elle' : 'Onay';
+      const site = r.target.site || null;
+      rows.push({ ...base, expect: '301', src, site, target: site && noLive.has(site) ? null : r.target.url, noLive: !!(site && noLive.has(site)) });
+      continue;
+    }
+    rows.push({ ...base, expect: 'open', src: 'Karar yok · eski yönlendirme', hint: r.target?.url || r.hint || '' });
   }
   if (traffic) for (const r of rows) { const t = traffic.get(r.path); if (t) r.traffic = trafficOf(t); }
   return { rows: sortByTraffic(rows), map };
@@ -182,6 +199,8 @@ export function classify(e, f, isStg) {
   // A redirect.
   if (f.left) {
     if (isStg(hostName(f.left))) return 'to-staging';
+    // v0.12.2: the expected target is on another domain (an old redirect to an outside address, approved in the map).
+    if (e.expect === '301' && e.target && sameUrl(f.left, e.target) && f.chain.length === 1) return [301, 308].includes(first) ? 'ok-left' : 'temp';
     return 'outside';
   }
   if (f.loop) return 'target-bad';
