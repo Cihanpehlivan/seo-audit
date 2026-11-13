@@ -170,7 +170,7 @@ function siteRows(ck) {
 }
 
 // Comparison of two crawls (old site vs new site) as an Excel file.
-export async function exportCompareExcel(cmp, file, { map, todo, launch, siteNames = {} } = {}) {
+export async function exportCompareExcel(cmp, file, { map, todo, launch, verify, siteNames = {} } = {}) {
   const wb = new ExcelJS.Workbook();
   const s = cmp.summary;
   const targets = cmp.targets || [cmp.new];
@@ -225,6 +225,28 @@ export async function exportCompareExcel(cmp, file, { map, todo, launch, siteNam
       { header: 'Grup', key: 'group', width: 30 }, { header: 'Site', key: 'site', width: 30 }, { header: 'Ekip', key: 'team', width: 10 },
       { header: 'İş', key: 'task', width: 36 }, { header: 'Tür', key: 'what', width: 20 }, { header: 'Adres', key: 'page', width: 60 },
       { header: 'Değer', key: 'value', width: 60 }, { header: 'Not', key: 'note', width: 70 }, { header: 'Durum', key: 'state', width: 10 },
+    ], rows);
+  }
+  // v0.11.0: live check. One row per address. Redirect rows: expected and live answer. Site rows: type and value.
+  if (verify) {
+    const TYPE = { '301': '301', '410': '410', '200': 'Aynı adres (200)', open: 'Karar yok' };
+    const rows = [];
+    for (const g of verify.groups) {
+      for (const it of g.items) {
+        const base = { group: g.title, task: it.title, site: it.site ? siteNames[it.site] || it.site : '', team: it.team, note: it.note, state: it.info ? 'Bilgi' : '' };
+        if (!it.list.length) rows.push(base);
+        for (const x of it.list) {
+          rows.push(it.listKind === 'redirect'
+            ? { ...base, type: TYPE[x.type] || '', addr: x.old, expect: x.expect, got: x.got, final: x.final, src: x.src }
+            : { ...base, type: x.what, addr: x.page, got: x.value });
+        }
+      }
+    }
+    sheet(wb, 'Canlı doğrulama', [
+      { header: 'Grup', key: 'group', width: 18 }, { header: 'İş', key: 'task', width: 36 }, { header: 'Site', key: 'site', width: 28 },
+      { header: 'Ekip', key: 'team', width: 10 }, { header: 'Tür', key: 'type', width: 18 }, { header: 'Adres', key: 'addr', width: 60 },
+      { header: 'Beklenen', key: 'expect', width: 55 }, { header: 'Canlıda', key: 'got', width: 40 }, { header: 'Son adres', key: 'final', width: 55 },
+      { header: 'Kaynak', key: 'src', width: 22 }, { header: 'Not', key: 'note', width: 70 }, { header: 'Durum', key: 'state', width: 10 },
     ], rows);
   }
   const yn = (b) => (b ? 'Evet' : 'Hayır');

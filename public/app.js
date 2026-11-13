@@ -485,11 +485,12 @@ loadInfo();
 // Steps: Proje → Tarama → Eşleştirme → 301 haritası → Yapılacaklar. One "next task" card on every step.
 // v0.8.0: the 301 map comes before Yapılacaklar, because the work list depends on the map.
 // v0.10.0: Canlıya çıkış (launch list from the staging crawls) is active.
+// v0.11.0: Canlı doğrulama (live check after launch) is active. No step is "later" now.
 const STEPS = [
   ['proje', 'Proje'], ['tarama', 'Tarama'], ['eslestirme', 'Eşleştirme'], ['harita', '301 haritası'], ['yapilacaklar', 'Yapılacaklar'],
-  ['canliya', 'Canlıya çıkış'], ['dogrulama', 'Canlı doğrulama', true],
+  ['canliya', 'Canlıya çıkış'], ['dogrulama', 'Canlı doğrulama'],
 ];
-const PANES = { proje: 'stepProje', tarama: 'stepTarama', eslestirme: 'stepEslestirme', harita: 'stepHarita', yapilacaklar: 'stepYapilacaklar', canliya: 'stepCanliya' };
+const PANES = { proje: 'stepProje', tarama: 'stepTarama', eslestirme: 'stepEslestirme', harita: 'stepHarita', yapilacaklar: 'stepYapilacaklar', canliya: 'stepCanliya', dogrulama: 'stepDogrulama' };
 const MATCH_STEPS = ['eslestirme', 'harita', 'yapilacaklar', 'canliya'];
 const ROLE = { old: 'Eski site', heir: 'Eski alan adına geçecek site', extra: 'Ek site' };
 const HELP = {
@@ -501,7 +502,7 @@ const HELP = {
   root: 'Ana sayfa, kökteki sayfalar ve az sayfalı bölümler. Satırı açın ve sayfaları görün.',
 };
 const prj = { id: null, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, loading: false, step: 'proje', poll: null, saveTimer: null, openSecs: new Set(),
-  mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100, mapSaving: false };
+  mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100, mapSaving: false, vf: null, vfKey: '', vfErr: null, vfLoading: false };
 let projectList = [];
 const help = (text) => `<details class="q"><summary aria-label="Açıklama">?</summary><p>${esc(text)}</p></details>`;
 const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
@@ -556,7 +557,7 @@ $('#prjUpload2').addEventListener('change', (e) => { if (e.target.files[0]) uplo
 async function openProject(id, step) {
   currentId = null; es?.close();
   show('projectView');
-  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, openSecs: new Set(), mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100 });
+  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, openSecs: new Set(), mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100, vf: null, vfKey: '', vfErr: null });
   prj.step = PANES[step] ? step : prj.step && prj.id === id ? prj.step : null;
   loadHistory();
   try { Object.assign(prj, await api(`/api/projects/${encodeURIComponent(id)}`)); }
@@ -571,6 +572,7 @@ async function openProject(id, step) {
   renderProject();
   watchCrawls();
   if (MATCH_STEPS.includes(prj.step)) loadMatch();
+  if (prj.step === 'dogrulama') loadVerify();
 }
 // A new project opens on "Proje". A project with crawls opens where the work is.
 function firstStep() {
@@ -585,7 +587,7 @@ function renderProject() {
   $('#prjName').textContent = p.name;
   const last = Object.values(prj.status).map((x) => x.startedAt).filter(Boolean).sort().pop();
   const dayDiff = last ? Math.floor((Date.now() - new Date(last)) / 864e5) : null;
-  $('#prjSummary').textContent = `${p.sites.length} site · ${p.rules.length} kural · ${last ? `son tarama ${dayDiff === 0 ? 'bugün' : dayDiff === 1 ? 'dün' : fmtDate(last)}` : 'tarama yok'}`;
+  $('#prjSummary').textContent = `${p.sites.length} site · ${p.rules.length} kural · ${last ? `son tarama ${dayDiff === 0 ? 'bugün' : dayDiff === 1 ? 'dün' : fmtDate(last)}` : 'tarama yok'}${p.launch ? ` · canlıya çıktı ${fmtDay(p.launch.at)}` : ''}`;
   const state = stepStates();
   $('#prjSteps').innerHTML = STEPS.map(([k, name, later], i) => later
     ? `${STEPS[i - 1][2] ? '' : '<li class="later-h" aria-hidden="true">Sonraki sürüm</li>'}<li><span class="step later" title="Sonraki sürüm"><i>${i + 1}</i>${name}<span class="sr"> (sonraki sürüm)</span></span></li>`
@@ -599,6 +601,7 @@ function renderProject() {
   if (prj.step === 'harita') renderMap();
   if (prj.step === 'yapilacaklar') renderTodo();
   if (prj.step === 'canliya') renderLaunch();
+  if (prj.step === 'dogrulama') renderVerify();
   $('#prjSteps').querySelector('[aria-current="step"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 $('#prjSteps').addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b) goStep(b.dataset.step); });
@@ -617,6 +620,7 @@ function stepStates() {
     out.yapilacaklar = workCount() ? 'todo' : 'done';
     if (prj.match.launch) out.canliya = prj.match.launch.total ? 'todo' : 'done';
   }
+  if (p.launch && prj.vf) out.dogrulama = prj.vf.total ? 'todo' : 'done';
   return out;
 }
 
@@ -628,9 +632,11 @@ function nextTask() {
   if (!old.url) return { text: 'Eski sitenin adresini yazın. Araç önce bu siteyi tarar.', btn: 'Siteleri yazın', act: { step: 'proje', focus: 'old' } };
   if (!heir.url) return { text: 'Eski alan adına geçecek sitenin adresini yazın. Staging adresi olabilir.', btn: 'Adresi yazın', act: { step: 'proje', focus: 'heir' } };
   if (p.structure === 'domains' && !extras.some((s) => s.url)) return { text: 'Diller ayrı alan adlarına taşınıyor. Ek siteyi ve adresini yazın.', btn: 'Ek siteyi yazın', act: { step: 'proje', addSite: !extras.length, focus: extras[0]?.key } };
+  if (prj.step === 'dogrulama') return verifyTask();
   const running = p.sites.find((s) => st[s.key]?.state === 'running');
   if (running) return { text: `${siteName(running)} taranıyor. ${st[running.key].done} URL tarandı.`, btn: 'Taramayı izle', act: { live: st[running.key].jobId } };
-  for (const s of [old, heir, ...extras].filter((x) => x.url)) {
+  // v0.11.0: after launch the crawls before launch are locked. The card does not ask for them.
+  for (const s of [old, heir, ...extras].filter((x) => x.url && !p.launch)) {
     const x = st[s.key];
     if (x.state === 'none') return { text: `${siteName(s)} taranmadı.${s.role === 'extra' ? '' : ' Eşleştirme için gerekli.'}${x.error ? ` Son deneme hata verdi: ${x.error}` : ''}`, btn: `${siteName(s, true)} tara`, act: { crawl: s.key } };
     if (x.state === 'deleted') return { text: `${siteName(s)} taraması silinmiş. Proje tanımı duruyor. Tekrar tarayın.`, btn: 'Tekrar tara', act: { crawl: s.key } };
@@ -715,6 +721,10 @@ $('#prjNext').addEventListener('click', async (e) => {
     return;
   }
   if (a.reload) { prj.matchKey = ''; loadMatch(); return; }
+  if (a.launch) { $('#vfDate')?.focus(); return; }
+  if (a.crawlLive) { startLiveCrawl(a.crawlLive); return; }
+  if (a.verifyFresh) { loadVerify(true); return; }
+  if (a.vfOpen) { vfState.open = a.vfOpen; renderVerify(); setTimeout(() => document.querySelector(`[data-vf="${CSS.escape(a.vfOpen)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); return; }
   if (a.addSite) addSite();
   if (a.open) { lnState.open = a.open; renderLaunch(); setTimeout(() => document.querySelector(`[data-ln="${CSS.escape(a.open)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); return; }
   if (a.settings) setTimeout(() => { document.querySelector('#stepTarama details').open = true; $('#crawlAuth').focus(); });
@@ -808,14 +818,18 @@ let crawlHistory = [];
 async function renderCrawls() {
   try { crawlHistory = (await api('/api/crawls')).history; } catch {}
   const p = prj.project;
-  $('#prjCrawls').innerHTML = p.sites.map((s) => {
+  // v0.11.0: after launch the old domain serves the new site. A new crawl of the old site would lose the old pages.
+  const lockNote = p.launch ? `<p class="note small vf-lock">Site ${esc(fmtDay(p.launch.at))} tarihinde canlıya çıktı. Bu taramalar çıkıştan önceki hali tutar ve kilitlidir. Eski site taraması tekrar yapılmaz. Canlı taramalar Canlı doğrulama adımındadır.</p>` : '';
+  $('#prjCrawls').innerHTML = lockNote + p.sites.map((s) => {
     const x = prj.status[s.key] || { state: 'none' };
     const [label, cls] = STATE[x.state];
     const host = siteHost(s);
     const tag = x.state === 'done' ? `${label} · ${x.pages} sayfa` : x.state === 'running' ? `${label} · ${x.done} URL` : label;
     const warnTag = x.state === 'done' && x.pages && !x.ok ? '<span class="tag-s warn">Açılan sayfa yok</span>' : x.state === 'done' && x.limitReached ? '<span class="tag-s warn">URL limiti</span>' : '';
     const same = crawlHistory.filter((h) => host && bare(h.host) === bare(host) && h.id !== x.crawlId);
-    const btn = !s.url ? `<button type="button" class="ghost small" data-goto-proje>Adresi yazın</button>`
+    const locked = !!p.launch && x.state !== 'running';
+    const btn = locked ? `<span class="tag-s idle" title="Canlıya çıkıştan sonra kilitli">Kilitli</span>`
+      : !s.url ? `<button type="button" class="ghost small" data-goto-proje>Adresi yazın</button>`
       : x.state === 'running' ? `<a class="ghost small" href="#/live/${esc(x.jobId)}">İzle</a>`
       : `<button type="button" class="ghost small${x.state === 'done' ? '' : ' strong'}" data-crawl="${esc(s.key)}">${x.state === 'done' ? 'Tekrar tara' : 'Tara'}</button>`;
     return `<div class="crawl-row" data-site="${esc(s.key)}">
@@ -823,7 +837,7 @@ async function renderCrawls() {
       <div class="crawl-state"><span class="tag-s ${cls}">${esc(tag)}</span>${warnTag}
         ${x.startedAt ? `<span class="small">${esc(fmtDate(x.startedAt))}</span>` : ''}${x.error ? `<span class="small flag">Son deneme: ${esc(x.error)}</span>` : ''}
         ${x.crawlId && x.state === 'done' ? `<a class="small" href="#/crawl/${esc(x.crawlId)}">Sorunları aç</a>` : ''}</div>
-      <div class="crawl-act">${btn}${same.length && x.state !== 'running' ? `<label class="sr" for="link-${esc(s.key)}">Var olan taramayı bağla</label>
+      <div class="crawl-act">${btn}${same.length && x.state !== 'running' && !locked ? `<label class="sr" for="link-${esc(s.key)}">Var olan taramayı bağla</label>
         <select id="link-${esc(s.key)}" data-link="${esc(s.key)}"><option value="">Var olan tarama…</option>${same.map((h) => `<option value="${esc(h.id)}">${esc(fmtDate(h.startedAt))} · ${h.summary.total} URL</option>`).join('')}</select>` : ''}</div>
     </div>`;
   }).join('');
@@ -854,15 +868,18 @@ $('#prjCrawls').addEventListener('change', async (e) => {
 // While a crawl runs, the project screen asks the server every 2 seconds.
 function watchCrawls() {
   clearTimeout(prj.poll);
-  const running = Object.values(prj.status || {}).some((x) => x.state === 'running');
+  const isRun = (x) => x.state === 'running' || x.live?.state === 'running';
+  const running = Object.values(prj.status || {}).some(isRun);
   if (!running) return;
   prj.poll = setTimeout(async () => {
     if ($('#projectView').hidden) return;
     try {
       const d = await api(`/api/projects/${prj.id}`);
       const finished = Object.keys(d.status).some((k) => prj.status[k]?.state === 'running' && d.status[k].state !== 'running');
+      const liveDone = Object.keys(d.status).some((k) => prj.status[k]?.live?.state === 'running' && d.status[k].live?.state !== 'running');
       Object.assign(prj, d);
       if (finished) { prj.match = null; prj.matchKey = ''; loadHistory(); }
+      if (liveDone) { prj.vfKey = ''; loadHistory(); if (prj.step === 'dogrulama') loadVerify(); }
       renderProject();
     } catch {}
     watchCrawls();
@@ -887,17 +904,20 @@ async function loadMatch() {
 const fmtClock = (iso) => new Date(iso).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 function renderRecheck() {
   const el = $('#prjRecheck');
-  const at = prj.match?.checkedAt;
-  el.hidden = !(MATCH_STEPS.includes(prj.step) && at);
+  // v0.11.0: on Canlı doğrulama the line shows the live check (the old addresses on the live domain).
+  const vfStep = prj.step === 'dogrulama';
+  const at = vfStep ? prj.vf?.checkedAt : prj.match?.checkedAt;
+  el.hidden = !((MATCH_STEPS.includes(prj.step) || vfStep) && at);
   if (el.hidden) return;
   const today = new Date(at).toDateString() === new Date().toDateString();
   el.innerHTML = `<span>Son adres kontrolü: ${esc(today ? `bugün ${fmtClock(at)}` : fmtDate(at))}</span>
-    ${help(TERMS.recheck)}
-    <button type="button" class="ghost small" id="recheckBtn"${prj.rechecking ? ' disabled' : ''}>${prj.rechecking ? 'Kontrol ediyor…' : 'Tekrar kontrol et'}</button>
+    ${help(vfStep ? TERMS.vfRecheck : TERMS.recheck)}
+    <button type="button" class="ghost small" id="recheckBtn"${prj.rechecking || prj.vfLoading ? ' disabled' : ''}>${prj.rechecking || prj.vfLoading ? 'Kontrol ediyor…' : 'Tekrar kontrol et'}</button>
     ${prj.recheckErr ? `<span class="recheck-err" role="alert">${esc(prj.recheckErr)}</span>` : ''}`;
 }
 $('#prjRecheck').addEventListener('click', async (e) => {
   if (!e.target.closest('#recheckBtn') || prj.rechecking || prj.loading) return;
+  if (prj.step === 'dogrulama') { loadVerify(true); return; }
   const id = prj.id;
   prj.rechecking = true; prj.recheckErr = null;
   renderRecheck();
@@ -1238,6 +1258,7 @@ $('#mapRows').addEventListener('click', (e) => {
 // One card per place: the old domain's server, each new site, content, decisions. Every term has a "?" text.
 // All help texts live here, so the same term has the same text on every screen.
 const TERMS = {
+  vfRecheck: 'Araç her eski adresi canlı alan adında ister ve yanıtı bir süre saklar. 301 kurduysanız "Tekrar kontrol et" düğmesine basın. Canlı site ayarları canlı taramadan gelir: site kartında "Tekrar tara" düğmesine basın.',
   recheck: 'Araç her eski adresi yeni sitede ister ve yanıtı bir süre saklar. Sunucuda 301 kurduysanız "Tekrar kontrol et" düğmesine basın. Araç adresleri tekrar ister. Yeni tarama gerekmez.',
   server: 'Canlıdan sonra eski alan adını kullanan sunucu. Eski adreslerin bütün 301 ve 410 yanıtları burada kurulur. Ayrı alan adına taşınan sayfaların 301\'i de buradadır.',
   heir: HELP.heir,
@@ -1434,6 +1455,212 @@ $('#lnGroups').addEventListener('click', (e) => {
   const c = e.target.closest('[data-recrawl]');
   if (c) { c.disabled = true; goStep('tarama'); startSiteCrawl(c.dataset.recrawl); }
 });
+
+// ---------- Step 7: Canlı doğrulama (v0.11.0): the live check after launch ----------
+// The launch mark writes the phase of the project. It changes no result: every result comes from a live request or a
+// live crawl. After the mark the crawls before launch are locked (the old domain serves the new site now).
+const fmtDay = (d) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+const VF_TERMS = {
+  launch: 'Çıkış işareti projenin aşamasını yazar. Hiçbir kontrolün sonucunu değiştirmez. İşaretten sonra eski site ve staging taramaları kilitlenir: eski alan adı artık yeni siteyi sunar. Eski siteyi tekrar taramak eski sayfaları kaybettirir.',
+  list: 'Beklenen liste: 301 haritasındaki kararlar ve kurallar, staging\'de aynı adreste açılan sayfalar ve kararı olmayan sayfalar. Liste çıkış öncesi taramalardan gelir. Araç staging\'e istek atmaz.',
+  critical: 'Bu işler şu an trafik veya dizin kaybı yaratır. Hemen düzeltin.',
+  fix: 'Sayfa açılıyor ama doğru değil: zincir, geçici yönlendirme, yanlış hedef, eksik etiket veya sitemap hatası.',
+  unknown: 'Araç bu satırları kontrol edemedi. Bu satırlar tamam sayılmaz. Nedeni satırda yazılı.',
+  ok: 'Canlı istekte doğru çıkan adresler ve kontroller.',
+  site: 'Araç her siteyi canlı alan adında ayrıca tarar. Bu tarama staging taramasının yerini almaz. Staging ayarı, etiket ve sitemap kontrolü bu taramadan gelir.',
+  'ok-open': 'Haritada bu sayfa için karar yok. Adres canlıda açılıyor veya tek adımda yönleniyor. Kararı haritaya yazın: liste sonra da doğru kalsın.',
+  'live-noindex': LN_TERMS.noindex,
+  'live-disallow': LN_TERMS.disallow,
+  'live-staging-addr': LN_TERMS['staging-addr'],
+  'live-tracking': LN_TERMS.tracking,
+  'live-gsc': LN_TERMS.gsc,
+  chain: TERMS.fix, temp: TERMS.fix, no410: TERMS['410'],
+};
+const vfState = { open: null };
+const vfKey = (it) => `${it.kind}:${it.site || ''}`;
+const vfSiteName = (k) => (k === 'server' ? `${prj.vf?.oldHost || 'Eski alan adı'} sunucusu` : k === 'old' ? 'Eski site' : siteByKey(k) ? siteName(siteByKey(k)) : '');
+const todayIso = () => new Date().toLocaleDateString('sv');
+
+async function loadVerify(fresh = false) {
+  const p = prj.project;
+  if (!p?.launch) { prj.vf = null; renderProject(); return; }
+  const key = JSON.stringify([p.updatedAt, Object.values(prj.status || {}).map((x) => [x.crawlId, x.live?.crawlId, x.live?.state])]);
+  if (!fresh && prj.vf && prj.vfKey === key) { renderProject(); return; }
+  if (prj.vfLoading) return;
+  const id = prj.id;
+  prj.vfLoading = true; prj.vfErr = null;
+  renderProject();
+  try {
+    const v = await api(`/api/projects/${id}/verify${fresh ? '?fresh=1' : ''}`);
+    if (prj.id === id) { prj.vf = v; prj.vfKey = key; }
+  } catch (e) { if (prj.id === id) prj.vfErr = e.message; }
+  finally { prj.vfLoading = false; }
+  if (prj.id === id) renderProject();
+}
+async function startLiveCrawl(key, btn) {
+  prj.vfErr = null;
+  try {
+    await api(`/api/projects/${prj.id}/crawl`, { method: 'POST', body: JSON.stringify({ site: key, live: true, options: { maxUrls: $('#crawlMax').value } }) });
+    Object.assign(prj, await api(`/api/projects/${prj.id}`));
+    renderProject();
+    watchCrawls();
+  } catch (e) { prj.vfErr = e.message; if (btn) btn.disabled = false; renderProject(); }
+}
+async function markLaunch(on, btn) {
+  if (!on && !confirm('Çıkış işareti kaldırılsın mı? Kilit kalkar. Eski siteyi tekrar taramayın: eski alan adı artık yeni siteyi sunar.')) return;
+  btn.disabled = true; prj.vfErr = null;
+  try {
+    const d = on ? await api(`/api/projects/${prj.id}/launch`, { method: 'POST', body: JSON.stringify({ at: $('#vfDate')?.value || todayIso() }) })
+      : await api(`/api/projects/${prj.id}/launch`, { method: 'DELETE' });
+    Object.assign(prj, d);
+    prj.vf = null; prj.vfKey = '';
+    if (on) loadVerify(); else renderProject();
+  } catch (e) { prj.vfErr = e.message; btn.disabled = false; renderProject(); }
+}
+
+const vfBtn = (it) => (it.action?.type === 'project' ? { btn: 'Projeyi açın', act: { step: 'proje', focus: it.action.site, focusField: 'live' } }
+  : it.action?.type === 'crawl-live' ? { btn: `${siteName(siteByKey(it.action.site), true)} canlıda tara`, act: { crawlLive: it.action.site } }
+  : it.action?.type === 'watch' ? { btn: 'Taramayı izle', act: { live: it.action.jobId } }
+  : { btn: 'Listeyi açın', act: { vfOpen: vfKey(it) } });
+function verifyTask() {
+  const p = prj.project, V = prj.vf, st = prj.status;
+  if (!p.launch) {
+    if (!isReady('old') || !isReady('heir')) return { text: 'Çıkıştan önce eski siteyi ve eski alan adına geçecek siteyi tarayın. Canlı doğrulama bu taramaları kullanır.', btn: 'Taramayı açın', act: { step: 'tarama' } };
+    return { text: 'Site canlıya çıktı mı? Çıkış gününü işaretleyin. Araç çıkış öncesi taramaları kilitler.', btn: 'Tarihi seçin', act: { launch: true } };
+  }
+  if (prj.vfLoading) return { text: 'Araç eski adresleri canlı alan adında istiyor.', btn: null };
+  if (prj.vfErr) return { text: prj.vfErr, btn: 'Tekrar dene', act: { verifyFresh: true } };
+  if (!V) return { text: 'Canlı doğrulama yükleniyor.', btn: null };
+  if (V.notSwitched) return { text: 'Eski adreslerin çoğu yönlenmiyor ve 200 veriyor. Eski alan adı hâlâ eski siteyi sunuyor olabilir. DNS geçişini kontrol edin, sonra tekrar kontrol edin.', btn: 'Tekrar kontrol et', act: { verifyFresh: true } };
+  const run = p.sites.find((s) => st[s.key]?.live?.state === 'running');
+  if (run) return { text: `${siteName(run)} canlıda taranıyor. ${st[run.key].live.done || 0} URL tarandı.`, btn: 'Taramayı izle', act: { live: st[run.key].live.jobId } };
+  const all = V.groups.flatMap((g) => g.items.map((it) => ({ ...it, group: g.key })));
+  const crit = all.filter((i) => i.group === 'critical');
+  if (crit.length) return { text: `${crit.length} kritik iş var. Önce: ${crit[0].title} (${vfSiteName(crit[0].site)}).`, ...vfBtn(crit[0]) };
+  const block = all.find((i) => ['nolive', 'live-nocrawl', 'live-stale'].includes(i.kind));
+  if (block) {
+    const name = vfSiteName(block.site);
+    const text = block.kind === 'nolive' ? `${name} sitesinin canlı alan adı yok. Bu site ve ona giden ${block.n} adres kontrol edilemez.`
+      : block.kind === 'live-stale' ? `${name} canlı taraması eski alan adına ait. Siteyi canlıda tekrar tarayın.`
+      : `Kritik iş yok. ${name} canlıda taranmadı. Staging ayarı, etiket ve sitemap kontrolü için gerekli.`;
+    return { text, ...vfBtn(block) };
+  }
+  const fix = all.filter((i) => i.group === 'fix' && !i.info);
+  if (fix.length) return { text: `Kritik iş yok. ${fix.length} düzeltme var. Önce: ${fix[0].title}. Excel her işi ekibi ile verir.`, btn: 'Excel indir', act: { excel: true } };
+  const unk = all.filter((i) => i.group === 'unknown' && i.kind !== 'live-running');
+  if (unk.length) return { text: `Kritik iş yok. ${unk.length} kontrol yapılamadı: ${unk[0].title}. Bu satırlar tamam sayılmaz.`, ...vfBtn(unk[0]) };
+  return { text: 'Taşıma doğrulandı. 301 listesi ve canlı siteler doğru.', btn: 'Excel indir', act: { excel: true } };
+}
+
+function launchBox() {
+  const p = prj.project;
+  if (p.launch) {
+    return `<div class="vf-launched"><span>Çıkış: <b>${esc(fmtDay(p.launch.at))}</b>. Çıkış öncesi taramalar kilitli.</span>${help(VF_TERMS.launch)}
+      <button type="button" class="ghost small" id="vfUnmark">Çıkış işaretini kaldır</button></div>`;
+  }
+  const ready = isReady('old') && isReady('heir');
+  return `<section class="place vf-launch">
+    <header><span class="ptitle"><b>Canlıya çıkış</b>${help(VF_TERMS.launch)}</span></header>
+    <p class="note">Site canlıya çıktı mı? Çıkış gününü seçin ve işaretleyin.${ready ? '' : ' Önce eski siteyi ve eski alan adına geçecek siteyi tarayın.'}</p>
+    <ul class="vf-points small">
+      <li>Eski site ve staging taramaları kilitlenir. Eski site taraması çıkıştan önceki hali tutar.</li>
+      <li>301 listesi bu taramalardan ve haritadaki kararlardan çıkar. Araç staging'e istek atmaz.</li>
+      <li>Araç her eski adresi canlı alan adında ister. Her siteyi canlıda ayrıca tarar.</li>
+      <li>İşareti geri alabilirsiniz. Kilit kalkar.</li>
+    </ul>
+    <div class="vf-form"><label>Çıkış günü<input type="date" id="vfDate" value="${esc(todayIso())}"></label>
+      <button type="button" class="ghost strong" id="vfMark">Canlıya çıktık</button></div>
+  </section>`;
+}
+const VF_STATE = { done: ['ok', ''], none: ['idle', 'Canlıda taranmadı'], running: ['run', ''], deleted: ['idle', 'Canlı tarama silinmiş'], stale: ['warn', 'Alan adı değişti'], nolive: ['warn', 'Kontrol edilemez'] };
+function vfCard(c) {
+  const s = siteByKey(c.key), x = prj.status[c.key]?.live || {};
+  const [cls, label] = VF_STATE[c.state] || VF_STATE.none;
+  const tag = c.state === 'done' ? `Canlı tarama · ${c.pages} sayfa` : c.state === 'running' ? `Taranıyor · ${x.done || 0} URL` : label;
+  const btn = c.state === 'nolive' ? `<button type="button" class="ghost small" data-vfproject="${esc(c.key)}">Projeyi açın</button>`
+    : c.state === 'running' ? `<a class="ghost small" href="#/live/${esc(x.jobId || '')}">İzle</a>`
+    : `<button type="button" class="ghost small${c.state === 'done' ? '' : ' strong'}" data-livecrawl="${esc(c.key)}">${c.state === 'done' ? 'Tekrar tara' : 'Canlıda tara'}</button>`;
+  return `<div class="vf-card"><div class="vf-card-h"><b>${esc(siteName(s))}</b><span class="small">${c.liveHost ? `Canlı: ${esc(c.liveHost)}` : 'Canlı alan adı yok'}</span></div>
+    <div class="vf-card-s"><span class="tag-s ${cls}">${esc(tag)}</span>${c.startedAt && c.state === 'done' ? `<span class="small">${esc(fmtDate(c.startedAt))}</span>` : ''}
+      ${x.error ? `<span class="small flag">Son deneme: ${esc(x.error)}</span>` : ''}${x.crawlId && c.state === 'done' ? `<a class="small" href="#/crawl/${esc(x.crawlId)}">Sorunları aç</a>` : ''}</div>
+    <div class="vf-card-a">${btn}</div></div>`;
+}
+function renderVerify() {
+  const p = prj.project, V = prj.vf;
+  $('#vfExcel').href = `/api/projects/${prj.id}/excel`;
+  $('#vfBusy').hidden = !prj.vfLoading;
+  $('#vfErr').textContent = !prj.vfLoading && prj.vfErr ? prj.vfErr : '';
+  $('#vfLaunch').innerHTML = launchBox();
+  const show = !!(p.launch && V);
+  $('#vfSitesH').hidden = !show; $('#vfFoot').hidden = !show;
+  if (!show) { for (const id of ['#vfSum', '#vfBar', '#vfSites', '#vfGroups']) $(id).innerHTML = ''; return; }
+  const r = V.redirects;
+  const tiles = [['Kritik', 'crit', V.counts.critical], ['Düzeltin', 'warn', V.counts.fix], ['Kontrol edilemedi', 'warn', V.counts.unknown]];
+  $('#vfSum').innerHTML = tiles.map(([label, cls, n]) => `<div class="ln-tile ${n ? cls : 'zero'}"><span>${label}</span><b>${n}</b></div>`).join('')
+    + `<div class="ln-tile ${r.total && r.ok === r.total ? 'good' : r.total ? '' : 'zero'}"><span>301 listesi tamam</span><b>${r.ok} / ${r.total}</b></div>`;
+  const seg = (k, cls) => (r[k] ? `<i class="${cls}" style="flex:${r[k]}"></i>` : '');
+  $('#vfBar').innerHTML = r.total ? `<div class="vf-bar" role="img" aria-label="${r.ok} tamam, ${r.fix} düzeltin, ${r.critical} kritik, ${r.unknown} kontrol edilemedi">${seg('ok', 'b-ok')}${seg('fix', 'b-fix')}${seg('critical', 'b-crit')}${seg('unknown', 'b-unk')}</div>
+    <div class="small vf-bar-t"><span>${r.total} eski adres · ${r.ok} tamam · ${r.fix} düzeltin · ${r.critical} kritik · ${r.unknown} kontrol edilemedi</span>${help(VF_TERMS.list)}</div>` : '';
+  const oldSite = p.sites.find((s) => s.role === 'old'), os = prj.status[oldSite.key] || {};
+  $('#vfSites').innerHTML = `<div class="vf-card"><div class="vf-card-h"><b>${esc(siteName(oldSite))}</b><span class="small">${esc(os.host || hostOfUrl(oldSite.url))}</span></div>
+      <div class="vf-card-s"><span class="tag-s idle">Kilitli</span>${os.startedAt ? `<span class="small">Çıkıştan önce · ${esc(fmtDate(os.startedAt))}</span>` : ''}</div>
+      <p class="small vf-card-n">Çıkıştan önceki hal. Tekrar taranmaz.</p></div>` + V.sites.map(vfCard).join('');
+  $('#vfGroups').innerHTML = V.groups.map((g) => {
+    if (g.key === 'ok' && !g.items.length) return '';
+    const n = V.counts[g.key];
+    const state = g.key === 'ok' ? `<span class="tag-s ok">${g.items.length} kontrol</span>` : n ? `<span class="tag-s ${g.key === 'critical' ? 'run' : 'warn'}">${n} iş</span>` : '<span class="tag-s ok">Sorun yok</span>';
+    return `<section class="place ln-group ln-${g.key === 'critical' ? 'critical' : g.key} vf-${g.key}">
+      <header><span class="ptitle"><b>${esc(g.title)}</b>${help(VF_TERMS[g.key])}</span>${g.sub ? `<span class="small role">${esc(g.sub)}</span>` : ''}${state}</header>
+      ${g.items.map(vfRow).join('')}</section>`;
+  }).join('');
+}
+function vfRow(it) {
+  const k = vfKey(it);
+  const tagCls = it.group === 'ok' ? 'ok' : it.info ? 'idle' : it.group === 'critical' ? 'run' : 'warn';
+  const count = it.info ? 'Bilgi' : it.unit === 'eksik' ? 'Eksik' : it.unit === 'bütün site' ? 'Bütün site' : it.n ? `${it.n}${it.unit ? ` ${it.unit}` : ''}` : '';
+  const detail = it.kind === 'live-staging-addr' && it.detail ? Object.entries(it.detail).map(([x, n]) => `${LN_DETAIL[x] || x} ${n}`).join(' · ')
+    : it.kind === 'live-noindex' && it.detail ? [it.detail.meta && `meta robots ${it.detail.meta}`, it.detail.header && `X-Robots-Tag ${it.detail.header}`].filter(Boolean).join(' · ') + ' sayfa' : '';
+  const site = it.site ? vfSiteName(it.site) : '';
+  const btns = [
+    it.list.length && !['live-tracking', 'live-gsc'].includes(it.kind) ? `<button type="button" class="ghost small" data-vfopen="${esc(k)}" aria-expanded="${vfState.open === k}">${vfState.open === k ? 'Listeyi kapat' : 'Listeyi aç'}</button>` : '',
+    it.action?.type === 'project' ? `<button type="button" class="ghost small" data-vfproject="${esc(it.action.site)}">Projeyi açın</button>` : '',
+    it.action?.type === 'crawl-live' ? `<button type="button" class="ghost small strong" data-livecrawl="${esc(it.action.site)}">Canlıda tara</button>` : '',
+    it.action?.type === 'watch' && it.action.jobId ? `<a class="ghost small" href="#/live/${esc(it.action.jobId)}">İzle</a>` : '',
+  ].filter(Boolean).join('');
+  const term = VF_TERMS[it.kind];
+  return `<div class="ln-row${it.info ? ' info' : ''}" data-vf="${esc(k)}">
+    <div class="ln-main"><b>${esc(it.title)}</b> ${term ? help(term) : ''}
+      <div class="ln-tags">${site ? `<span class="tag-s idle">${esc(site)}</span>` : ''}${it.team ? `<span class="tag-s idle team">${esc(it.team)}</span>` : ''}</div>
+      ${detail ? `<div class="small ln-detail">${esc(detail)}</div>` : ''}
+      ${it.note ? `<p class="small ln-note">${esc(it.note)}</p>` : ''}</div>
+    <div class="ln-side">${count ? `<span class="tag-s ${tagCls}">${esc(count)}</span>` : ''}</div>
+    ${btns ? `<div class="pact">${btns}</div>` : ''}
+    ${vfState.open === k ? vfList(it) : ''}</div>`;
+}
+function vfList(it) {
+  const max = prj.vf.listLimit || 200;
+  const shown = it.list.slice(0, max);
+  const head = it.list.length > max ? `<p class="small">${it.list.length} satır var. İlk ${max} satır görünüyor. Bütün liste Excel'de.</p>` : '';
+  const addr = (u) => (/^https?:\/\/\S+$/.test(u || '') ? cmpLink(u) : esc(u || '—'));
+  const table = it.listKind === 'redirect'
+    ? `<thead><tr><th>Eski adres</th><th>Beklenen</th><th>Canlıda</th><th>Kaynak</th></tr></thead><tbody>${shown.map((x) => `<tr><td class="u">${addr(x.old)}</td><td class="u">${addr(x.expect)}</td><td class="u">${esc(x.got || '—')}${x.final ? `<br>${addr(x.final)}` : ''}</td><td>${esc(x.src || '')}</td></tr>`).join('')}</tbody>`
+    : `<thead><tr><th>Tür</th><th>Adres</th><th>Değer</th></tr></thead><tbody>${shown.map((x) => `<tr><td>${esc(x.what)}</td><td class="u">${addr(x.page)}</td><td class="u">${addr(x.value)}</td></tr>`).join('')}</tbody>`;
+  return `<div class="plist">${head}<div class="table-wrap"><table>${table}</table></div></div>`;
+}
+$('#vfLaunch').addEventListener('click', (e) => {
+  const m = e.target.closest('#vfMark'); if (m) { markLaunch(true, m); return; }
+  const u = e.target.closest('#vfUnmark'); if (u) markLaunch(false, u);
+});
+function vfClick(e) {
+  const o = e.target.closest('[data-vfopen]');
+  if (o) { vfState.open = vfState.open === o.dataset.vfopen ? null : o.dataset.vfopen; renderVerify(); return; }
+  const c = e.target.closest('[data-livecrawl]');
+  if (c) { c.disabled = true; startLiveCrawl(c.dataset.livecrawl, c); return; }
+  const pj = e.target.closest('[data-vfproject]');
+  if (pj) { const k = pj.dataset.vfproject; goStep('proje'); setTimeout(() => document.querySelector(`[data-site="${CSS.escape(k)}"] [name=live]`)?.focus(), 80); }
+}
+$('#vfSites').addEventListener('click', vfClick);
+$('#vfGroups').addEventListener('click', vfClick);
 
 // ---------- All pages view (groups of the comparison) ----------
 const CMP_KINDS = [

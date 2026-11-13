@@ -23,7 +23,8 @@ scripts/dogrula.js      Doğrulama komutu (v0.10.2): `npm run dogrula -- <tarama
 src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal
 src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu (v0.7.1: her bölümün sayfa listesi). Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0)
 src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma), 301 haritası kararlarının temizliği
-src/launch.js           Canlıya çıkış listesi (v0.10.0): staging taramalarından kritik, karar, çıkışta değişecek ve kontrol işleri
+src/launch.js           Canlıya çıkış listesi (v0.10.0): staging taramalarından kritik, karar, çıkışta değişecek ve kontrol işleri. v0.11.0: ortak fonksiyonlar (makeIsStaging, stagingAddresses, indexBlockers, tagCheck) canlı doğrulama ile paylaşılır
+src/verify.js           Canlı doğrulama (v0.11.0): beklenen liste (istek yok), canlı istekler (sadece canlı alan adları), canlı tarama bulguları, gruplar (Kritik, Düzeltin, Kontrol edilemedi, Tamam)
 src/todo.js             Yapılacaklar (v0.9.0): işleri yere göre gruplar (eski alan adı sunucusu, her yeni site, İçerik, Karar bekleyen), site hazırlık kontrolü
 src/redirectmap.js      301 haritası (v0.8.0): bulunamayan eski sayfaya yeni sayfa önerisi (slug, title, H1, içerik; IDF ağırlığı), güven, kullanıcı kararları, CSV. v0.8.1: dil filtresi (html lang), eski ana sayfaya ana sayfa önerisi
 src/netguard.js         Yayın modunda iç ağ adreslerini engeller (SSRF koruması)
@@ -42,12 +43,15 @@ src/server.js           Web sunucusu + API (/api/crawls, /api/projects, /api/com
                         /api/projects/:id → crawl (POST), match (v0.10.0: `launch` alanı), excel, export. GET/PUT/DELETE tanım
                         /api/projects/:id/ready → POST { site, ok } (v0.9.0): hazır görünmeyen siteyi bu tarama için hazır say
                         /api/projects/:id/match?fresh=1 (v0.10.1): eski adresleri tekrar ister. Yanıtta `checkedAt` var. Kayıtlı sonuç `compare.probeCacheMin` dakika geçerlidir
+                        /api/projects/:id/launch (v0.11.0) → POST { at } çıkış işareti ve kilit, DELETE işareti kaldırır
+                        /api/projects/:id/crawl { site, live: true } (v0.11.0) → canlı tarama (ayrı kimlik: liveCrawlId)
+                        /api/projects/:id/verify[?fresh=1] (v0.11.0) → canlı doğrulama. Çıkış işareti yoksa 409, need: ["launch"]
 render.yaml             Render Blueprint (ücretsiz plan, Docker)
 .github/workflows/guncelle.yml  Güncelleme zip dosyasını uygular (v0.10.3): köke yüklenen `*.zip` açılır, test edilir, commit edilir. Bkz. Çalışma döngüsü 7. adım
 docs/                   Landing page (v0.8.3): docs/index.html + docs/img/. GitHub Pages (main, /docs) veya Netlify ile yayınlanır. Uygulamadan bağımsız, tarama yapmaz
 public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page (Site denetimi / Taşıma projesi). Proje ekranı: adım çubuğu + Sıradaki iş kartı
 config/rules.json       Bütün eşikler, kural ayarları ve ek kontrol limitleri (checks)
-test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi, fixture-migration.js: eski site + geçecek site, server-test.js: yerel sunucu güvenliği ve "Tekrar kontrol et")
+test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi, fixture-migration.js: eski site + geçecek site, server-test.js: yerel sunucu güvenliği, "Tekrar kontrol et" ve çıkış akışı, fixture-verify.js: bozuk ve temiz canlı site)
 ```
 
 ## Kurallar ve konvansiyonlar
@@ -71,7 +75,7 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 2 | Ek kontroller (11 kural): site sürümleri, SSL, HSTS, sıkıştırma, llms.txt, dış link, görsel; site kartı | Tamam (v0.4.0) |
 | Arayüz | Koyu tema, landing giriş ekranı, bütün ekranlar yenilendi | Tamam (v0.4.1) |
 | Yayın | Render (ücretsiz), SSRF koruması, yayın limitleri. Şifre isteğe bağlı, Render şifresiz (v0.8.4) | Tamam (v0.5.0) |
-| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1), yapılacaklar listesi (yere göre), site hazırlık uyarısı ve kavram açıklamaları (v0.9.0), canlı adres ve staging adresi ayrımı (v0.9.1), Parça 3a canlıya çıkış listesi ve "Yeni yapı" seçeneklerinin birleşmesi (v0.10.0). Sırada: v0.10.0 gerçek sitede deneme, sonra Parça 3b canlı doğrulama | Devam ediyor |
+| Sprint 3 | Migration: Parça 1 karşılaştırma ekranı tamam (v0.6.0), yol kuralları + çoklu hedef + desen önerisi + açıklama (v0.6.1), taşıma projesi + 301 kontrolü (v0.7.0), eşleştirme ekranı düzeltmesi (v0.7.1), Parça 2 301 haritası (v0.8.0), gerçek site düzeltmeleri: dil kontrolü, bölüm uyarısı, ana sayfa, Excel kaynağı (v0.8.1), yapılacaklar listesi (yere göre), site hazırlık uyarısı ve kavram açıklamaları (v0.9.0), canlı adres ve staging adresi ayrımı (v0.9.1), Parça 3a canlıya çıkış listesi ve "Yeni yapı" seçeneklerinin birleşmesi (v0.10.0), Parça 3b canlı doğrulama (v0.11.0). Kod tamam. Sırada: gerçek sitede deneme (canlıya çıkmış bir proje) | Kod tamam (v0.11.0), gerçek site denemesi bekliyor |
 | Landing | Portfolyo için statik tanıtım sayfası (kadastro paftası tasarımı), GitHub Pages veya Netlify | Tamam (v0.8.3), yayın bekliyor |
 | Bakım | Kod incelemesi ve hata düzeltme sürümü: 12 hata (şifre sızıntısı, gövde zaman aşımı ve boyutu, Host/Origin kontrolü, SVG title, noindex okuma, bozuk URL, kelime sayısı, 301 kontrol önbelleği, istek sınırı, sitemap entity, tarama kimliği) | Tamam (v0.10.1) |
 | Doğrulama | Aracın taramasını Screaming Frog dışa aktarımı ile karşılaştıran komut (`npm run dogrula`). Plan kullanıcı ile yapıldı. Sırada: kullanıcı iki projede taramaları yapar ve özet dosyalarını sohbete yükler | Araç tamam (v0.10.2), ölçüm bekliyor |
@@ -80,7 +84,7 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
 | Sprint 6 | JS render | Bekliyor |
 
-Testler: crawler 22, kural 103, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 20, canlıya çıkış 11, sunucu 6 (IPv6 varsa 7), doğrulama 8 kontrol (toplam yaklaşık 20 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler (v0.11.0, 11 dosya, 270 kontrol): crawler 22, kural 103, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 20, canlıya çıkış 11, sunucu 8 (IPv6 varsa 9), doğrulama 8, canlı doğrulama 12 kontrol (toplam yaklaşık 11 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
 - Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
@@ -105,6 +109,16 @@ Gerçek site denemesi (v0.8.0, 11 Ekim 2026, çok dilli taşıma: İngilizce kö
 - Excel onaylanan satırda güven, puan ve nedeni silmişti. Önerinin doğruluğu ölçülemedi.
 - Bölüm kuralı doğru olan eski İngilizce /prosedur/ sayfaları çoğunlukla doğru eşleşti. Dolgu sayfaları genel /procedures sayfasına gitti (daha özel sayfa vardı); kaynağı belli değil.
 v0.8.1 bu dört sorunu düzeltti. Tekrar test bekliyor.
+
+Açık noktalar (v0.11.0):
+- Canlı doğrulama gerçek sitede denenmedi. Canlıya çıkmış bir projede "Canlıya çıktık" ile işaretleyin, her siteyi canlıda tarayın. Kritik listede yanlış alarm arayın. Özellikle "Aynı adreste açılıyor" (200 beklenen) satırlarına bakın: canlı site sondaki `/` için yönlendirme yapıyorsa bu satırlar "Sayfa yönleniyor" olur.
+- Eski projeler: çıkış işareti yoksa adım sadece işaret formunu gösterir. v0.10.0 öncesi eski site taramasında etiket verisi yoktur ve çıkıştan sonra eski site tekrar taranamaz: araç "Etiket kontrolü yapılamadı" der (Kontrol edilemedi).
+- Çıkıştan sonra Eşleştirme, 301 haritası, Yapılacaklar ve Canlıya çıkış adımları staging'e istek atmaya devam eder. Staging kapanırsa bu adımlar "Kontrol edilemedi" gösterir. Canlı doğrulama bundan etkilenmez (istek atmayan beklenen liste). İleride: çıkıştan sonra bu adımlar da istek atmaz.
+- Çıkıştan önce taranmamış ek site: beklenen listede o sitenin sayfaları "Karar yok" olur (kural hedefi taranmadı). Site kartı yine görünür ve canlıda taranabilir.
+- Canlı tarama robots.txt kurallarına uyar. Canlıda `Disallow: /` kalmışsa tarama sayfaları okuyamaz: araç Disallow'u kritik yazar, noindex ve staging adresi o taramada görünmez. Satırı kaldırınca tekrar tarayın.
+- "Geçiş yapılmadı" uyarısı oran ile çalışır (`verify.notSwitchedRatio` 0.8, en az 3 adres). Eski site ve yeni site aynı yolları kullanıyorsa (301 az) uyarı çıkmayabilir.
+- Ekran görüntüsü Claude'un ortamında Playwright ile alındı (projeye bağımlılık değildir). Ortam internete çıkmaz: Google Fonts isteği konsolda hata verir, uygulama hatası değildir.
+- Eski küçük stil sorunu (bu sürümde değişmedi): mobilde proje başlığı kelimenin ortasından bölünür ("yeni / leme").
 
 Açık noktalar (v0.10.1):
 - v0.10.1 gerçek sitede denenmedi. Şifreli bir staging taraması yapın ve sonucu kontrol edin. Eşleştirmede "Tekrar kontrol et" düğmesini 301 kurduktan sonra deneyin.
@@ -217,6 +231,23 @@ Bilinen sınır: sütun adları Screaming Frog'un İngilizce arayüzüne göredi
 Sonuçlar: henüz ölçüm yok.
 
 ## Karar günlüğü
+
+- v0.11.0: Parça 3b, canlı doğrulama (kullanıcı sohbette taslağı ve 10 kararı onayladı). Amaç: canlıya çıkıştan sonra taşımanın doğru yapıldığını kanıtlamak. Kontroller: A) her eski adres canlı alan adında (301, 410, sayfanın kendisi), B) staging ayarı canlıda (noindex, X-Robots-Tag, `Disallow: /`, açık yazılmış staging adresi), C) eski sitenin etiketleri (Analytics/GTM, Search Console), D) sitemap (sadece canlı adresler, adresler 200).
+- v0.11.0: Çıkış işareti ("Canlıya çıktık" + tarih, `project.launch`). v0.10.0 kuralı ("elle tamam işareti yok") ile çelişmez: işaret projenin aşamasını yazar, hiçbir kontrolün sonucunu değiştirmez. Bütün sonuçlar istekten ve taramadan gelir. Neden: araç çıkış anını başka yoldan bilemez ve eski site taramasını korumak için kilit gerekir.
+- v0.11.0: Kilit. İşaretten sonra eski site ve staging taramaları tekrar taranamaz (sunucu 409 verir, arayüz "Kilitli" yazar). Neden: çıkıştan sonra eski alan adı yeni siteyi sunar; eski siteyi tekrar taramak eski sayfaları kaybettirir. PUT kilitli tarama kimliğini ve işareti değiştirmez. İşaret kalkınca kilit kalkar. Çıkıştan sonra biten çıkış öncesi tarama projeye bağlanmaz.
+- v0.11.0: Beklenen liste istek atmadan hesaplanır (çıkış öncesi taramalar + güncel kararlar). Deney: eşleştirme ekranının 301 haritası staging'e istek atar; staging'de kurulan 301 o listeden düşer (2 satır → 1 satır). İstek olmadan liste sabittir. İstek olmadan taşınan sayfalar `moving` grubunda kalır: hedefi taramada olanlar kural satırı, olmayanlar öneri satırı olur (CSV ile aynı). Karar, staging yönlendirmesinden önce gelir.
+- v0.11.0: Kapsam: haritadaki 301 ve 410 satırlarına ek olarak staging'de aynı adreste açılan sayfalar (200 beklenir) ve kararı olmayan sayfalar ("Karar yok": 404 ise kritik "Kayıp sayfa", açılıyor veya tek adımda yönleniyorsa Tamam ve not). Böylece her eski sayfa kontrol edilir.
+- v0.11.0: Dört grup: Kritik, Düzeltin, Kontrol edilemedi, Tamam. "Kontrol edilemedi" tamam sayılmaz. Sonuç türleri ve grupları `src/verify.js` → `R` tablosundadır. 410 yerine 404 "Düzeltin" grubundadır (Google iki yanıtı da kaldırır, 410 daha hızlıdır).
+- v0.11.0: İstekler sadece projenin canlı alan adlarına gider (eski alan adı ve ek sitelerin canlı alan adı). Başka hosta giden adım istenmez: staging ise kritik "Yanlış hedef: staging", değilse "Hedef proje dışında" (Kontrol edilemedi). Yayın modunda her adım SSRF korumasından geçer ("İç ağ adresi"). Aynı adres bir kontrolde bir kez istenir. Yayın modunda en fazla `yayin.maxUrls` adres kontrol edilir.
+- v0.11.0: Sonuç sunucu belleğinde proje başına `compare.probeCacheMin` dakika saklanır. Anahtar beklenen listenin özetidir: haritada bir karar değişirse liste hemen tekrar kontrol edilir. "Tekrar kontrol et" (`?fresh=1`) hemen tekrar ister.
+- v0.11.0: Canlı tarama ayrı kimlik alır (`sites[].liveCrawlId`, `pendingLiveCrawlId`, `liveError`). Staging taraması ile karışmaz. Geçecek site eski alan adında, ek site canlı alan adında taranır. Eski site canlıda taranmaz. Canlı alan adı yazılmamış ek site kontrol edilemez: kart ve satır nedeni yazar, iş "Projeyi açın". Canlı alan adı sonra değişirse tarama "eski alan adında" olur.
+- v0.11.0: "Geçiş yapılmadı" uyarısı: 301 beklenen adreslerin en az `verify.notSwitchedRatio` (0.8) oranı yönlenmeden 200 veriyorsa (en az `notSwitchedMin` 3 adres) Sıradaki iş kartı DNS geçişini kontrol etmeyi söyler.
+- v0.11.0: Kod paylaşımı: staging adresi, noindex/Disallow ve etiket kontrolü `launch.js` içinden ayrıldı ve iki modül tarafından kullanılır. `buildLaunch` davranışı değişmedi (11 test aynen geçti). Proje girdileri (taramalar, kurallar, canlı alan adları) `server.js` → `projectInputs` içinde: eşleştirme ve canlı doğrulama paylaşır.
+- v0.11.0: Sitemap: sadece 200 veren sitemap dosyası sayılır (tarayıcı denediği `/sitemap.xml` 404 dosyasını da listeye yazar). Canlı sitede sitemap açılmıyorsa ve eski sitede vardı veya robots.txt sitemap adresi veriyorsa "Sitemap bulunamadı". Başka alan adı: canlı alan adı dışındaki ve staging olmayan hostlar.
+- v0.11.0: Excel "Canlı doğrulama" sayfası (çıkış işareti varsa): Grup, İş, Site, Ekip, Tür, Adres, Beklenen, Canlıda, Son adres, Kaynak, Not, Durum. Adres işlerinin yeri "<eski alan adı> sunucusu". Excel kayıtlı sonucu kullanır.
+- v0.11.0: Test sitesindeki başka alan adı `.example` ile yazılır: `.test` eki `stagingSuffixes` içinde olduğu için staging sayılır. Yeni testler eski kodda başarısız oldu (verify-test modül bulamadı, sunucu testinin 2 yeni kontrolü başarısız), yeni kodda geçti.
+- v0.11.0: Tanıtım sayfasındaki (docs) adım listesi güncellendi: "Canlıya çıkış · Sonraki sürüm" v0.10.0'dan beri eskiydi. Canlıya çıkış ve Canlı doğrulama eklendi.
+- v0.11.0: Yeni bağımlılık yok.
 
 - v0.10.4: README baştan yazıldı (kullanıcı istedi). Yeni yapı: aracın konumu (site taşıma aracı), "Araç ne yapar" bölümü (tam yaptığı, kısmen yaptığı ve yapmadığı işler), site denetimi, taşıma projesi, komut satırı, sunucu, doğrulama, geliştirme, sınırlar, yol haritası. Sürüm etiketleri (v0.7.0 gibi) README'den çıktı: geçmiş bu dosyadadır. Yol haritası v0.10.2 sırasına göre yazıldı. Akış şeması Mermaid ile (GitHub kendisi çizer). "Tam yaptığı işler" notu: kod ve test tamam, gerçek site ölçümü sürüyor. Doğrulama ölçümü bitince bu notu güncelleyin.
 - v0.10.4: `.env.example` içindeki "şifreyi zorunlu yapar" yorumu düzeltildi (v0.8.4'ten beri şifre isteğe bağlı).

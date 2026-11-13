@@ -5,7 +5,7 @@ Site taşıma (yenileme) projeleri için teknik SEO aracı. Kişisel proje.
 Araç iki iş yapar:
 
 1. **Site denetimi.** Bir siteyi tarar, teknik SEO sorunlarını bulur ve her sorunu doğru ekibe verir.
-2. **Taşıma projesi.** Eski siteyi ve yeni siteyi karşılaştırır, 301 listesini üretir, yapılacak işleri çıkarır ve canlıya çıkışı kontrol eder.
+2. **Taşıma projesi.** Eski siteyi ve yeni siteyi karşılaştırır, 301 listesini üretir, yapılacak işleri çıkarır, canlıya çıkışı kontrol eder ve çıkıştan sonra taşımayı canlıda doğrular.
 
 Araç yerel bilgisayarda veya kendi sunucunuzda çalışır. Sürüm `package.json` dosyasındadır. Kararların geçmişi `CLAUDE.md` → Karar günlüğü bölümündedir.
 
@@ -16,6 +16,7 @@ flowchart LR
   C --> D[301 haritası]
   D --> E[Yapılacaklar]
   E --> F[Canlıya çıkış listesi]
+  F --> G[Canlı doğrulama]
 ```
 
 ## Araç ne yapar
@@ -34,6 +35,7 @@ Bu işlerin kodu ve testi tamamdır. Gerçek sitelerde ölçüm sürüyor (bkz. 
 | 301'leri staging'de kontrol eder | Her eski adresi yeni sitede ister. Sonuç: 301 kurulu, 301 eksik, hedef yok, zincir veya geçici yönlendirme. |
 | İşleri yere ve ekibe göre ayırır | Eski alan adı sunucusu, her yeni site, içerik ve karar bekleyen işler ayrı kartlardır. |
 | Canlıya çıkışı kontrol eder | Staging adresi kalmış mı (canonical, hreflang, link, görsel, sitemap, 301 listesi), staging Google'a açık mı, noindex ve `Disallow: /` nerede, Analytics/GTM ve Search Console etiketi yeni sitede var mı. |
+| Taşımayı canlıda doğrular | Çıkıştan sonra her eski adresi canlı alan adında ister: 301 doğru mu, zincir, geçici yönlendirme, yanlış hedef, hedef hatalı, 410 geldi mi, kayıp sayfa. Canlı siteyi ayrıca tarar: noindex, X-Robots-Tag, `Disallow: /` ve staging adresi kalmış mı, etiketler var mı, sitemap canlı adresleri mi içeriyor ve adresler 200 mü. |
 | Rapor verir | Web arayüzü, Excel (site denetimi ve taşıma projesi), 301 listesi CSV, ham JSON. |
 
 ### Kısmen yaptığı işler
@@ -50,7 +52,6 @@ Bu işlerin kodu ve testi tamamdır. Gerçek sitelerde ölçüm sürüyor (bkz. 
 ### Yapmadığı işler
 
 - JavaScript çalıştırmaz. React, Next veya Vue ile oluşan içeriği ve linkleri görmez.
-- Canlıya çıkıştan sonra doğrulama yapmaz (sıradaki iş).
 - Search Console, trafik ve backlink verisi kullanmaz. Sorunları trafiğe göre sıralamaz.
 - Hız ölçmez (Core Web Vitals).
 - Anahtar kelime ve sıralama takibi yapmaz.
@@ -123,7 +124,7 @@ Kurallar:
 
 ## Taşıma projesi
 
-Giriş ekranında "Taşıma projesi" seçin ve proje adını yazın. Araç altı adımda yol gösterir. Her ekranda tek bir "Sıradaki iş" kartı durur: tek cümle ve tek düğme. Her terimin yanında "?" açıklaması vardır.
+Giriş ekranında "Taşıma projesi" seçin ve proje adını yazın. Araç yedi adımda yol gösterir. Her ekranda tek bir "Sıradaki iş" kartı durur: tek cümle ve tek düğme. Her terimin yanında "?" açıklaması vardır.
 
 | Adım | Ne yapılır |
 |---|---|
@@ -133,6 +134,7 @@ Giriş ekranında "Taşıma projesi" seçin ve proje adını yazın. Araç altı
 | 301 haritası | Adresi değişen her sayfa için araç yeni sayfa önerir. Güven: Yüksek, Orta, Düşük. Öneriyi onaylayın, başka sayfa seçin, adres yazın veya 410 verin. Araç Türkçe sayfaya Türkçe sayfa önerir. Eski ana sayfaya doğru sitenin ana sayfasını önerir. Ana sayfaya toplu yönlendirme önermez (soft 404). "CSV indir" son listeyi verir. Kararlar projede saklanır. |
 | Yapılacaklar | İşler yapıldığı yere göre kartlardır: eski alan adı sunucusu (301, yönlendirme düzeltmesi, 410), her yeni site (sayfa oluşturun, link verin), İçerik (title, meta, H1, noindex) ve Karar bekleyen. Her kart ekibi gösterir. Listede "Canlı adres" (301 hedefi) ve "Kontrol edilen adres" (staging) ayrı sütunlardır. Yeni sitede çok az sayfa varsa araç "hazır değil gibi görünüyor" der ve o sitenin işlerini saymaz. Site gerçekten küçükse uyarıyı kapatın. |
 | Canlıya çıkış | Staging taramalarından çıkış öncesi liste. Dört grup: **Kritik** (301 listesinde veya sitede açık yazılmış staging adresi; şifresiz ve Google'a açık staging), **Karar bekleyen** (301 haritasında açık satır), **Çıkış anında değiştirin** (noindex, X-Robots-Tag, `Disallow: /`: staging'de normaldir), **Kontrol edin** (Analytics/GTM kimliği ve Search Console etiketi yeni sitede var mı). Göreli adres sorun değildir. Durum her zaman taramadan gelir: düzeltin, sonra tekrar tarayın. |
+| Canlı doğrulama | Site canlıya çıkınca "Canlıya çıktık" düğmesi ile çıkış gününü işaretleyin. Araç eski site ve staging taramalarını kilitler. Sonra her siteyi "Canlıda tara" ile tarayın. Dört grup: **Kritik** (301 yok ve hata, hedef hatalı, staging'e giden 301, kayıp sayfa, canlıda noindex, `Disallow: /`, staging adresi), **Düzeltin** (zincir, 302/307, yanlış hedef, 410 yerine başka yanıt, eksik etiket, sitemap hatası), **Kontrol edilemedi** (canlı alan adı yok, canlı tarama yok, erişim engeli; tamam sayılmaz), **Tamam**. |
 
 **Eski alan adına geçecek site:** canlıdan sonra eski alan adını bu site kullanır. Bütün 301'ler bu sitede kurulur.
 
@@ -159,11 +161,21 @@ Yeni tarama eski adresleri bulamaz, çünkü yeni sitede onlara link yoktur. Bu 
 
 Araç bu yanıtları 30 dakika saklar (`rules.json` → `compare.probeCacheMin`). Sunucuda 301 kurduysanız adım çubuğunun altındaki "Tekrar kontrol et" düğmesine basın. Araç adresleri tekrar ister. Yeni tarama gerekmez. Satır son kontrolün saatini gösterir.
 
+### Canlı doğrulama
+
+Çıkıştan sonra eski alan adı yeni siteyi sunar. Bu yüzden eski site taraması çıkıştan önceki taramadır ve tekrar yapılmaz. "Canlıya çıktık" işareti bu taramayı kilitler. İşaret hiçbir kontrolün sonucunu değiştirmez. İşareti geri alabilirsiniz.
+
+Beklenen liste çıkış öncesi taramalardan ve 301 haritasındaki kararlardan gelir. Araç staging'e istek atmaz: staging çıkıştan sonra kapanabilir. Listede her eski sayfa vardır: 301 ve 410 kararları, kurallar, staging'de aynı adreste açılan sayfalar (200 beklenir) ve kararı olmayan sayfalar.
+
+Araç her eski adresi canlı alan adında ister ve yönlendirmeyi elle izler. İstek sadece projedeki canlı alan adlarına gider. Başka alan adına giden adım istenmez. Yayın modunda SSRF koruması her adımda çalışır. Sonuç 30 dakika saklanır (`compare.probeCacheMin`). "Tekrar kontrol et" adresleri hemen tekrar ister. Haritada bir karar değişirse araç listeyi hemen tekrar kontrol eder.
+
+Canlı alan adı yazılmamış ek site kontrol edilemez. Ekran nedeni ve sıradaki işi yazar. Eski adreslerin çoğu yönlenmeden 200 veriyorsa araç "eski alan adı hâlâ eski siteyi sunuyor olabilir" der (`rules.json` → `verify`).
+
 ### Proje dosyası ve Excel
 
-Proje sunucuda `crawls/projects/` klasöründe durur. Projede sonuç yoktur, sadece tanım vardır: siteler, roller, tarama kimlikleri, kurallar ve 301 kararları. "Projeyi indir" JSON dosyasını verir, "Proje yükle" geri yükler.
+Proje sunucuda `crawls/projects/` klasöründe durur. Projede sonuç yoktur, sadece tanım vardır: siteler, roller, tarama kimlikleri (staging ve canlı ayrı), kurallar, 301 kararları ve çıkış günü. "Projeyi indir" JSON dosyasını verir, "Proje yükle" geri yükler.
 
-Proje Excel'inin sayfaları: Özet, Yapılacaklar, Canlıya çıkış, Kaybolan, Yönlenen, İçerik değişimi, Taşınan, Linksiz, Bölüm kaldırıldı, Kontrol edilemedi, Yeni sayfalar, Kurallar, 301 haritası, Öneriler. Boş gruplar için sayfa oluşmaz.
+Proje Excel'inin sayfaları: Özet, Yapılacaklar, Canlıya çıkış, Canlı doğrulama (çıkıştan sonra), Kaybolan, Yönlenen, İçerik değişimi, Taşınan, Linksiz, Bölüm kaldırıldı, Kontrol edilemedi, Yeni sayfalar, Kurallar, 301 haritası, Öneriler. Boş gruplar için sayfa oluşmaz.
 
 ## Komut satırı
 
@@ -294,7 +306,7 @@ Durum: komut hazır. Gerçek sitelerdeki ilk ölçüm bekliyor.
 
 ### Testler
 
-`npm test` on test dosyası çalıştırır. Testler internete çıkmaz: yerel test siteleri kullanır.
+`npm test` on bir test dosyası çalıştırır. Testler internete çıkmaz: yerel test siteleri kullanır.
 
 | Test | Kontrol | Kapsam |
 |---|---|---|
@@ -306,8 +318,9 @@ Durum: komut hazır. Gerçek sitelerdeki ilk ölçüm bekliyor.
 | Yapılacaklar | 8 | İşlerin yeri, site hazırlık uyarısı, canlı adres |
 | Proje | 20 | Tanım, kayıt, API, "Tara" düğmesi, eşleştirme, proje dosyası |
 | Canlıya çıkış | 11 | Dört test sitesi. Temiz staging hiçbir iş üretmemeli. |
-| Sunucu | 6 | Host ve Origin kontrolü, istek boyutu, "Tekrar kontrol et", tarama kimliği (IPv6 varsa 7 kontrol) |
+| Sunucu | 8 | Host ve Origin kontrolü, istek boyutu, "Tekrar kontrol et", çıkış işareti ve kilit, canlı tarama, canlı doğrulama ucu ve Excel, tarama kimliği (IPv6 varsa 9 kontrol) |
 | Doğrulama | 8 | CSV okuyucu, referans sütunları, alan karşılaştırması |
+| Canlı doğrulama | 12 | Bozuk ve temiz canlı site. Her sonuç türü, SSRF, kontrol sınırı. Temiz canlı site hiçbir iş üretmemeli. |
 
 Kurallar:
 
@@ -337,17 +350,16 @@ Tamamlanan:
 - Tarama, web arayüzü, Excel
 - Kural motoru (88 kural), sağlık skoru, ek kontroller
 - Yayın modu (Render), SSRF koruması
-- Taşıma projesi: eşleştirme, 301 haritası, yapılacaklar, canlıya çıkış listesi
+- Taşıma projesi: eşleştirme, 301 haritası, yapılacaklar, canlıya çıkış listesi, canlı doğrulama
 - Kod incelemesi ve güvenlik düzeltmeleri, doğrulama komutu
 
 Sıradaki işler (sıra ile):
 
 1. Doğrulama: üç gerçek taramada Screaming Frog ile karşılaştırma
-2. Canlı doğrulama: canlıya çıkıştan sonra 301 listesini ve noindex durumunu canlıda kontrol etme
-3. Eski URL listesi ve Search Console verisi: trafik alan sayfaları 301 haritasına ekleme ve sıralama
-4. JavaScript render (Playwright)
-5. Paylaşılabilir rapor ve ClickUp işi
-6. Canlıdan sonra izleme (1, 7 ve 30 gün)
+2. Eski URL listesi ve Search Console verisi: trafik alan sayfaları 301 haritasına ekleme ve sıralama
+3. JavaScript render (Playwright)
+4. Paylaşılabilir rapor ve ClickUp işi
+5. Canlıdan sonra izleme (1, 7 ve 30 gün)
 
 Sonra konuşulacak: AI önerileri (title, meta, alt metin, anlam benzerliği ile 301 eşleştirme), Core Web Vitals.
 

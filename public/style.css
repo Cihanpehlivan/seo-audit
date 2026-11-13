@@ -569,3 +569,35 @@ details.q p { position: absolute; z-index: 5; top: 24px; left: -8px; width: 280p
   .recheck details.q { position: static; }
   .recheck details.q p { left: 0; right: 0; width: auto; top: 100%; margin-top: 6px; }
 }
+
+/* v0.11.0: Canlı doğrulama. Launch mark, live site cards, 301 list bar. Groups reuse the launch list styles. */
+.vf-launch { margin-bottom: 18px; }
+.vf-points { margin: 10px 0 0; padding-left: 18px; color: var(--graphite); display: grid; gap: 4px; }
+.vf-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; margin-top: 14px; }
+.vf-form label { display: grid; gap: 4px; font-size: 13px; color: var(--graphite); }
+.vf-form input[type=date] { background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 10px; color: var(--ink); color-scheme: dark; }
+.vf-launched { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; font-size: 14px; color: var(--graphite); }
+.vf-launched b { color: var(--ink); }
+.vf-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--panel-2); margin: 0 0 6px; }
+.vf-bar i { display: block; min-width: 3px; }
+.vf-bar .b-ok { background: var(--green); } .vf-bar .b-fix { background: var(--amber); } .vf-bar .b-crit { background: var(--red); } .vf-bar .b-unk { background: var(--stone); }
+.vf-bar-t { position: relative; margin: 0 0 18px; color: var(--graphite); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ln-tile.good b { color: #8FD3A8; }
+.vf-sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin: 0 0 18px; }
+.vf-card { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 8px; min-width: 0; }
+.vf-card-h { display: grid; gap: 2px; min-width: 0; }
+.vf-card-h b { font-weight: 600; overflow-wrap: anywhere; }
+.vf-card-h .small { overflow-wrap: anywhere; }
+.vf-card-s { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.vf-card-a { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vf-ok .ln-row.info .ln-main b, .vf-ok .ln-main b { color: var(--graphite); }
+.vf-lock { margin: 0 0 12px; }
+.vf-card-n { margin: 0; color: var(--graphite); }
+.plist td.u br + a { display: inline-block; margin-top: 2px; }
+@media (max-width: 900px) {
+  .vf-sites { grid-template-columns: 1fr; }
+  .vf-launched details.q, .vf-bar-t details.q, .vf-card details.q { position: static; }
+  .vf-launched details.q p, .vf-bar-t details.q p, .vf-card details.q p { left: 0; right: 0; width: auto; top: 100%; margin-top: 6px; }
+  .vf-form > * { flex: 1 1 100%; }
+  .vf-form .ghost { text-align: center; }
+}

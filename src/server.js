@@ -13,7 +13,9 @@ import { normalizeUrl } from './normalize.js';
 import { runAudit, loadConfig, RULES, CATEGORIES } from './rules/index.js';
 import { isBroken, isOk } from './rules/helpers.js';
 import { buildTodo } from './todo.js';
-import { buildLaunch } from './launch.js';
+import { buildLaunch, makeIsStaging } from './launch.js';
+import { expectedList, checkRedirects, buildVerify, makeRequest, hostKey } from './verify.js';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import net from 'node:net';
 import { makeGuard } from './netguard.js';
@@ -165,37 +167,80 @@ const bareHost = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
 const projectLimits = () => { const c = loadConfig(); return { maxExtras: c.compare.maxTargets - 1, maxRules: c.compare.maxRules, maxDecisions: c.redirectMap.maxDecisions }; };
 
 // State of every site: none (not crawled), running, done, deleted (crawl file gone), stale (address changed).
+// v0.11.0: every target site also gets "live": the state of its live crawl (after launch), kept apart from the staging crawl.
 async function projectStatus(p) {
   const out = {};
+  const origins = p.launch ? await liveOrigins(p) : {};
   for (const site of p.sites) {
-    const job = site.pendingCrawlId && jobs.get(site.pendingCrawlId);
-    if (job && job.status === 'running') { out[site.key] = { state: 'running', jobId: job.id, done: job.progress.done, phase: job.progress.phase || 'crawl' }; continue; }
-    if (!site.crawlId) { out[site.key] = { state: 'none', error: site.lastError || null }; continue; }
-    const m = await store.meta(site.crawlId);
-    if (!m) { out[site.key] = { state: 'deleted', crawlId: site.crawlId }; continue; }
-    const urlHost = site.url ? bareHost(new URL(site.url).hostname) : '';
-    out[site.key] = {
-      state: urlHost && bareHost(m.host) !== urlHost ? 'stale' : 'done',
-      crawlId: m.id, host: m.host, startedAt: m.startedAt, pages: m.summary.total, ok: m.summary.ok,
-      blocked: m.summary.blocked, limitReached: !!m.limitReached, cancelled: !!m.cancelled, error: site.lastError || null,
-    };
+    out[site.key] = await crawlState(site);
+    if (site.role !== 'old') out[site.key].live = await liveState(site, origins[site.key] || null);
   }
+  return out;
+}
+async function crawlState(site) {
+  const job = site.pendingCrawlId && jobs.get(site.pendingCrawlId);
+  if (job && job.status === 'running') return { state: 'running', jobId: job.id, done: job.progress.done, phase: job.progress.phase || 'crawl' };
+  if (!site.crawlId) return { state: 'none', error: site.lastError || null };
+  const m = await store.meta(site.crawlId);
+  if (!m) return { state: 'deleted', crawlId: site.crawlId };
+  const urlHost = site.url ? bareHost(new URL(site.url).hostname) : '';
+  return {
+    state: urlHost && bareHost(m.host) !== urlHost ? 'stale' : 'done',
+    crawlId: m.id, host: m.host, startedAt: m.startedAt, pages: m.summary.total, ok: m.summary.ok,
+    blocked: m.summary.blocked, limitReached: !!m.limitReached, cancelled: !!m.cancelled, error: site.lastError || null,
+  };
+}
+// Live crawl of a target site. stale: the crawl is on another domain than the live domain of the project now.
+async function liveState(site, origin) {
+  const job = site.pendingLiveCrawlId && jobs.get(site.pendingLiveCrawlId);
+  if (job && job.status === 'running') return { state: 'running', jobId: job.id, done: job.progress.done, origin };
+  if (!site.liveCrawlId) return { state: 'none', error: site.liveError || null, origin };
+  const m = await store.meta(site.liveCrawlId);
+  if (!m) return { state: 'deleted', crawlId: site.liveCrawlId, origin };
+  return { state: origin && hostKey(m.startUrl) !== hostKey(origin) ? 'stale' : 'done', crawlId: m.id, host: m.host, startedAt: m.startedAt,
+    pages: m.summary.total, ok: m.summary.ok, limitReached: !!m.limitReached, error: site.liveError || null, origin };
+}
+// Live origin of every target site: the heir takes the old domain, an extra site its "live domain" (null: not written).
+// The old origin comes from the old crawl (it keeps http/https and www as the old site had them).
+async function liveOrigins(p) {
+  const old = p.sites.find((s) => s.role === 'old');
+  const m = old.crawlId ? await store.meta(old.crawlId) : null;
+  let base;
+  try { base = new URL(m?.startUrl || old.url); } catch { return {}; }
+  const out = {};
+  for (const s of p.sites) if (s.role !== 'old') out[s.key] = s.role === 'heir' ? base.origin : s.live ? `${base.protocol}//${s.live}` : null;
   return out;
 }
 
 // Starts a crawl for one site of a project. The crawl id is written to the project when the crawl ends.
-async function startProjectCrawl(id, key, options) {
+// v0.11.0: after launch the crawls before launch are locked: the old domain now serves the new site, so a new crawl
+// of the old site would lose the old pages. live: true crawls a target site on its live domain (a separate crawl id).
+const LOCKED = 'Site canlıya çıktı. Çıkış öncesi taramalar kilitli: eski site taraması çıkıştan önceki hali tutar. Canlı tarama için Canlı doğrulama adımını açın.';
+async function startProjectCrawl(id, key, options, { live = false } = {}) {
   const p = await projects.get(id);
   const site = p.sites.find((s) => s.key === key);
   if (!site) throw Object.assign(new Error('Site projede yok.'), { code: 404 });
-  if (!site.url) throw Object.assign(new Error('Önce sitenin adresini yazın.'), { code: 400 });
-  const job = await startJob({ url: site.url, label: site.role === 'old' ? 'eski' : 'yeni', options });
-  await projects.update(id, (q) => { const s = q.sites.find((x) => x.key === key); if (s) { s.pendingCrawlId = job.id; s.lastError = null; } });
+  let url = site.url, label = site.role === 'old' ? 'eski' : 'yeni';
+  if (live) {
+    if (!p.launch) throw Object.assign(new Error('Önce çıkışı işaretleyin. Canlı tarama çıkıştan sonra yapılır.'), { code: 409 });
+    if (site.role === 'old') throw Object.assign(new Error('Eski site canlıda taranmaz. Eski alan adını geçecek site kullanır.'), { code: 400 });
+    const origin = (await liveOrigins(p))[key];
+    if (!origin) throw Object.assign(new Error('Bu sitenin canlı alan adı yok. Proje adımında yazın.'), { code: 400 });
+    url = `${origin}/`; label = 'canli';
+  } else {
+    if (p.launch) throw Object.assign(new Error(LOCKED), { code: 409 });
+    if (!site.url) throw Object.assign(new Error('Önce sitenin adresini yazın.'), { code: 400 });
+  }
+  const F = live ? { pend: 'pendingLiveCrawlId', id: 'liveCrawlId', err: 'liveError' } : { pend: 'pendingCrawlId', id: 'crawlId', err: 'lastError' };
+  const job = await startJob({ url, label, options });
+  await projects.update(id, (q) => { const s = q.sites.find((x) => x.key === key); if (s) { s[F.pend] = job.id; s[F.err] = null; } });
   job.finished.then((r) => projects.update(id, (q) => {
     const s = q.sites.find((x) => x.key === key);
-    if (!s || s.pendingCrawlId !== job.id) return;
-    s.pendingCrawlId = null;
-    if (r.status === 'error') s.lastError = r.error; else { s.crawlId = job.id; s.lastError = null; }
+    if (!s || s[F.pend] !== job.id) return;
+    s[F.pend] = null;
+    if (r.status === 'error') s[F.err] = r.error;
+    else if (!live && q.launch) s[F.err] = 'Tarama çıkış işaretinden sonra bitti. Kilit nedeniyle projeye bağlanmadı.';
+    else { s[F.id] = job.id; s[F.err] = null; }
   })).catch((e) => console.error('Proje güncellenemedi:', e.message));
   return job;
 }
@@ -207,10 +252,10 @@ function siteNames(p) {
   return out;
 }
 
-// Matching of a project: old site → heir and other sites. Sections without a decision get the suggested move.
-async function projectMatch(p, { fresh = false } = {}) {
+// Inputs of the matching: crawls, rules (the user's and the suggested moves), live hosts, sites of the 301 map.
+// No requests here. v0.11.0: shared by the matching and the live check.
+async function projectInputs(p, status) {
   const cc = loadConfig().compare;
-  const status = await projectStatus(p);
   const old = p.sites.find((s) => s.role === 'old'), heir = p.sites.find((s) => s.role === 'heir');
   const missing = [old, heir].filter((s) => status[s.key].state !== 'done' && status[s.key].state !== 'stale');
   if (missing.length) {
@@ -233,6 +278,20 @@ async function projectMatch(p, { fresh = false } = {}) {
   const first = compareCrawls(oldRes, newList, { rules: userRules, live, suggest });
   const auto = first.suggestions.filter((x) => !x.notFound).map(({ from, host, to }) => ({ from, host, to }));
   const rules = parseRules([...userRules.map(({ from, host, to, drop }) => ({ from, host, to, drop })), ...auto], cc.maxRules + cc.maxSuggestions);
+  // 301 map (v0.8.0): heir first. The heir takes the old domain, so its live origin is the old origin.
+  const oldOrigin = new URL(oldRes.meta.startUrl);
+  const mapSites = targets.map((s, i) => {
+    const res = newList[i];
+    return { key: s.key, host: res.meta.host, origin: new URL(res.meta.startUrl).origin, pages: res.pages,
+      liveOrigin: s.role === 'heir' ? oldOrigin.origin : s.live ? `${oldOrigin.protocol}//${s.live}` : null };
+  });
+  return { cc, old, heir, targets, ids, oldRes, newList, keyOfHost, live, rules, auto, mapSites };
+}
+
+// Matching of a project: old site → heir and other sites. Sections without a decision get the suggested move.
+async function projectMatch(p, { fresh = false } = {}) {
+  const status = await projectStatus(p);
+  const { cc, old, targets, ids, oldRes, newList, keyOfHost, live, rules, auto, mapSites } = await projectInputs(p, status);
   const cmp = await compareWithProbe(status[old.key].crawlId, ids, oldRes, newList, rules, cc, live, { fresh });
   const autoFrom = new Set(auto.map((a) => a.from));
   const sections = sectionTable(cmp, { minPages: cc.suggestMinPages, pageLimit: cc.sectionPageLimit, langMinShare: cc.langMinShare }).map((sec) => ({
@@ -246,13 +305,6 @@ async function projectMatch(p, { fresh = false } = {}) {
       ? { notFound: true, hits: sec.suggestion.hits, why: sec.suggestion.why, ...(sec.suggestion.to ? { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to } : {}) }
       : { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to, why: sec.suggestion.why }),
   }));
-  // 301 map (v0.8.0): heir first. The heir takes the old domain, so its live origin is the old origin.
-  const oldOrigin = new URL(oldRes.meta.startUrl);
-  const mapSites = targets.map((s, i) => {
-    const res = newList[i];
-    return { key: s.key, host: res.meta.host, origin: new URL(res.meta.startUrl).origin, pages: res.pages,
-      liveOrigin: s.role === 'heir' ? oldOrigin.origin : s.live ? `${oldOrigin.protocol}//${s.live}` : null };
-  });
   const map = buildRedirectMap(cmp, oldRes, mapSites, p.map || {}, loadConfig().redirectMap);
   map.noLive = mapSites.filter((s) => !s.liveOrigin).map((s) => s.key);
   // Work list by place (v0.9.0). A thin site (few pages) is "not ready" until the user accepts its crawl.
@@ -263,6 +315,48 @@ async function projectMatch(p, { fresh = false } = {}) {
   const launch = buildLaunch({ oldRes, map, cfg: loadConfig(),
     sites: targets.map((s, i) => ({ key: s.key, role: s.role, res: newList[i], liveOrigin: mapSites[i].liveOrigin })) });
   return { cmp, sections, targets: targets.map((s) => s.key), status, map, todo, launch };
+}
+
+// Live check (v0.11.0, Part 3b). The expected list comes from the crawls before launch and the decisions (no staging
+// requests). Every old address is asked on the live old domain; hops go only to the live domains of the project.
+// The answers are kept compare.probeCacheMin minutes per project; fresh: true asks again ("Tekrar kontrol et").
+// A new decision changes the expected list, so it is checked again at once.
+const verifyCache = new Map(); // project id → { key, at, checked }
+async function projectVerify(p, { fresh = false } = {}) {
+  if (!p.launch) throw Object.assign(new Error('Çıkış işaretlenmedi. Site canlıya çıkınca "Canlıya çıktık" düğmesine basın.'), { code: 409, need: ['launch'] });
+  const cfg = loadConfig();
+  const status = await projectStatus(p);
+  const { targets, oldRes, newList, rules, live, mapSites } = await projectInputs(p, status);
+  const { rows } = expectedList({ oldRes, newList, sites: mapSites, rules, live, decisions: p.map || {}, cfg });
+  const info = targets.map((s, i) => {
+    const host = bareHost(newList[i].meta.host), liveHost = mapSites[i].liveOrigin ? bareHost(new URL(mapSites[i].liveOrigin).hostname) : '';
+    return { host, liveHost, staging: !liveHost || host !== liveHost };
+  });
+  const isStg = makeIsStaging(info, cfg);
+  const allowed = new Set([hostKey(oldRes.meta.startUrl), ...mapSites.filter((s) => s.liveOrigin).map((s) => hostKey(s.liveOrigin))]);
+  const key = createHash('sha1').update(JSON.stringify([rows.map((r) => [r.oldUrl, r.expect, r.target || '', !!r.noLive]), [...allowed]])).digest('hex');
+  const hit = verifyCache.get(p.id);
+  let checked, at;
+  if (hit && !fresh && hit.key === key && Date.now() - hit.at < (cfg.compare.probeCacheMin ?? 30) * 60_000) ({ checked, at } = hit);
+  else {
+    const request = makeRequest({ guard: PUBLIC_MODE ? makeGuard() : null, timeoutMs: cfg.checks.timeoutMs, userAgent: `SEO-Audit/${VERSION}` });
+    checked = await checkRedirects(rows, request, { allowed, isStg, concurrency: cfg.checks.concurrency, maxHops: cfg.verify?.maxHops ?? 5,
+      maxChecks: PUBLIC_MODE ? cfg.yayin.maxUrls : Infinity });
+    at = Date.now();
+    verifyCache.delete(p.id);
+    verifyCache.set(p.id, { key, at, checked });
+    if (verifyCache.size > 20) verifyCache.delete(verifyCache.keys().next().value);
+  }
+  // Every target site gets a card, also one without a crawl before launch.
+  const origins = await liveOrigins(p);
+  const liveSites = await Promise.all(p.sites.filter((s) => s.role !== 'old').map(async (s) => {
+    const L = status[s.key].live || { state: 'none' };
+    let res = null, state = L.state;
+    if (state === 'done') { try { res = await store.load(L.crawlId); } catch { state = 'deleted'; } }
+    return { key: s.key, role: s.role, name: s.name, liveOrigin: origins[s.key] || null, state, res, jobId: L.jobId, done: L.done, startedAt: L.startedAt };
+  }));
+  const V = buildVerify({ checked, liveSites, oldRes, isStg, cfg });
+  return { ...V, checkedAt: new Date(at).toISOString(), launch: p.launch, status };
 }
 
 async function startJob(body) {
@@ -411,7 +505,7 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'GET') {
           const list = await projects.list();
           return send(res, 200, list.map((p) => ({ id: p.id, name: p.name, updatedAt: p.updatedAt, sites: p.sites.length, rules: p.rules.length,
-            crawlIds: p.sites.flatMap((s) => [s.crawlId, s.pendingCrawlId]).filter(Boolean) })));
+            crawlIds: p.sites.flatMap((s) => [s.crawlId, s.pendingCrawlId, s.liveCrawlId, s.pendingLiveCrawlId]).filter(Boolean) })));
         }
         if (req.method === 'POST') {
           const def = validateProject(await readJson(req), projectLimits());
@@ -425,9 +519,11 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'PUT') {
           const def = validateProject(await readJson(req), projectLimits());
           // The 301 map is not changed here (POST /map changes it). A removed site drops its decisions.
-          const p = await projects.update(pid, (old) => ({ ...old, ...def, map: cleanMap(old.map || {}, def.sites), sites: def.sites.map((s) => {
+          // v0.11.0: the launch mark and the live crawls are server fields. After launch the crawl ids before launch stay.
+          const p = await projects.update(pid, (old) => ({ ...old, ...def, launch: old.launch, map: cleanMap(old.map || {}, def.sites), sites: def.sites.map((s) => {
             const prev = old.sites.find((x) => x.key === s.key);
-            return { ...s, pendingCrawlId: prev?.pendingCrawlId || null, lastError: prev?.lastError || null };
+            return { ...s, crawlId: old.launch ? prev?.crawlId || null : s.crawlId, pendingCrawlId: prev?.pendingCrawlId || null, lastError: prev?.lastError || null,
+              liveCrawlId: prev?.liveCrawlId || null, pendingLiveCrawlId: prev?.pendingLiveCrawlId || null, liveError: prev?.liveError || null };
           }) }));
           return send(res, 200, { project: p, status: await projectStatus(p) });
         }
@@ -435,7 +531,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (action === 'crawl' && req.method === 'POST') {
         const body = await readJson(req);
-        const job = await startProjectCrawl(pid, String(body.site || ''), body.options || {});
+        const job = await startProjectCrawl(pid, String(body.site || ''), body.options || {}, { live: !!body.live });
         return send(res, 201, publicJob(job));
       }
       if ((action === 'match' || action === 'excel') && req.method === 'GET') {
@@ -448,7 +544,11 @@ const server = http.createServer(async (req, res) => {
           return send(res, 200, { ...cmp, sections, targetSites: targets, status, map, todo, launch });
         }
         const tmp = path.join(os.tmpdir(), `prj-${Date.now()}.xlsx`);
-        await exportCompareExcel(m.cmp, tmp, { map: m.map, todo: m.todo, launch: m.launch, siteNames: siteNames(await projects.get(pid)) });
+        const pe = await projects.get(pid);
+        // v0.11.0: after launch the file also has the live check (saved answers, no new requests while they are fresh).
+        let verify = null;
+        if (pe.launch) { try { verify = await projectVerify(pe); } catch (e) { if (e.code !== 409) throw e; } }
+        await exportCompareExcel(m.cmp, tmp, { map: m.map, todo: m.todo, launch: m.launch, verify, siteNames: { ...siteNames(pe), server: `${m.cmp.old.host} sunucusu` } });
         res.writeHead(200, {
           'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'content-disposition': `attachment; filename="tasima-${m.cmp.old.host}.xlsx"`,
@@ -456,6 +556,31 @@ const server = http.createServer(async (req, res) => {
         const buf = await readFile(tmp);
         unlink(tmp).catch(() => {});
         return res.end(buf);
+      }
+      // v0.11.0: POST /launch { at } marks the launch day and locks the crawls before launch. DELETE takes the mark back.
+      if (action === 'launch' && req.method === 'POST') {
+        const body = await readJson(req);
+        const raw = String(body?.at || '');
+        const at = /^\d{4}-\d{2}-\d{2}$/.test(raw) && !Number.isNaN(Date.parse(raw)) ? raw : new Date().toISOString().slice(0, 10);
+        const p0 = await projects.get(pid);
+        const st = await projectStatus(p0);
+        const need = p0.sites.filter((s) => s.role !== 'extra' && !['done', 'stale'].includes(st[s.key].state));
+        if (need.length) return send(res, 409, { error: 'Eski site ve eski alan adına geçecek site taranmadı. Çıkıştan önce iki siteyi tarayın.', need: need.map((s) => s.key) });
+        if (p0.sites.some((s) => st[s.key].state === 'running')) return send(res, 409, { error: 'Bir tarama sürüyor. Tarama bitince çıkışı işaretleyin.' });
+        const p = await projects.update(pid, (q) => ({ ...q, launch: { at, markedAt: new Date().toISOString(),
+          crawls: Object.fromEntries(q.sites.filter((s) => s.crawlId).map((s) => [s.key, s.crawlId])) } }));
+        verifyCache.delete(pid);
+        return send(res, 200, { project: p, status: await projectStatus(p) });
+      }
+      if (action === 'launch' && req.method === 'DELETE') {
+        const p = await projects.update(pid, (q) => { const { launch, ...rest } = q; return rest; });
+        verifyCache.delete(pid);
+        return send(res, 200, { project: p, status: await projectStatus(p) });
+      }
+      // v0.11.0: GET /verify[?fresh=1] the live check. 409 with need: ["launch"] before the launch mark.
+      if (action === 'verify' && req.method === 'GET') {
+        try { return send(res, 200, await projectVerify(await projects.get(pid), { fresh: u.searchParams.get('fresh') === '1' })); }
+        catch (e) { if (e.code === 409) return send(res, 409, { error: e.message, need: e.need }); throw e; }
       }
       // 301 map: POST { set: { "/old/path": decision | null } } saves decisions (null removes one).
       // GET ?format=csv gives the final list for the developer (301 and 410 rows).
@@ -495,7 +620,8 @@ const server = http.createServer(async (req, res) => {
         const p = await projects.get(pid);
         const { id, name, structure, sites, rules, createdAt, updatedAt } = p;
         const body = JSON.stringify({ format: 'seo-audit-proje', version: 1, id, name, structure, rules, map: p.map || {}, createdAt, updatedAt,
-          sites: sites.map(({ key, role, name: n, url, live, crawlId }) => ({ key, role, name: n, url, live, crawlId })) }, null, 2);
+          ...(p.launch ? { launch: p.launch } : {}),
+          sites: sites.map(({ key, role, name: n, url, live, crawlId, liveCrawlId }) => ({ key, role, name: n, url, live, crawlId, ...(liveCrawlId ? { liveCrawlId } : {}) })) }, null, 2);
         const tr = { ğ: 'g', ü: 'u', ş: 's', ı: 'i', ö: 'o', ç: 'c' };
         const file = name.toLocaleLowerCase('tr').replace(/[ğüşıöç]/g, (c) => tr[c]).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'proje';
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename="proje-${file}.json"` });

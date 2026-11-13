@@ -23,8 +23,10 @@ const site = (routes) => listen((q, res) => {
 });
 
 // Old site: two service pages. New site: one new page. The 301 for /hizmet-a is set up later (redirectOn).
-let redirectOn = false;
-const oldSrv = await site((u) => (u === '/' ? html('Eski', '<a href="/hizmet-a">a</a><a href="/hizmet-b">b</a>') : /^\/hizmet-[ab]$/.test(u) ? html('Hizmet ' + u) : null));
+// v0.11.0: after launch (switched) the old domain serves the new site with the 301 for /hizmet-a.
+let redirectOn = false, switched = false;
+const newRoutes = (u) => (u === '/' ? html('Yeni', '<a href="/yeni-a">a</a>') : u === '/yeni-a' ? html('Yeni A') : u === '/hizmet-a' ? { loc: '/yeni-a' } : null);
+const oldSrv = await site((u) => (switched ? newRoutes(u) : u === '/' ? html('Eski', '<a href="/hizmet-a">a</a><a href="/hizmet-b">b</a>') : /^\/hizmet-[ab]$/.test(u) ? html('Hizmet ' + u) : null));
 const newSrv = await site((u) => (u === '/' ? html('Yeni', '<a href="/yeni-a">a</a>') : u === '/yeni-a' ? html('Yeni A') : redirectOn && u === '/hizmet-a' ? { loc: '/yeni-a' } : null));
 const OLD = `http://127.0.0.1:${oldSrv.address().port}/`;
 const NEW = `http://localhost:${newSrv.address().port}/`;
@@ -93,7 +95,7 @@ await check('istek boyutu: büyük proje dosyası yüklenir, sınırın üstü 4
 const waitCrawls = async () => {
   for (let i = 0; i < 100; i++) {
     const { data } = await api(`/api/projects/${pid}`);
-    if (Object.values(data.status).every((x) => x.state !== 'running')) return data.status;
+    if (Object.values(data.status).every((x) => x.state !== 'running' && x.live?.state !== 'running')) return data.status;
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error('tarama bitmedi');
@@ -119,6 +121,60 @@ await check('301 kontrolü: kayıtlı sonuç kullanılır, "Tekrar kontrol et" a
   assert.ok(fresh.data.checkedAt > first.data.checkedAt);
   const after = await api(`/api/projects/${pid}/match`);
   assert.equal(after.data.summary.redirected, 1, 'yeni sonuç kayıtta kalmalı');
+});
+
+await check('canlı doğrulama: çıkıştan önce yok, çıkış taramaları kilitler, canlı tarama ayrı kimlik alır', async () => {
+  const before = await api(`/api/projects/${pid}/verify`);
+  assert.equal(before.status, 409);
+  assert.deepEqual(before.data.need, ['launch']);
+  assert.equal((await api(`/api/projects/${pid}/crawl`, { method: 'POST', body: { site: 'heir', live: true } })).status, 409);
+  const l = await api(`/api/projects/${pid}/launch`, { method: 'POST', body: { at: '2026-11-20' } });
+  assert.equal(l.status, 200);
+  assert.equal(l.data.project.launch.at, '2026-11-20');
+  const staging = l.data.project.sites.find((s) => s.key === 'heir').crawlId;
+  assert.equal(l.data.project.launch.crawls.heir, staging);
+  for (const key of ['old', 'heir']) {
+    const r = await api(`/api/projects/${pid}/crawl`, { method: 'POST', body: { site: key, options: { checks: false } } });
+    assert.equal(r.status, 409, key);
+    assert.match(r.data.error, /kilitli/);
+  }
+  assert.equal((await api(`/api/projects/${pid}/crawl`, { method: 'POST', body: { site: 'old', live: true } })).status, 400);
+  // A PUT from an old browser copy cannot change a locked crawl id or remove the launch mark.
+  const put = await api(`/api/projects/${pid}`, { method: 'PUT', body: { ...l.data.project, launch: undefined, sites: l.data.project.sites.map((s) => ({ ...s, crawlId: s.key === 'old' ? null : s.crawlId })) } });
+  assert.equal(put.data.project.launch.at, '2026-11-20');
+  assert.ok(put.data.project.sites.find((s) => s.key === 'old').crawlId);
+  switched = true; // DNS switch: the old domain serves the new site
+  assert.equal((await api(`/api/projects/${pid}/crawl`, { method: 'POST', body: { site: 'heir', live: true, options: { checks: false } } })).status, 201);
+  const st = await waitCrawls();
+  assert.equal(st.heir.live.state, 'done');
+  assert.notEqual(st.heir.live.crawlId, staging);
+  assert.equal(st.heir.crawlId, staging, 'staging taraması değişmemeli');
+  assert.equal(new URL(st.heir.live.origin).origin, new URL(OLD).origin, 'canlı tarama eski alan adında');
+});
+const vKinds = (v) => Object.fromEntries(v.data.groups.flatMap((g) => g.items).filter((i) => i.listKind === 'redirect').flatMap((i) => i.list.map((x) => [new URL(x.old).pathname, i.kind])));
+await check('canlı doğrulama: sonuç istekten gelir, kayıtlı kalır, karar değişince tekrar istenir, Excel sayfası', async () => {
+  const v = await api(`/api/projects/${pid}/verify`);
+  assert.equal(v.status, 200);
+  assert.deepEqual(vKinds(v), { '/': 'ok-200', '/hizmet-a': 'ok-open', '/hizmet-b': 'lost' });
+  assert.equal(v.data.counts.critical, 1);
+  assert.equal(v.data.sites.find((s) => s.key === 'heir').state, 'done');
+  assert.equal((await api(`/api/projects/${pid}/verify`)).data.checkedAt, v.data.checkedAt, 'kayıtlı sonuç gelmeli');
+  await api(`/api/projects/${pid}/map`, { method: 'POST', body: { set: { '/hizmet-b': { gone: true, src: 'elle' } } } });
+  const d = await api(`/api/projects/${pid}/verify`);
+  assert.equal(vKinds(d)['/hizmet-b'], 'no410', 'yeni karar hemen kontrol edilmeli');
+  const fresh = await api(`/api/projects/${pid}/verify?fresh=1`);
+  assert.ok(fresh.data.checkedAt >= d.data.checkedAt);
+  const x = await fetch(`${base}/api/projects/${pid}/excel`);
+  assert.equal(x.status, 200);
+  const { default: ExcelJS } = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await x.arrayBuffer()));
+  const ws = wb.getWorksheet('Canlı doğrulama');
+  assert.ok(ws, 'Canlı doğrulama sayfası yok');
+  assert.ok(ws.getSheetValues().some((r) => Array.isArray(r) && r.includes('410 bekleniyordu, gelmedi')));
+  const del = await api(`/api/projects/${pid}/launch`, { method: 'DELETE' });
+  assert.equal(del.data.project.launch, undefined);
+  assert.equal((await api(`/api/projects/${pid}/verify`)).status, 409);
 });
 
 await check('tarama kimliği: aynı saniyede iki tarama ayrı kimlik alır', async () => {

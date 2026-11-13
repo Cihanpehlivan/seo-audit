@@ -44,7 +44,9 @@ export function validateProject(input, { maxExtras = 3, maxRules = 50, maxDecisi
     const live = bareHost(str(s.live, 200).replace(/^[a-z]+:\/\//i, '').replace(/[/:?#].*$/, ''));
     if (live && !/^[a-z0-9.-]+\.[a-z0-9-]+$/.test(live)) throw bad(`Canlı alan adı geçersiz: ${s.live}`);
     const crawlId = s.crawlId && ID_RE.test(String(s.crawlId)) ? String(s.crawlId) : null;
-    return { key, role, name: str(s.name, 40) || (role === 'extra' ? `Ek site ${i - 1}` : ''), url, live: role === 'extra' ? live : '', crawlId };
+    // v0.11.0: the live crawl (after launch). Read from a project file; the server keeps it on PUT.
+    const liveCrawlId = role !== 'old' && s.liveCrawlId && ID_RE.test(String(s.liveCrawlId)) ? String(s.liveCrawlId) : null;
+    return { key, role, name: str(s.name, 40) || (role === 'extra' ? `Ek site ${i - 1}` : ''), url, live: role === 'extra' ? live : '', crawlId, liveCrawlId };
   });
   if (sites.filter((s) => s.role === 'old').length !== 1) throw bad('Projede bir eski site olmalı.');
   if (sites.filter((s) => s.role === 'heir').length !== 1) throw bad('Projede bir "eski alan adına geçecek site" olmalı.');
@@ -69,6 +71,13 @@ export function validateProject(input, { maxExtras = 3, maxRules = 50, maxDecisi
   const out = { name, structure, sites, rules };
   // 301 map decisions (v0.8.0). Only read from a project file (import). The browser changes them with POST /map.
   if (input.map && typeof input.map === 'object' && !Array.isArray(input.map)) out.map = cleanMap(input.map, sites, maxDecisions);
+  // v0.11.0: the launch mark (day and crawl ids before launch). Only read from a project file; POST /launch sets it.
+  const l = input.launch;
+  if (l && typeof l === 'object' && /^\d{4}-\d{2}-\d{2}$/.test(String(l.at || '')) && !Number.isNaN(Date.parse(l.at))) {
+    const crawls = {};
+    for (const s of sites) if (l.crawls?.[s.key] && ID_RE.test(String(l.crawls[s.key]))) crawls[s.key] = String(l.crawls[s.key]);
+    out.launch = { at: l.at, markedAt: typeof l.markedAt === 'string' ? l.markedAt.slice(0, 40) : null, crawls };
+  }
   return out;
 }
 

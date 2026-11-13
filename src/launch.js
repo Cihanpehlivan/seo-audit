@@ -1,6 +1,7 @@
 // Launch list (v0.10.0, Sprint 3 Part 3a). Reads the staging crawls of a project and lists the work before go-live.
 // Groups by time: critical (fix before launch), decide (the 301 map), switch (change at launch: normal on staging),
-// check (compare with the old site). A site crawled on its live domain is not staging: its checks come in Part 3b.
+// check (compare with the old site). A site crawled on its live domain is not staging: its checks are in the live check
+// (v0.11.0, src/verify.js), which uses the shared functions below.
 import robotsParser from 'robots-parser';
 import { isOk, isNoindex, isStagingHost, blocksIndex } from './rules/helpers.js';
 
@@ -23,6 +24,93 @@ export function rootBlocked(res) {
   return robotsParser(`${origin}/robots.txt`, r.body).isAllowed(`${origin}/`, 'Googlebot') === false;
 }
 
+// Which hosts are staging? info: [{ host, liveHost, staging }] of the target sites. Live hosts are never staging.
+// v0.11.0: shared with the live check (src/verify.js).
+export function makeIsStaging(info, cfg = {}) {
+  const liveHosts = new Set(info.map((x) => x.liveHost).filter(Boolean));
+  const stagingHosts = new Set(info.filter((x) => x.staging).map((x) => x.host));
+  return (h) => {
+    const b = bare(h);
+    if (!b || liveHosts.has(b)) return false;
+    return stagingHosts.has(b) || (cfg.stagingHosts ? isStagingHost(b, cfg) : false);
+  };
+}
+
+// Staging addresses written in full on a site (canonical, hreflang, link, asset, sitemap, robots.txt Sitemap line).
+// fresh: the crawl has the data (v0.10.0+). Returns null when there is nothing to report.
+export function stagingAddresses(res, isStg) {
+  const ok = res.pages.filter(isOk);
+  const fresh = ok.some((p) => p.absHosts) && !!res.meta.sitemap?.hosts;
+  const list = [];
+  if (fresh) {
+    for (const p of ok) {
+      const a = p.absHosts;
+      if (isStg(a.canonical)) list.push({ what: 'canonical', page: p.url, value: p.canonical });
+      const hl = (p.hreflang || []).filter((h) => isStg(hostOf(h.url)));
+      if (a.hreflang.some(isStg) && hl.length) for (const h of hl) list.push({ what: 'hreflang', page: p.url, value: `${h.lang} → ${h.url}` });
+      const lh = a.link.filter(isStg);
+      if (lh.length) list.push({ what: 'link', page: p.url, value: lh.join(', ') });
+      const ah = a.asset.filter(isStg);
+      if (ah.length) list.push({ what: 'asset', page: p.url, value: ah.join(', ') });
+    }
+    const smFiles = (res.meta.sitemap.files || []).filter((f) => !f.index).map((f) => f.url).join(', ');
+    for (const [h, n] of Object.entries(res.meta.sitemap.hosts)) if (isStg(h)) list.push({ what: 'sitemap', page: smFiles, value: `${n} URL · ${h}`, count: n });
+  }
+  for (const u of res.meta.robots?.sitemaps || []) if (isStg(hostOf(u))) list.push({ what: 'robots', page: `${new URL(res.meta.startUrl).origin}/robots.txt`, value: `Sitemap: ${u}` });
+  if (!list.length) return { fresh, found: null };
+  const detail = {};
+  for (const x of list) detail[x.what] = (detail[x.what] || 0) + (x.count || 1);
+  const order = Object.keys(STAGE_KIND);
+  list.sort((a, b) => order.indexOf(a.what) - order.indexOf(b.what));
+  return { fresh, found: { n: Object.values(detail).reduce((a, b) => a + b, 0), detail, list: list.map(({ count, ...x }) => ({ ...x, what: STAGE_KIND[x.what] })) } };
+}
+
+// Settings that close a site to Google: noindex (meta robots, X-Robots-Tag) and robots.txt "Disallow: /".
+export function indexBlockers(res) {
+  const ok = res.pages.filter(isOk);
+  const noindex = ok.filter(isNoindex);
+  const robotsUrl = `${new URL(res.meta.startUrl).origin}/robots.txt`;
+  return {
+    open: ok.filter((p) => !isNoindex(p)),
+    noindex: noindex.length ? {
+      n: noindex.length,
+      detail: { meta: noindex.filter((p) => blocksIndex(p.metaRobots)).length, header: noindex.filter((p) => blocksIndex(p.xRobotsTag)).length },
+      list: noindex.map((p) => ({ what: [p.metaRobots && 'meta robots', p.xRobotsTag && 'X-Robots-Tag'].filter(Boolean).join(', '), page: p.url, value: [p.metaRobots, p.xRobotsTag].filter(Boolean).join(' · ') })),
+    } : null,
+    disallow: rootBlocked(res) ? { list: [{ what: 'robots.txt', page: robotsUrl, value: 'Disallow: /' }] } : null,
+  };
+}
+
+// Tags of the old site on a new site: Analytics/GTM IDs and (heir only) the Search Console meta tag.
+// Returns [] when a crawl has no tag data. Each item: { kind, n, unit, info, note, list }.
+const union = (pages, f) => new Set(pages.flatMap((p) => p[f] || []));
+export const hasTagData = (ok) => ok.some((p) => Array.isArray(p.tracking));
+export function tagCheck(oldOk, ok, { heir = false } = {}) {
+  if (!hasTagData(oldOk) || !hasTagData(ok)) return [];
+  const out = [];
+  const oldIds = union(oldOk, 'tracking'), oldVer = union(oldOk, 'gscVerify');
+  const ids = union(ok, 'tracking');
+  const missing = [...oldIds].filter((x) => !ids.has(x));
+  if (oldIds.size && missing.length) {
+    const none = !ids.size;
+    out.push({ kind: 'tracking', n: none ? missing.length : 0, unit: none ? 'eksik' : 'farklı', info: !none,
+      note: none ? `Eski site: ${[...oldIds].join(', ')}. Yeni site: yok. Etiketi ekleyin.`
+        : `Eski site: ${[...oldIds].join(', ')}. Yeni site: ${[...ids].join(', ')}. Yeni hesap bilinçli olabilir. Kontrol edin.`,
+      list: missing.map((x) => ({ what: 'eksik kimlik', page: '', value: x })) });
+  }
+  // Search Console: only the heir. It takes the old domain, so the old verification must stay.
+  if (heir && oldVer.size) {
+    const ver = union(ok, 'gscVerify');
+    if (![...oldVer].some((x) => ver.has(x))) {
+      const none = !ver.size;
+      out.push({ kind: 'gsc', n: none ? 1 : 0, unit: none ? 'eksik' : 'farklı', info: !none,
+        note: none ? 'Eski sitede var, yeni sitede yok. DNS ile doğruladıysanız iş yok.' : 'Yeni sitede başka bir doğrulama değeri var. Mülk değişmiş olabilir. Kontrol edin.',
+        list: [...oldVer].map((x) => ({ what: 'eski değer', page: '', value: x })) });
+    }
+  }
+  return out;
+}
+
 // oldRes: crawl of the old site. sites: target sites, heir first: { key, role, res, liveOrigin }.
 // map: 301 map (rows, noLive). cfg: the whole rules.json (staging patterns and the launch section).
 export function buildLaunch({ oldRes, sites, map, cfg = {} }) {
@@ -35,13 +123,7 @@ export function buildLaunch({ oldRes, sites, map, cfg = {} }) {
     const host = bare(s.res.meta.host), liveHost = s.liveOrigin ? bare(hostOf(s.liveOrigin)) : '';
     return { key: s.key, role: s.role, host, liveHost, staging: !liveHost || host !== liveHost };
   });
-  const liveHosts = new Set(info.map((x) => x.liveHost).filter(Boolean));
-  const stagingHosts = new Set(info.filter((x) => x.staging).map((x) => x.host));
-  const isStg = (h) => {
-    const b = bare(h);
-    if (!b || liveHosts.has(b)) return false;
-    return stagingHosts.has(b) || (cfg.stagingHosts ? isStagingHost(b, cfg) : false);
-  };
+  const isStg = makeIsStaging(info, cfg);
 
   // ---- Critical: staging addresses in the 301 list ----
   const noLive = new Set(map?.noLive || []);
@@ -63,61 +145,34 @@ export function buildLaunch({ oldRes, sites, map, cfg = {} }) {
     const me = info.find((x) => x.key === s.key);
     if (!me.staging) continue;
     const res = s.res;
-    const ok = res.pages.filter(isOk);
-    const fresh = ok.some((p) => p.absHosts) && !!res.meta.sitemap?.hosts;
-    const blocked = rootBlocked(res);
-    const noindex = ok.filter(isNoindex);
-    const open = ok.filter((p) => !isNoindex(p));
+    const ib = indexBlockers(res);
 
     // Critical: staging is open to Google (no password, no noindex, no Disallow).
-    if (!res.meta.options?.auth && !blocked && open.length) {
-      add({ group: 'critical', kind: 'staging-open', site: s.key, team: 'Backend', title: 'Staging Google\'a açık', n: open.length, unit: 'sayfa',
+    if (!res.meta.options?.auth && !ib.disallow && ib.open.length) {
+      add({ group: 'critical', kind: 'staging-open', site: s.key, team: 'Backend', title: 'Staging Google\'a açık', n: ib.open.length, unit: 'sayfa',
         note: 'Staging şifresiz. noindex ve Disallow yok. Google sayfaları dizine ekleyebilir. Şifre veya noindex ekleyin.',
-        list: open.map((p) => ({ what: 'açık', page: p.url, value: '' })) });
+        list: ib.open.map((p) => ({ what: 'açık', page: p.url, value: '' })) });
     }
 
     // Critical: the staging address is written in full on the site. It breaks after launch.
-    const list = [];
-    if (fresh) {
-      for (const p of ok) {
-        const a = p.absHosts;
-        if (isStg(a.canonical)) list.push({ what: 'canonical', page: p.url, value: p.canonical });
-        const hl = (p.hreflang || []).filter((h) => isStg(hostOf(h.url)));
-        if (a.hreflang.some(isStg) && hl.length) for (const h of hl) list.push({ what: 'hreflang', page: p.url, value: `${h.lang} → ${h.url}` });
-        const lh = a.link.filter(isStg);
-        if (lh.length) list.push({ what: 'link', page: p.url, value: lh.join(', ') });
-        const ah = a.asset.filter(isStg);
-        if (ah.length) list.push({ what: 'asset', page: p.url, value: ah.join(', ') });
-      }
-      const smFiles = (res.meta.sitemap.files || []).filter((f) => !f.index).map((f) => f.url).join(', ');
-      for (const [h, n] of Object.entries(res.meta.sitemap.hosts)) if (isStg(h)) list.push({ what: 'sitemap', page: smFiles, value: `${n} URL · ${h}`, count: n });
-    }
-    for (const u of res.meta.robots?.sitemaps || []) if (isStg(hostOf(u))) list.push({ what: 'robots', page: `${new URL(res.meta.startUrl).origin}/robots.txt`, value: `Sitemap: ${u}` });
-    if (list.length) {
-      const detail = {};
-      for (const x of list) detail[x.what] = (detail[x.what] || 0) + (x.count || 1);
-      const n = Object.values(detail).reduce((a, b) => a + b, 0);
-      const order = Object.keys(STAGE_KIND);
-      list.sort((a, b) => order.indexOf(a.what) - order.indexOf(b.what));
-      add({ group: 'critical', kind: 'staging-addr', site: s.key, team: 'CMS', title: 'Sitede staging adresi yazılı', n, unit: 'adres', detail, list: list.map(({ count, ...x }) => ({ ...x, what: STAGE_KIND[x.what] })),
+    const sa = stagingAddresses(res, isStg);
+    if (sa.found) {
+      add({ group: 'critical', kind: 'staging-addr', site: s.key, team: 'CMS', title: 'Sitede staging adresi yazılı', unit: 'adres', ...sa.found,
         note: 'Staging alan adı açık yazılmış. Canlıdan sonra bu adresler staging\'e gider veya kırılır. Göreli adres veya canlı alan adı kullanın.' });
     }
-    if (!fresh) {
+    if (!sa.fresh) {
       add({ group: 'check', kind: 'recrawl', site: s.key, team: 'Siz', title: 'Tarama eski', n: 1, unit: '',
         note: 'Bu tarama staging adresi, sitemap ve etiket verisini içermiyor. Siteyi tekrar tarayın.', action: { type: 'recrawl', site: s.key } });
     }
 
     // Switch at launch: normal on staging, wrong on the live site.
-    if (noindex.length) {
-      const meta = noindex.filter((p) => blocksIndex(p.metaRobots)).length;
-      const head = noindex.filter((p) => blocksIndex(p.xRobotsTag)).length;
-      add({ group: 'switch', kind: 'noindex', site: s.key, team: 'Backend', title: 'noindex', n: noindex.length, unit: 'sayfa', detail: { meta, header: head },
-        note: 'Canlıya çıkışta noindex etiketini ve X-Robots-Tag başlığını kaldırın.',
-        list: noindex.map((p) => ({ what: [p.metaRobots && 'meta robots', p.xRobotsTag && 'X-Robots-Tag'].filter(Boolean).join(', '), page: p.url, value: [p.metaRobots, p.xRobotsTag].filter(Boolean).join(' · ') })) });
+    if (ib.noindex) {
+      add({ group: 'switch', kind: 'noindex', site: s.key, team: 'Backend', title: 'noindex', unit: 'sayfa', ...ib.noindex,
+        note: 'Canlıya çıkışta noindex etiketini ve X-Robots-Tag başlığını kaldırın.' });
     }
-    if (blocked) {
+    if (ib.disallow) {
       add({ group: 'switch', kind: 'disallow', site: s.key, team: 'Backend', title: 'robots.txt Disallow: /', n: 1, unit: 'bütün site',
-        note: 'robots.txt bütün siteyi Googlebot\'a kapatıyor. Canlıya çıkışta bu satırı kaldırın.', list: [{ what: 'robots.txt', page: `${new URL(res.meta.startUrl).origin}/robots.txt`, value: 'Disallow: /' }] });
+        note: 'robots.txt bütün siteyi Googlebot\'a kapatıyor. Canlıya çıkışta bu satırı kaldırın.', list: ib.disallow.list });
     }
   }
 
@@ -131,34 +186,13 @@ export function buildLaunch({ oldRes, sites, map, cfg = {} }) {
 
   // ---- Check: tags of the old site ----
   const oldOk = oldRes.pages.filter(isOk);
-  const oldFresh = oldOk.some((p) => Array.isArray(p.tracking));
-  if (!oldFresh && oldOk.length) {
+  if (!hasTagData(oldOk) && oldOk.length) {
     add({ group: 'check', kind: 'recrawl', site: 'old', team: 'Siz', title: 'Tarama eski', n: 1, unit: '',
       note: 'Eski site taraması etiket verisini içermiyor. Analytics ve Search Console kontrolü için eski siteyi tekrar tarayın.', action: { type: 'recrawl', site: 'old' } });
   }
-  const union = (pages, f) => new Set(pages.flatMap((p) => p[f] || []));
-  const oldIds = union(oldOk, 'tracking'), oldVer = union(oldOk, 'gscVerify');
   for (const s of sites) {
-    const ok = s.res.pages.filter(isOk);
-    if (!oldFresh || !ok.some((p) => Array.isArray(p.tracking))) continue;
-    const ids = union(ok, 'tracking');
-    const missing = [...oldIds].filter((x) => !ids.has(x));
-    if (oldIds.size && missing.length) {
-      const none = !ids.size;
-      add({ group: 'check', kind: 'tracking', site: s.key, team: 'Frontend', title: 'Analytics / GTM etiketi', n: none ? missing.length : 0, unit: none ? 'eksik' : 'farklı', info: !none,
-        note: none ? `Eski site: ${[...oldIds].join(', ')}. Yeni site: yok. Etiketi ekleyin.`
-          : `Eski site: ${[...oldIds].join(', ')}. Yeni site: ${[...ids].join(', ')}. Yeni hesap bilinçli olabilir. Kontrol edin.`,
-        list: missing.map((x) => ({ what: 'eksik kimlik', page: '', value: x })) });
-    }
-    // Search Console: only the heir. It takes the old domain, so the old verification must stay.
-    if (s.role === 'heir' && oldVer.size) {
-      const ver = union(ok, 'gscVerify');
-      if (![...oldVer].some((x) => ver.has(x))) {
-        const none = !ver.size;
-        add({ group: 'check', kind: 'gsc', site: s.key, team: 'Frontend', title: 'Search Console doğrulama etiketi', n: none ? 1 : 0, unit: none ? 'eksik' : 'farklı', info: !none,
-          note: none ? 'Eski sitede var, yeni sitede yok. DNS ile doğruladıysanız iş yok.' : 'Yeni sitede başka bir doğrulama değeri var. Mülk değişmiş olabilir. Kontrol edin.',
-          list: [...oldVer].map((x) => ({ what: 'eski değer', page: '', value: x })) });
-      }
+    for (const t of tagCheck(oldOk, s.res.pages.filter(isOk), { heir: s.role === 'heir' })) {
+      add({ group: 'check', site: s.key, team: 'Frontend', title: t.kind === 'gsc' ? 'Search Console doğrulama etiketi' : 'Analytics / GTM etiketi', ...t });
     }
   }
 
