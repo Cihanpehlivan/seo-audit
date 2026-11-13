@@ -27,6 +27,7 @@ const DEFAULTS = {
   checks: false,         // true or { site, external, images, variants }: extra checks after the crawl
   onChecks: null,        // progress of the extra checks: { done, total }
   blockPrivate: false,   // public server: never request private or internal addresses (SSRF guard)
+  seeds: null,           // v0.12.0: only these URLs (old address list). No links, no sitemap, no hop to another host
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -52,6 +53,10 @@ export async function crawl(startUrl, opts = {}) {
   const start = normalizeUrl(startUrl);
   if (!start) throw new Error(`Geçersiz URL: ${startUrl}`);
   const root = new URL(start);
+  // v0.12.0: list mode. The tool asks only the given addresses of the site. It follows no link and reads no sitemap.
+  // A redirect to another host is recorded but not requested: the requests stay on this site.
+  const listMode = Array.isArray(o.seeds);
+  if (listMode) o.useSitemap = false;
   const headers = { 'user-agent': o.userAgent, accept: 'text/html,application/xhtml+xml,*/*;q=0.8' };
   if (o.auth) headers.authorization = 'Basic ' + Buffer.from(o.auth).toString('base64');
 
@@ -117,6 +122,7 @@ export async function crawl(startUrl, opts = {}) {
         chain.push({ url: current, status: res.status, to: next });
         res.body?.cancel?.().catch(() => {});
         r.done();
+        if (listMode && next && !isInternal(next, root.hostname)) return { chain, finalUrl: next, status: res.status, offHost: true, ms: totalMs };
         if (!next || chain.some((c) => c.url === next)) {
           return { chain, finalUrl: next || current, status: res.status, error: 'redirect-loop', ms: totalMs };
         }
@@ -190,7 +196,9 @@ export async function crawl(startUrl, opts = {}) {
     (source === 'sitemap' ? sitemapQueue : linkQueue).push({ url, depth, foundOn, source });
   }
 
-  enqueue(start, 0, null, 'start');
+  if (listMode) {
+    for (const u of o.seeds) { const n = normalizeUrl(u); if (n && isInternal(n, root.hostname) && !queued.has(n)) { queued.add(n); linkQueue.push({ url: n, depth: null, foundOn: null, source: 'list' }); } }
+  } else enqueue(start, 0, null, 'start');
   for (const u of sitemap.urls) if (isInternal(u, root.hostname)) {
     // Sitemap URLs are crawled after link discovery, so orphan pages are visible.
     if (!queued.has(u) && !looksLikeAsset(u)) { queued.add(u); sitemapQueue.push({ url: u, depth: null, foundOn: null, source: 'sitemap' }); }
@@ -217,10 +225,14 @@ export async function crawl(startUrl, opts = {}) {
       sizeBytes: r.size || 0,
       contentEncoding: r.contentEncoding || '',
       ...(r.truncated ? { truncated: true } : {}),
+      ...(r.offHost ? { offHost: true } : {}),
       ...(r.finalUrl?.startsWith('https:') && !r.chain.length ? { hsts: r.hsts || '' } : {}),
     });
 
-    if (r.chain.length) {
+    if (listMode) {
+      // List mode: read the page, follow nothing.
+      if (!r.chain.length && r.body && /html/i.test(r.contentType) && r.status < 400) Object.assign(rec, parsePage(r.body, item.url, root.hostname));
+    } else if (r.chain.length) {
       // Redirecting URL: crawl the target as its own page.
       const d = item.depth == null ? null : item.depth + 1;
       enqueue(r.finalUrl, d, item.url, 'redirect');

@@ -1,6 +1,7 @@
 // Writes crawl results to an Excel file for the team.
 import ExcelJS from 'exceljs';
 import { FIX } from './compare.js';
+import { RESULT as LIST_RESULT } from './urllist.js';
 
 const HEAD = { font: { bold: true, color: { argb: 'FFFFFFFF' } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3C3489' } } };
 
@@ -170,7 +171,15 @@ function siteRows(ck) {
 }
 
 // Comparison of two crawls (old site vs new site) as an Excel file.
-export async function exportCompareExcel(cmp, file, { map, todo, launch, verify, siteNames = {} } = {}) {
+// v0.12.0: traffic columns of the old address list. Only the numbers that exist in the list get a column.
+const TRAFFIC_COLS = [['c', 'Tıklama'], ['i', 'Gösterim'], ['v', 'Görüntüleme'], ['l', 'Link veren alan adı']];
+function trafficColumns(rows) {
+  const has = new Set(rows.flatMap((r) => Object.keys(r.traffic || {})));
+  return TRAFFIC_COLS.filter(([k]) => has.has(k)).map(([k, header]) => ({ header, key: `t_${k}`, width: k === 'l' ? 20 : 12 }));
+}
+const trafficCells = (t) => Object.fromEntries(TRAFFIC_COLS.map(([k]) => [`t_${k}`, t?.[k] ?? null]));
+
+export async function exportCompareExcel(cmp, file, { map, todo, launch, verify, urlList, siteNames = {} } = {}) {
   const wb = new ExcelJS.Workbook();
   const s = cmp.summary;
   const targets = cmp.targets || [cmp.new];
@@ -296,15 +305,24 @@ export async function exportCompareExcel(cmp, file, { map, todo, launch, verify,
   if (map?.rows.length) {
     const ST = { rule: 'Kural (301)', approved: 'Onaylandı (301)', gone: '410', pending: 'Onay bekliyor', none: 'Öneri yok' };
     const CONF = { high: 'Yüksek', mid: 'Orta', low: 'Düşük' };
+    const tcols = trafficColumns(map.rows);
     sheet(wb, '301 haritası', [
-      { header: 'Eski URL', key: 'oldUrl', width: 60 }, { header: 'Yeni URL', key: 'to', width: 60 }, { header: 'Durum', key: 'st', width: 18 },
+      { header: 'Eski URL', key: 'oldUrl', width: 60 }, ...tcols, { header: 'Yeni URL', key: 'to', width: 60 }, { header: 'Durum', key: 'st', width: 18 },
       { header: 'Kaynak', key: 'src', width: 24 }, { header: 'Araç önerisi', key: 'sug', width: 60 },
       { header: 'Güven', key: 'conf', width: 10 }, { header: 'Puan', key: 'score', width: 8 }, { header: 'Neden', key: 'why', width: 70 }, { header: 'Uyarı', key: 'warn', width: 40 },
+      { header: 'Eski sayfa nereden', key: 'found', width: 20 },
     ], map.rows.map((r) => {
       const best = r.candidates?.[0];
-      return { oldUrl: r.oldUrl, to: r.target?.url || '', st: ST[r.status], src: mapSource(r), sug: best?.url || '',
+      return { oldUrl: r.oldUrl, ...trafficCells(r.traffic), found: r.fromList ? 'Eski adres listesi' : 'Tarama', to: r.target?.url || '', st: ST[r.status], src: mapSource(r), sug: best?.url || '',
         conf: best ? CONF[best.conf] : '', score: best ? best.score : null, why: best?.why || r.why || '', warn: r.warn || '' };
     }));
+  }
+  // v0.12.0: every address of the old address list and its result. Traffic order.
+  if (urlList?.rows.length) {
+    sheet(wb, 'Eski adres listesi', [
+      { header: 'Eski yol', key: 'path', width: 60 }, ...trafficColumns(urlList.rows), { header: 'Sonuç', key: 'res', width: 26 },
+      { header: 'Ayrıntı', key: 'detail', width: 50 },
+    ], urlList.rows.map((r) => ({ path: r.path, ...trafficCells(r.traffic), res: LIST_RESULT[r.result] || r.result, detail: r.detail })));
   }
   if (cmp.suggestions?.length) {
     sheet(wb, 'Öneriler', [

@@ -76,8 +76,12 @@ export function validateProject(input, { maxExtras = 3, maxRules = 50, maxDecisi
   if (l && typeof l === 'object' && /^\d{4}-\d{2}-\d{2}$/.test(String(l.at || '')) && !Number.isNaN(Date.parse(l.at))) {
     const crawls = {};
     for (const s of sites) if (l.crawls?.[s.key] && ID_RE.test(String(l.crawls[s.key]))) crawls[s.key] = String(l.crawls[s.key]);
+    // v0.12.0: the crawl of the old address list is locked too.
+    if (l.crawls?.list && ID_RE.test(String(l.crawls.list))) crawls.list = String(l.crawls.list);
     out.launch = { at: l.at, markedAt: typeof l.markedAt === 'string' ? l.markedAt.slice(0, 40) : null, crawls };
   }
+  // v0.12.0: crawl of the old address list (read from a project file; the server keeps it on PUT).
+  if (input.urlList?.crawlId && ID_RE.test(String(input.urlList.crawlId))) out.urlList = { crawlId: String(input.urlList.crawlId) };
   return out;
 }
 
@@ -110,11 +114,31 @@ async function writeAtomic(file, data) {
 
 export class ProjectStore {
   constructor(dir) { this.dir = dir; this.queue = new Map(); }
+  // v0.12.0: the old address list of a project is a separate file (lists/<id>.json). The project file stays small:
+  // the side bar reads every project file. The list is customer data: crawls/ is never in the repository.
+  listFile(id) { this.file(id); return path.join(this.dir, 'lists', `${id}.json`); }
+  async getList(id) { try { return JSON.parse(await readFile(this.listFile(id), 'utf8')); } catch { return { version: 1, sources: [] }; } }
+  // Read, change and write the list of one project at a time. fn returns the new list.
+  updateList(id, fn) {
+    return this.serial(`list:${id}`, async () => {
+      const out = await fn(await this.getList(id));
+      if (!out.sources.length) { await unlink(this.listFile(id)).catch(() => {}); return out; }
+      await writeAtomic(this.listFile(id), JSON.stringify(out));
+      return out;
+    });
+  }
+  serial(key, job) {
+    const prev = this.queue.get(key) || Promise.resolve();
+    const next = prev.catch(() => {}).then(job);
+    this.queue.set(key, next);
+    next.finally(() => { if (this.queue.get(key) === next) this.queue.delete(key); }).catch(() => {});
+    return next;
+  }
   file(id) {
     if (!PID_RE.test(id)) throw Object.assign(new Error('Geçersiz proje'), { code: 400 });
     return path.join(this.dir, `${id}.json`);
   }
-  async init() { await mkdir(this.dir, { recursive: true }); }
+  async init() { await mkdir(path.join(this.dir, 'lists'), { recursive: true }); }
   async get(id) { return JSON.parse(await readFile(this.file(id), 'utf8')); }
   async list() {
     const files = (await readdir(this.dir)).filter((f) => f.endsWith('.json'));
@@ -129,17 +153,13 @@ export class ProjectStore {
   }
   // Read, change and write one project at a time. fn returns the new project (or nothing to keep it).
   update(id, fn) {
-    const prev = this.queue.get(id) || Promise.resolve();
-    const next = prev.catch(() => {}).then(async () => {
+    return this.serial(id, async () => {
       const p = await this.get(id);
       const out = (await fn(p)) || p;
       out.updatedAt = new Date().toISOString();
       await writeAtomic(this.file(id), JSON.stringify(out, null, 1));
       return out;
     });
-    this.queue.set(id, next);
-    next.finally(() => { if (this.queue.get(id) === next) this.queue.delete(id); }).catch(() => {});
-    return next;
   }
-  async remove(id) { await unlink(this.file(id)).catch(() => {}); }
+  async remove(id) { await unlink(this.file(id)).catch(() => {}); await unlink(this.listFile(id)).catch(() => {}); }
 }

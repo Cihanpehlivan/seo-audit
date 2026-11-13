@@ -21,6 +21,12 @@ export function startMigrationSites() {
     '/tr/': [200, page('Türkçe')], '/tr/a': [200, page('A')], '/tr/b': [200, page('B')], '/tr/c': [200, page('C')],
     '/fr/x': [200, page('X')], '/fr/y': [200, page('Y')], '/fr/z': [200, page('Z')],
     '/robots.txt': [200, '', { 'content-type': 'text/plain' }],
+    // v0.12.0: pages without links (no sitemap). Only the old address list finds them (test/urllist-test.js).
+    '/eski-kampanya': [200, page('Hakkında kampanya')],
+    '/eski-indirim': [301, '', { location: '/about' }],
+    '/disari': [301, '', { location: 'http://baska.example/x' }], // another host: list mode must not ask it
+    '/notlar': [200, 'düz metin', { 'content-type': 'text/plain; charset=utf-8' }],
+    // /eski-katalog: 404
   });
   const heir = serve({
     '/': [200, page('Ana sayfa', '<a href="/about">About</a>')], '/about': [200, page('Hakkında')],

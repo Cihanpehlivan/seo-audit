@@ -557,7 +557,8 @@ $('#prjUpload2').addEventListener('change', (e) => { if (e.target.files[0]) uplo
 async function openProject(id, step) {
   currentId = null; es?.close();
   show('projectView');
-  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, openSecs: new Set(), mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100, vf: null, vfKey: '', vfErr: null });
+  if (prj.id !== id) Object.assign(prj, { id, project: null, status: null, match: null, matchKey: '', matchErr: null, matchNeed: null, openSecs: new Set(), mapTab: null, mapChoice: {}, mapManual: {}, mapShow: 100, vf: null, vfKey: '', vfErr: null, list: null, listState: null });
+  if (ul.pid !== id) Object.assign(ul, UL_EMPTY(), { pid: id });
   prj.step = PANES[step] ? step : prj.step && prj.id === id ? prj.step : null;
   loadHistory();
   try { Object.assign(prj, await api(`/api/projects/${encodeURIComponent(id)}`)); }
@@ -571,6 +572,7 @@ async function openProject(id, step) {
   if (!prj.step) prj.step = firstStep();
   renderProject();
   watchCrawls();
+  loadList();
   if (MATCH_STEPS.includes(prj.step)) loadMatch();
   if (prj.step === 'dogrulama') loadVerify();
 }
@@ -596,7 +598,7 @@ function renderProject() {
   renderNext();
   renderRecheck();
   if (prj.step === 'proje') renderSites();
-  if (prj.step === 'tarama') renderCrawls();
+  if (prj.step === 'tarama') { renderCrawls(); renderList(); }
   if (prj.step === 'eslestirme') renderSections();
   if (prj.step === 'harita') renderMap();
   if (prj.step === 'yapilacaklar') renderTodo();
@@ -643,6 +645,10 @@ function nextTask() {
     if (x.state === 'stale') return { text: `${siteName(s)} adresi değişti. Tarama eski adrese ait. Tekrar tarayın.`, btn: 'Tekrar tara', act: { crawl: s.key } };
     if (x.pages && !x.ok) return { text: `${siteName(s)} taramasında açılan sayfa yok.${x.blocked ? ' robots.txt sayfaları engelledi.' : ''} Ayarları değiştirip tekrar tarayın.`, btn: 'Tarama ayarlarını aç', act: { step: 'tarama', settings: true } };
   }
+  // v0.12.0: the old address list changes the old page set. Its requests come before the matching.
+  const ls = prj.listState;
+  if (ls?.state === 'running') return { text: `Listedeki adresler eski sitede isteniyor: ${ls.done} / ${ls.total}.`, btn: 'Listeyi gösterin', act: { step: 'tarama', listFocus: true } };
+  if (!p.launch && prj.list?.open && !prj.list.needOld) return { text: `${prj.list.open} adres taramada yok. Eski sitede isteyin. Açılan sayfa eski sayfa olur ve 301 haritasına girer.`, btn: 'Adresleri isteyin', act: { listFetch: true } };
   if (prj.loading) return { text: 'Eşleştiriliyor. Araç eski adresleri yeni sitelerde istiyor.', btn: null };
   if (prj.matchErr) return { text: prj.matchErr, btn: 'Tekrar dene', act: { reload: true } };
   if (!prj.match) return { text: 'Siteler tarandı. Eski bölümleri yeni sitelerle eşleştirin.', btn: 'Eşleştirmeyi aç', act: { step: 'eslestirme' } };
@@ -710,6 +716,8 @@ $('#prjNext').addEventListener('click', async (e) => {
   const a = prj.nextAct || {};
   if (a.live) { location.hash = `#/live/${a.live}`; return; }
   if (a.crawl) { goStep('tarama'); await startSiteCrawl(a.crawl); return; }
+  if (a.listFetch) { goStep('tarama'); await startListFetch(); return; }
+  if (a.listFocus) setTimeout(() => $('#prjList').scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
   if (a.excel) { location.href = `/api/projects/${prj.id}/excel`; return; }
   if (a.csv) { location.href = `/api/projects/${prj.id}/map?format=csv`; return; }
   if (a.approveHigh) { approveHigh(); return; }
@@ -826,7 +834,8 @@ async function renderCrawls() {
     const host = siteHost(s);
     const tag = x.state === 'done' ? `${label} · ${x.pages} sayfa` : x.state === 'running' ? `${label} · ${x.done} URL` : label;
     const warnTag = x.state === 'done' && x.pages && !x.ok ? '<span class="tag-s warn">Açılan sayfa yok</span>' : x.state === 'done' && x.limitReached ? '<span class="tag-s warn">URL limiti</span>' : '';
-    const same = crawlHistory.filter((h) => host && bare(h.host) === bare(host) && h.id !== x.crawlId);
+    // v0.12.0: a crawl of the old address list is not a site crawl. It is never offered here.
+    const same = crawlHistory.filter((h) => host && bare(h.host) === bare(host) && h.id !== x.crawlId && h.label !== 'liste');
     const locked = !!p.launch && x.state !== 'running';
     const btn = locked ? `<span class="tag-s idle" title="Canlıya çıkıştan sonra kilitli">Kilitli</span>`
       : !s.url ? `<button type="button" class="ghost small" data-goto-proje>Adresi yazın</button>`
@@ -869,7 +878,7 @@ $('#prjCrawls').addEventListener('change', async (e) => {
 function watchCrawls() {
   clearTimeout(prj.poll);
   const isRun = (x) => x.state === 'running' || x.live?.state === 'running';
-  const running = Object.values(prj.status || {}).some(isRun);
+  const running = Object.values(prj.status || {}).some(isRun) || prj.listState?.state === 'running';
   if (!running) return;
   prj.poll = setTimeout(async () => {
     if ($('#projectView').hidden) return;
@@ -877,7 +886,9 @@ function watchCrawls() {
       const d = await api(`/api/projects/${prj.id}`);
       const finished = Object.keys(d.status).some((k) => prj.status[k]?.state === 'running' && d.status[k].state !== 'running');
       const liveDone = Object.keys(d.status).some((k) => prj.status[k]?.live?.state === 'running' && d.status[k].live?.state !== 'running');
+      const listDone = prj.listState?.state === 'running' && d.listState?.state !== 'running';
       Object.assign(prj, d);
+      if (listDone) { prj.match = null; prj.matchKey = ''; loadHistory(); loadList(); }
       if (finished) { prj.match = null; prj.matchKey = ''; loadHistory(); }
       if (liveDone) { prj.vfKey = ''; loadHistory(); if (prj.step === 'dogrulama') loadVerify(); }
       renderProject();
@@ -886,8 +897,170 @@ function watchCrawls() {
   }, 2000);
 }
 
+
+// ---------- Old address list (v0.12.0): card on the Tarama step ----------
+// Sources (Search Console, Analytics, backlink, plain list) → cleaned on the server → addresses that are not in the
+// old crawl are asked on the old site → pages that answer join the old page set. Before launch only.
+const LIST_RESULT = {
+  crawl: ['Taramada vardı', 'idle'], found: ['Yeni bulundu', 'ok'], gone: ['Eski sitede hata', 'warn'], redirect: ['Eski sitede yönleniyor', 'warn'],
+  nothtml: ['HTML değil', 'idle'], error: ['Yanıt yok', 'warn'], blocked: ['robots.txt engeli', 'warn'], pending: ['İstenmedi', 'idle'],
+  limit: ['İstenmedi (sınır)', 'idle'], late: ['Çıkıştan sonra geldi', 'idle'],
+};
+const UL_COLS = [['url', 'Adres'], ['clicks', 'Tıklama'], ['impressions', 'Gösterim'], ['views', 'Görüntüleme'], ['links', 'Link veren alan adı']];
+const UL_EMPTY = () => ({ open: false, text: '', file: '', preview: null, header: null, chosen: null, err: '', busy: false, msg: '' });
+const ul = { pid: null, ...UL_EMPTY() };
+const nf = (n) => Number(n).toLocaleString('tr-TR');
+function trafficText(t) {
+  if (!t) return '';
+  if (t.c != null) return `${nf(t.c)} tıklama`;
+  if (t.i != null) return `${nf(t.i)} gösterim`;
+  if (t.v != null) return `${nf(t.v)} görüntüleme`;
+  if (t.l != null) return `${nf(t.l)} alan adı link verir`;
+  return '';
+}
+const trafficTag = (t) => (trafficText(t) ? `<span class="tag-s click">${esc(trafficText(t))}</span>` : '');
+async function loadList() {
+  const id = prj.id;
+  try { const v = await api(`/api/projects/${id}/urllist`); if (prj.id === id) prj.list = v; } catch { if (prj.id === id) prj.list = null; }
+  if (prj.id !== id || $('#projectView').hidden) return;
+  if (prj.step === 'tarama') renderList();
+  renderNext();
+}
+// POST that keeps the column list of an error (the screen shows the column choice).
+async function listPost(body) {
+  const res = await fetch(`/api/projects/${prj.id}/urllist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || `İstek başarısız (${res.status})`), { columns: data.columns || null });
+  return data;
+}
+async function listPreview() {
+  if (!ul.text.trim()) { ul.err = 'CSV dosyası seçin veya adresleri yapıştırın.'; renderList(); return; }
+  ul.busy = true; ul.err = ''; renderList();
+  try {
+    const { preview } = await listPost({ text: ul.text, file: ul.file, preview: true, columns: ul.chosen });
+    ul.preview = preview;
+    ul.header = preview.header?.length ? preview.header : null;
+    if (ul.header && !ul.chosen) ul.chosen = Object.fromEntries(UL_COLS.map(([k]) => [k, preview.columns[k] || '']));
+  } catch (e) {
+    ul.preview = null; ul.err = e.message;
+    if (e.columns?.length) { ul.header = e.columns; ul.chosen = ul.chosen || Object.fromEntries(UL_COLS.map(([k]) => [k, ''])); }
+  } finally { ul.busy = false; renderList(); }
+}
+async function listAdd() {
+  ul.busy = true; ul.err = ''; renderList();
+  try {
+    const d = await listPost({ text: ul.text, file: ul.file, name: ul.preview?.kindName || '', columns: ul.chosen });
+    prj.list = d.view;
+    Object.assign(ul, UL_EMPTY(), { msg: `${d.added.kindName}: ${nf(d.added.addresses)} adres eklendi.` });
+    prj.match = null; prj.matchKey = '';
+  } catch (e) { ul.err = e.message; }
+  finally { ul.busy = false; renderList(); renderNext(); }
+}
+async function startListFetch() {
+  ul.err = '';
+  try {
+    await api(`/api/projects/${prj.id}/urllist/fetch`, { method: 'POST', body: JSON.stringify({ ignoreRobots: $('#crawlRobots').checked }) });
+    Object.assign(prj, await api(`/api/projects/${prj.id}`));
+    // A short list can end before this answer: the list is loaded again in every case.
+    prj.match = null; prj.matchKey = '';
+    renderProject();
+    watchCrawls();
+    if (prj.listState?.state !== 'running') { loadHistory(); loadList(); }
+  } catch (e) { ul.err = e.message; renderList(); }
+}
+function renderList() {
+  const box = $('#prjList');
+  const L = prj.list;
+  if (!L) { box.innerHTML = ''; return; }
+  const ls = prj.listState || L.state || { state: 'none' };
+  const launched = !!prj.project.launch;
+  const c = L.counts;
+  const has = L.sources.length > 0;
+  const head = `<h3>Eski adres listesi <span class="tag-s idle">İsteğe bağlı</span>${help(TERMS.urlList)}</h3>`;
+  const intro = has ? '' : `<p class="small muted">Linksiz ama trafik alan sayfa taramada yok. Canlıdan sonra bu sayfa 404 verir. Search Console, Analytics veya backlink listesini ekleyin.</p>`;
+  const chips = has ? `<div class="ul-src">${L.sources.map((x) => `<span class="ul-chip">${esc(x.name)} · ${nf(x.rows)} satır${x.afterLaunch ? ' · çıkıştan sonra' : ''}<button type="button" data-ul-del="${esc(x.id)}" aria-label="${esc(x.name)} listesini kaldırın" title="Listeyi kaldırın">✕</button></span>`).join('')}
+    ${ul.open ? '' : '<button type="button" class="ghost small" data-ul-open>+ Liste ekleyin</button>'}</div>` : '';
+  const openBtn = !has && !ul.open ? '<div class="ul-acts"><button type="button" class="ghost small strong" data-ul-open>Liste ekleyin</button></div>' : '';
+  box.innerHTML = head + intro + chips + (ul.msg ? `<p class="small ul-msg" role="status">${esc(ul.msg)}</p>` : '') + openBtn + (ul.open ? listPanel() : '')
+    + (ul.err && !ul.open ? `<p class="err" role="alert">${esc(ul.err)}</p>` : '') + (has ? listResultHtml(L, ls, launched, c) : '');
+}
+function listPanel() {
+  const P = ul.preview;
+  const sel = ul.header ? `<div class="ul-cols">${UL_COLS.map(([k, label]) => `<label>${esc(label)}<select data-ul-col="${k}">
+      <option value="">${k === 'url' ? 'Sütun seçin…' : 'Yok'}</option>${ul.header.map((h) => `<option value="${esc(h)}"${ul.chosen?.[k] === h ? ' selected' : ''}>${esc(h)}</option>`).join('')}</select></label>`).join('')}</div>` : '';
+  const info = P ? `<p class="small">Araç bu listeyi <b>${esc(P.kindName)}</b> olarak okudu. ${nf(P.rows)} satır · ${nf(P.addresses)} eski alan adı adresi${P.merged ? ` · ${nf(P.merged)} tekrar birleşti` : ''}${P.other ? ` · ${nf(P.other)} başka alan adında` : ''}${P.invalid ? ` · ${nf(P.invalid)} satır okunamadı` : ''}${P.assets ? ` · ${nf(P.assets)} dosya adresi (pdf, görsel) atlandı` : ''}.</p>
+    ${ul.header ? '<p class="small muted">Sütunlar yanlış ise değiştirin.</p>' : ''}` : '';
+  return `<div class="ul-panel">
+    <p class="small" style="margin-top:0">CSV dosyası seçin veya adresleri yapıştırın (her satırda bir adres). Ayırıcı virgül veya noktalı virgül olabilir.</p>
+    <div class="ul-acts" style="margin:0"><label class="ghost small strong ul-file">CSV dosyası seçin<input type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" data-ul-file></label>${ul.file ? `<span class="small muted">Dosya: ${esc(ul.file)}</span>` : ''}</div>
+    <label><span class="sr">Adres listesi</span><textarea data-ul-text spellcheck="false" placeholder="Top pages,Clicks,Impressions&#10;https://www.ornek.com/sayfa,120,900">${esc(ul.text.length > 20000 ? ul.text.slice(0, 20000) + '\n…' : ul.text)}</textarea></label>
+    ${sel}${info}${ul.err ? `<p class="err" role="alert">${esc(ul.err)}</p>` : ''}
+    <div class="ul-acts">${P ? `<button type="button" class="primary" data-ul-add${ul.busy ? ' disabled' : ''}>Listeyi ekleyin</button>` : ''}
+      <button type="button" class="ghost small${P ? '' : ' strong'}" data-ul-preview${ul.busy ? ' disabled' : ''}>${P ? 'Tekrar okuyun' : 'Listeyi okuyun'}</button>
+      <button type="button" class="ghost small" data-ul-cancel>Vazgeçin</button></div></div>`;
+}
+function listResultHtml(L, ls, launched, c) {
+  const odd = c.nothtml + c.error + c.blocked;
+  const tiles = [
+    [L.addresses, 'eski alan adında adres', ''], [c.crawl, 'taramada vardı', ''], [c.found, 'yeni bulundu · eski sayfa oldu', 'ok'],
+    [c.gone, 'eski sitede hata (404, 410)', 'warn'], [c.redirect, 'eski sitede yönleniyor', 'warn'], [odd, 'HTML değil, yanıt yok veya engelli', ''],
+    [c.pending + c.limit, 'taramada yok · istenmedi', launched ? '' : 'warn'], [c.late, 'çıkıştan sonra geldi', ''], [L.otherCount, 'başka alan adında · ayrıldı', ''],
+  ].filter(([n], i) => n || i < 2);
+  let act = '';
+  if (launched) act = `<p class="note small">Site ${esc(fmtDay(prj.project.launch.at))} tarihinde canlıya çıktı. Eski alan adı yeni siteyi sunar. Araç eski sitede istek atmaz.${c.late ? ' Çıkıştan sonra gelen adresler henüz kontrol edilmez (sonraki sürüm).' : ''}</p>`;
+  else if (ls.state === 'running') act = `<div class="ul-acts"><span class="tag-s run">İsteniyor · ${nf(ls.done)} / ${nf(ls.total)}</span><a class="ghost small" href="#/live/${esc(ls.jobId)}">İzle</a></div>`;
+  else if (L.needOld) act = '<p class="small muted">Önce eski siteyi tarayın. Araç listeyi eski site taraması ile karşılaştırır.</p>';
+  else if (L.open) act = `<div class="ul-acts"><button type="button" class="ghost small strong" data-ul-fetch>Eski sitede isteyin · ${nf(L.toAsk)} adres</button><span class="small muted">İstekler sadece eski siteye gider. robots.txt ayarı tarama ayarlarından gelir.</span></div>`;
+  else if (ls.state === 'done' && L.toAsk) act = `<div class="ul-acts"><span class="small muted">İstek: ${esc(fmtDate(ls.startedAt))}</span><button type="button" class="ghost small" data-ul-fetch>Tekrar isteyin</button></div>`;
+  const limit = c.limit && L.limit ? `<p class="small muted">Yayındaki sunucu en fazla ${nf(L.limit)} adres ister. Trafiği yüksek olan adresler önce istendi.</p>` : '';
+  const error = ls.error ? `<p class="small flag">Son deneme: ${esc(ls.error)}</p>` : '';
+  const found = c.found ? `<p class="small">Yeni bulunan ${nf(c.found)} sayfa eşleştirmeye, 301 haritasına ve canlı doğrulamaya girer. Trafik alan sayfa listelerde önce gelir.</p>` : '';
+  const other = L.other?.length ? `<p class="small muted">Başka alan adı: ${L.other.map((o) => `${esc(o.host)} (${nf(o.n)})`).join(', ')}. Bu adresler kontrol edilmez.</p>` : '';
+  const rows = L.rows.map((r) => {
+    const [label, cls] = LIST_RESULT[r.result] || [r.result, 'idle'];
+    return `<tr><td><code>${esc(r.path)}</code></td><td>${trafficTag(r.traffic) || '<span class="small muted">—</span>'}</td>
+      <td><span class="tag-s ${cls}">${esc(label)}</span>${r.detail ? `<span class="small muted ul-det">${esc(r.detail)}</span>` : ''}</td></tr>`;
+  }).join('');
+  const table = L.rows.length ? `<details class="ul-rows"><summary>Listeyi açın (trafiğe göre) · ${nf(L.addresses)} adres</summary>
+    <div class="table-wrap"><table class="ul-table"><thead><tr><th>Eski adres</th><th>Trafik</th><th>Sonuç</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${L.more ? `<p class="small muted">İlk ${nf(L.rows.length)} satır görünür. Bütün liste Excel'de ("Eski adres listesi" sayfası).</p>` : ''}</details>` : '';
+  return `<div class="map-tiles ul-tiles">${tiles.map(([n, label, cls]) => `<div class="map-tile ${n && cls ? cls : ''}"><b>${nf(n)}</b><span>${esc(label)}</span></div>`).join('')}</div>${act}${limit}${error}${found}${other}${table}`;
+}
+$('#prjList').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-ul-open]')) { Object.assign(ul, UL_EMPTY(), { open: true, pid: prj.id }); renderList(); setTimeout(() => $('#prjList textarea')?.focus(), 30); return; }
+  if (e.target.closest('[data-ul-cancel]')) { Object.assign(ul, UL_EMPTY()); renderList(); return; }
+  if (e.target.closest('[data-ul-preview]')) { listPreview(); return; }
+  if (e.target.closest('[data-ul-add]')) { listAdd(); return; }
+  const f = e.target.closest('[data-ul-fetch]');
+  if (f) { f.disabled = true; startListFetch(); return; }
+  const del = e.target.closest('[data-ul-del]');
+  if (del) {
+    const src = prj.list?.sources.find((x) => x.id === del.dataset.ulDel);
+    if (!src || !confirm(`"${src.name}" listesi kaldırılsın mı? 301 haritasındaki kararlarınız kalır.`)) return;
+    try { prj.list = await api(`/api/projects/${prj.id}/urllist/${encodeURIComponent(src.id)}`, { method: 'DELETE' }); ul.msg = `${src.name} listesi kaldırıldı.`; prj.match = null; prj.matchKey = ''; }
+    catch (err) { ul.err = err.message; }
+    renderList(); renderNext();
+  }
+});
+$('#prjList').addEventListener('input', (e) => {
+  if (e.target.matches('[data-ul-text]')) { ul.text = e.target.value; ul.preview = null; ul.file = ''; }
+});
+$('#prjList').addEventListener('change', async (e) => {
+  if (e.target.matches('[data-ul-file]')) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) { ul.err = 'Dosya 4 MB sınırından büyük. En çok trafik alan satırları alın ve tekrar deneyin.'; renderList(); return; }
+    ul.text = await file.text(); ul.file = file.name; ul.preview = null; ul.chosen = null; ul.header = null;
+    listPreview();
+    return;
+  }
+  const col = e.target.closest('[data-ul-col]');
+  if (col) { ul.chosen = { ...(ul.chosen || {}), [col.dataset.ulCol]: col.value }; listPreview(); }
+});
+
 // ---------- Step 3: Eşleştirme ----------
-const crawlKey = () => JSON.stringify([prj.project.updatedAt, Object.values(prj.status).map((x) => x.crawlId)]);
+// v0.12.0: the old address list (sources and its crawl) changes the old page set: a new key runs a new match.
+const crawlKey = () => JSON.stringify([prj.project.updatedAt, Object.values(prj.status).map((x) => x.crawlId), prj.listState?.crawlId || '', (prj.list?.sources || []).map((s) => s.id)]);
 async function loadMatch() {
   const key = crawlKey();
   if (prj.matchKey === key || prj.loading) { renderProject(); return; }
@@ -1192,7 +1365,9 @@ function renderMap() {
 }
 function mapRowHtml(r) {
   const p = esc(r.path);
-  const head = `<div class="mrow-old"><code>${p}</code>${r.oldTitle ? `<span class="small">Eski title: ${esc(r.oldTitle)}</span>` : ''}</div><span class="cmp-arrow" aria-hidden="true">→</span>`;
+  // v0.12.0: traffic from the old address list and the mark of a page found only by the list.
+  const tags = r.traffic || r.fromList ? `<span class="mrow-tags">${trafficTag(r.traffic)}${r.fromList ? `<span class="tag-s idle" title="Taramada yoktu. Eski adres listesi buldu.">Listeden</span>` : ''}</span>` : '';
+  const head = `<div class="mrow-old"><code>${p}</code>${tags}${r.oldTitle ? `<span class="small">Eski title: ${esc(r.oldTitle)}</span>` : ''}</div><span class="cmp-arrow" aria-hidden="true">→</span>`;
   if (r.status === 'rule') {
     return `<div class="mrow" data-mpath="${p}">${head}<div class="mrow-to"><span title="${esc(r.target.url)}">${mapTarget(r.target)}</span>
       <span class="small">${esc(r.why)} · ${r.installed ? '301 kurulu' : '301 henüz kurulmadı'}</span></div>
@@ -1258,6 +1433,7 @@ $('#mapRows').addEventListener('click', (e) => {
 // One card per place: the old domain's server, each new site, content, decisions. Every term has a "?" text.
 // All help texts live here, so the same term has the same text on every screen.
 const TERMS = {
+  urlList: 'Araç eski sayfaları link ve sitemap ile bulur. Linksiz ama trafik alan sayfa taramada yoktur ve 301 almaz. Listeyi Search Console (Performans → Sayfalar → Dışa aktar, Pages.csv), Analytics veya backlink aracından alın. Araç taramada olmayan adresleri eski sitede ister. Açılan sayfa eski sayfa olur. Liste sunucuda kalır, depoya girmez.',
   vfRecheck: 'Araç her eski adresi canlı alan adında ister ve yanıtı bir süre saklar. 301 kurduysanız "Tekrar kontrol et" düğmesine basın. Canlı site ayarları canlı taramadan gelir: site kartında "Tekrar tara" düğmesine basın.',
   recheck: 'Araç her eski adresi yeni sitede ister ve yanıtı bir süre saklar. Sunucuda 301 kurduysanız "Tekrar kontrol et" düğmesine basın. Araç adresleri tekrar ister. Yeni tarama gerekmez.',
   server: 'Canlıdan sonra eski alan adını kullanan sunucu. Eski adreslerin bütün 301 ve 410 yanıtları burada kurulur. Ayrı alan adına taşınan sayfaların 301\'i de buradadır.',

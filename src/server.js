@@ -15,6 +15,7 @@ import { isBroken, isOk } from './rules/helpers.js';
 import { buildTodo } from './todo.js';
 import { buildLaunch, makeIsStaging } from './launch.js';
 import { expectedList, checkRedirects, buildVerify, makeRequest, hostKey } from './verify.js';
+import { readList, cleanList, makeSource, mergeSources, validateList, rowCount, toFetch, withListPages, listResults, sourceSummary, KIND_NAME } from './urllist.js';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import net from 'node:net';
@@ -212,6 +213,94 @@ async function liveOrigins(p) {
   return out;
 }
 
+// ---------- Old address list (v0.12.0) ----------
+// State of the list crawl: none, running, done, deleted.
+async function listState(p) {
+  const L = p.urlList || {};
+  const job = L.pendingCrawlId && jobs.get(L.pendingCrawlId);
+  if (job && job.status === 'running') return { state: 'running', jobId: job.id, done: job.progress.done, total: job.total || 0 };
+  if (!L.crawlId) return { state: 'none', error: L.lastError || null };
+  const m = await store.meta(L.crawlId);
+  if (!m) return { state: 'deleted', crawlId: L.crawlId, error: L.lastError || null };
+  return { state: 'done', crawlId: m.id, startedAt: m.startedAt, asked: m.summary.total, error: L.lastError || null };
+}
+// The list screen: sources, counts by result and the rows (traffic order, up to urlList.listLimit).
+async function listView(p) {
+  const cfg = loadConfig().urlList || {};
+  const list = await projects.getList(p.id);
+  const merged = mergeSources(list.sources);
+  const state = await listState(p);
+  const old = p.sites.find((s) => s.role === 'old');
+  let oldRes = null;
+  if (old.crawlId) { try { oldRes = await store.load(old.crawlId); } catch {} }
+  let listRes = null;
+  if (state.state === 'done') { try { listRes = await store.load(state.crawlId); } catch {} }
+  const max = PUBLIC_MODE ? YAYIN.maxUrls : Infinity;
+  const want = oldRes ? toFetch(merged, oldRes, max) : null;
+  const R = listResults({ merged, oldRes, listRes, launched: !!p.launch, limitPaths: want?.rest });
+  // open: addresses still to ask (not in the old crawl, not asked by the last list crawl: a source came after it).
+  const open = R.counts.pending;
+  return {
+    ...sourceSummary(list), addresses: merged.size, state, counts: R.counts, open, launched: !!p.launch,
+    needOld: !oldRes, toAsk: want ? want.urls.length : 0, limit: Number.isFinite(max) ? max : null,
+    rows: R.rows.slice(0, cfg.listLimit ?? 200), more: Math.max(0, R.rows.length - (cfg.listLimit ?? 200)),
+  };
+}
+const LIST_LOCKED = 'Site canlıya çıktı. Eski alan adı yeni siteyi sunar. Araç eski sitede istek atmaz.';
+async function startListFetch(id, options = {}) {
+  const p = await projects.get(id);
+  if (p.launch) throw Object.assign(new Error(LIST_LOCKED), { code: 409, need: ['no-launch'] });
+  const st = await listState(p);
+  if (st.state === 'running') throw Object.assign(new Error('Liste adresleri zaten isteniyor.'), { code: 409 });
+  const old = p.sites.find((s) => s.role === 'old');
+  if (!old.crawlId) throw Object.assign(new Error('Eski site taranmadı. Önce eski siteyi tarayın.'), { code: 409, need: ['old'] });
+  let oldRes;
+  try { oldRes = await store.load(old.crawlId); } catch { throw Object.assign(new Error('Eski site taraması silinmiş. Eski siteyi tekrar tarayın.'), { code: 409, need: ['old'] }); }
+  const merged = mergeSources((await projects.getList(id)).sources);
+  if (!merged.size) throw Object.assign(new Error('Listede adres yok. Önce liste ekleyin.'), { code: 400 });
+  const want = toFetch(merged, oldRes, PUBLIC_MODE ? YAYIN.maxUrls : Infinity);
+  if (!want.urls.length) throw Object.assign(new Error('İstenecek adres yok. Listedeki bütün adresler eski site taramasında var.'), { code: 400 });
+  // The requests go only to the old site (the crawler's list mode never leaves the host). Public mode: SSRF guard.
+  const job = await startJob({ url: oldRes.meta.startUrl, label: 'liste', options: { ignoreRobots: !!options.ignoreRobots, checks: false } }, { seeds: want.urls });
+  await projects.update(id, (q) => ({ ...q, urlList: { ...(q.urlList || {}), pendingCrawlId: job.id, lastError: null } }));
+  job.finished.then((r) => projects.update(id, (q) => {
+    const L = { ...(q.urlList || {}) };
+    if (L.pendingCrawlId !== job.id) return;
+    L.pendingCrawlId = null;
+    if (r.status === 'error') L.lastError = r.error;
+    else if (q.launch) L.lastError = 'İstekler çıkış işaretinden sonra bitti. Kilit nedeniyle projeye bağlanmadı.';
+    else { L.crawlId = job.id; L.lastError = null; }
+    return { ...q, urlList: L };
+  })).catch((e) => console.error('Proje güncellenemedi:', e.message));
+  return job;
+}
+// Adds one source. preview: read and clean, do not save (the screen shows the columns first).
+async function addListSource(id, body) {
+  const cfg = loadConfig().urlList || {};
+  const p = await projects.get(id);
+  const old = p.sites.find((s) => s.role === 'old');
+  const m = old.crawlId ? await store.meta(old.crawlId) : null;
+  const start = m?.startUrl || old.url;
+  if (!start) throw Object.assign(new Error('Eski sitenin adresi yok. Proje adımında yazın.'), { code: 400 });
+  const chosen = body.columns && typeof body.columns === 'object' ? body.columns : null;
+  const r = readList(body.text, cfg, chosen);
+  const cleaned = cleanList(r.rows, start);
+  const list = await projects.getList(id);
+  const info = { kind: r.kind, kindName: KIND_NAME[r.kind], columns: r.columns, header: r.header, rows: r.rows.length, addresses: cleaned.urls.size,
+    other: Object.values(cleaned.other).reduce((a, b) => a + b, 0), invalid: cleaned.invalid, assets: cleaned.assets, merged: cleaned.merged };
+  if (!cleaned.urls.size) throw Object.assign(new Error(info.other ? `Listede eski alan adının adresi yok. ${info.other} adres başka alan adında.` : 'Listede okunabilen adres yok.'), { code: 400, columns: r.header });
+  if (body.preview) return { preview: info };
+  const src = makeSource({ text: body.text, name: body.name, file: body.file, kind: r.kind, columns: r.columns, cleaned, rows: r.rows.length }, `l${Date.now().toString(36)}`);
+  if (p.launch) src.afterLaunch = true;
+  await projects.updateList(id, (L) => {
+    if (L.sources.length >= (cfg.maxSources ?? 5)) throw Object.assign(new Error(`En fazla ${cfg.maxSources ?? 5} liste eklenir. Önce bir listeyi kaldırın.`), { code: 400 });
+    if (L.sources.some((x) => x.hash === src.hash)) throw Object.assign(new Error('Bu liste zaten ekli.'), { code: 409 });
+    if (rowCount(L) + src.urls.length > (cfg.maxRows ?? 30000)) throw Object.assign(new Error(`Listede en fazla ${cfg.maxRows ?? 30000} adres saklanır. Daha kısa bir liste ekleyin (en çok trafik alan satırlar).`), { code: 400 });
+    return { ...L, version: 1, sources: [...L.sources, src] };
+  });
+  return { added: info };
+}
+
 // Starts a crawl for one site of a project. The crawl id is written to the project when the crawl ends.
 // v0.11.0: after launch the crawls before launch are locked: the old domain now serves the new site, so a new crawl
 // of the old site would lose the old pages. live: true crawls a target site on its live domain (a separate crawl id).
@@ -264,7 +353,11 @@ async function projectInputs(p, status) {
   }
   const targets = [heir, ...p.sites.filter((s) => s.role === 'extra' && ['done', 'stale'].includes(status[s.key].state))];
   const ids = targets.map((s) => status[s.key].crawlId);
-  const [oldRes, ...newList] = await Promise.all([status[old.key].crawlId, ...ids].map((x) => store.load(x)));
+  const [oldCrawl, ...newList] = await Promise.all([status[old.key].crawlId, ...ids].map((x) => store.load(x)));
+  // v0.12.0: the old address list. Pages of the list crawl that answered with HTML 200 join the old page set.
+  // Every step after this (matching, 301 map, work list, launch list, live check) uses them like crawled pages.
+  const L = await listInputs(p, oldCrawl);
+  const oldRes = L.oldRes;
   const hostOf = (key) => {
     const s = p.sites.find((x) => x.key === key);
     return status[key]?.host ? bareHost(status[key].host) : s?.url ? bareHost(new URL(s.url).hostname) : '';
@@ -285,14 +378,28 @@ async function projectInputs(p, status) {
     return { key: s.key, host: res.meta.host, origin: new URL(res.meta.startUrl).origin, pages: res.pages,
       liveOrigin: s.role === 'heir' ? oldOrigin.origin : s.live ? `${oldOrigin.protocol}//${s.live}` : null };
   });
-  return { cc, old, heir, targets, ids, oldRes, newList, keyOfHost, live, rules, auto, mapSites };
+  return { cc, old, heir, targets, ids, oldRes, newList, keyOfHost, live, rules, auto, mapSites, list: L };
+}
+
+// Old address list of a project with the old crawl: merged list, list crawl, old page set with the list pages.
+// key: changes when the pages added from the list change (the comparison cache uses it).
+async function listInputs(p, oldCrawl) {
+  const list = await projects.getList(p.id);
+  const merged = mergeSources(list.sources);
+  const id = p.urlList?.crawlId || null;
+  let listRes = null;
+  if (id && merged.size) { try { listRes = await store.load(id); } catch {} }
+  const oldRes = withListPages(oldCrawl, listRes, merged);
+  const added = oldRes.pages.length - oldCrawl.pages.length;
+  const key = added ? createHash('sha1').update(oldRes.pages.slice(oldCrawl.pages.length).map((x) => x.url).join('\n')).digest('hex').slice(0, 12) : '';
+  return { list, merged, listRes, oldCrawl, oldRes, added, key };
 }
 
 // Matching of a project: old site → heir and other sites. Sections without a decision get the suggested move.
 async function projectMatch(p, { fresh = false } = {}) {
   const status = await projectStatus(p);
-  const { cc, old, targets, ids, oldRes, newList, keyOfHost, live, rules, auto, mapSites } = await projectInputs(p, status);
-  const cmp = await compareWithProbe(status[old.key].crawlId, ids, oldRes, newList, rules, cc, live, { fresh });
+  const { cc, old, targets, ids, oldRes, newList, keyOfHost, live, rules, auto, mapSites, list } = await projectInputs(p, status);
+  const cmp = await compareWithProbe(`${status[old.key].crawlId}${list.key ? `+${list.key}` : ''}`, ids, oldRes, newList, rules, cc, live, { fresh });
   const autoFrom = new Set(auto.map((a) => a.from));
   const sections = sectionTable(cmp, { minPages: cc.suggestMinPages, pageLimit: cc.sectionPageLimit, langMinShare: cc.langMinShare }).map((sec) => ({
     ...sec, auto: autoFrom.has(sec.from),
@@ -305,7 +412,7 @@ async function projectMatch(p, { fresh = false } = {}) {
       ? { notFound: true, hits: sec.suggestion.hits, why: sec.suggestion.why, ...(sec.suggestion.to ? { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to } : {}) }
       : { site: keyOfHost(sec.suggestion.host), to: sec.suggestion.to, why: sec.suggestion.why }),
   }));
-  const map = buildRedirectMap(cmp, oldRes, mapSites, p.map || {}, loadConfig().redirectMap);
+  const map = buildRedirectMap(cmp, oldRes, mapSites, p.map || {}, loadConfig().redirectMap, list.merged.size ? list.merged : null);
   map.noLive = mapSites.filter((s) => !s.liveOrigin).map((s) => s.key);
   // Work list by place (v0.9.0). A thin site (few pages) is "not ready" until the user accepts its crawl.
   const todo = buildTodo({ cmp, map, sections, oldHost: oldRes.meta.host, readyOk: p.readyOk || {}, cfg: loadConfig().todo || {},
@@ -314,7 +421,9 @@ async function projectMatch(p, { fresh = false } = {}) {
   // Launch list (v0.10.0): staging checks of every target site, the 301 list and the tags of the old site.
   const launch = buildLaunch({ oldRes, map, cfg: loadConfig(),
     sites: targets.map((s, i) => ({ key: s.key, role: s.role, res: newList[i], liveOrigin: mapSites[i].liveOrigin })) });
-  return { cmp, sections, targets: targets.map((s) => s.key), status, map, todo, launch };
+  // v0.12.0: result of every list address (Excel sheet "Eski adres listesi").
+  const urlList = list.merged.size ? listResults({ merged: list.merged, oldRes: list.oldCrawl, listRes: list.listRes, launched: !!p.launch }) : null;
+  return { cmp, sections, targets: targets.map((s) => s.key), status, map, todo, launch, urlList };
 }
 
 // Live check (v0.11.0, Part 3b). The expected list comes from the crawls before launch and the decisions (no staging
@@ -359,7 +468,8 @@ async function projectVerify(p, { fresh = false } = {}) {
   return { ...V, checkedAt: new Date(at).toISOString(), launch: p.launch, status };
 }
 
-async function startJob(body) {
+// extra.seeds (v0.12.0): list mode. The crawler asks only these addresses (old address list). No audit.
+async function startJob(body, extra = {}) {
   const url = normalizeUrl(String(body.url || '').trim());
   if (!url) throw Object.assign(new Error('Geçerli bir adres yazın. Örnek: https://www.ornek.com'), { code: 400 });
   if (startGuard && await startGuard(url)) throw Object.assign(new Error('Bu adres bir iç ağ adresi. Yayındaki sunucu iç ağ adreslerini taramaz.'), { code: 400 });
@@ -384,6 +494,7 @@ async function startJob(body) {
     counts: { ok: 0, redirect: 0, client: 0, server: 0, failed: 0, blocked: 0 },
     recent: [], clients: new Set(), controller, error: null,
   };
+  if (extra.seeds) job.total = extra.seeds.length;
   jobs.set(id, job);
 
   let pending = [];
@@ -395,7 +506,8 @@ async function startJob(body) {
   }, 300);
 
   job.finished = crawl(url, {
-    maxUrls: num(o.maxUrls, Math.min(5000, URL_LIMIT), 1, URL_LIMIT),
+    maxUrls: extra.seeds ? extra.seeds.length : num(o.maxUrls, Math.min(5000, URL_LIMIT), 1, URL_LIMIT),
+    seeds: extra.seeds || null,
     blockPrivate: PUBLIC_MODE,
     maxDepth: num(o.maxDepth, 50, 0, 100),
     concurrency: num(o.concurrency, 5, 1, 20),
@@ -419,7 +531,7 @@ async function startJob(body) {
     },
   }).then(async (result) => {
     let audit = null;
-    try { audit = runAudit(result, loadConfig()); } catch (e) { console.error('Denetim hatası:', e.message); }
+    if (!extra.seeds) try { audit = runAudit(result, loadConfig()); } catch (e) { console.error('Denetim hatası:', e.message); }
     const entry = await store.save(id, label, result, audit);
     job.status = result.meta.cancelled ? 'cancelled' : 'done';
     broadcast(job, 'done', { entry, status: job.status });
@@ -505,22 +617,30 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'GET') {
           const list = await projects.list();
           return send(res, 200, list.map((p) => ({ id: p.id, name: p.name, updatedAt: p.updatedAt, sites: p.sites.length, rules: p.rules.length,
-            crawlIds: p.sites.flatMap((s) => [s.crawlId, s.pendingCrawlId, s.liveCrawlId, s.pendingLiveCrawlId]).filter(Boolean) })));
+            crawlIds: [...p.sites.flatMap((s) => [s.crawlId, s.pendingCrawlId, s.liveCrawlId, s.pendingLiveCrawlId]), p.urlList?.crawlId, p.urlList?.pendingCrawlId].filter(Boolean) })));
         }
         if (req.method === 'POST') {
-          const def = validateProject(await readJson(req), projectLimits());
-          return send(res, 201, await projects.create(def));
+          const body = await readJson(req);
+          const def = validateProject(body, projectLimits());
+          const p = await projects.create(def);
+          // v0.12.0: a project file can carry the old address list ("Projeyi indir").
+          if (body?.urlList?.sources?.length) {
+            const c = loadConfig().urlList || {};
+            const L = validateList(body.urlList, { maxSources: c.maxSources, maxRows: c.maxRows });
+            if (L.sources.length) await projects.updateList(p.id, () => L);
+          }
+          return send(res, 201, p);
         }
       }
       if (pid && !PID_RE.test(pid)) return send(res, 400, { error: 'Geçersiz proje' });
       const action = parts[3];
       if (pid && !action) {
-        if (req.method === 'GET') { const p = await projects.get(pid); return send(res, 200, { project: p, status: await projectStatus(p) }); }
+        if (req.method === 'GET') { const p = await projects.get(pid); return send(res, 200, { project: p, status: await projectStatus(p), listState: await listState(p) }); }
         if (req.method === 'PUT') {
           const def = validateProject(await readJson(req), projectLimits());
           // The 301 map is not changed here (POST /map changes it). A removed site drops its decisions.
           // v0.11.0: the launch mark and the live crawls are server fields. After launch the crawl ids before launch stay.
-          const p = await projects.update(pid, (old) => ({ ...old, ...def, launch: old.launch, map: cleanMap(old.map || {}, def.sites), sites: def.sites.map((s) => {
+          const p = await projects.update(pid, (old) => ({ ...old, ...def, launch: old.launch, urlList: old.urlList, map: cleanMap(old.map || {}, def.sites), sites: def.sites.map((s) => {
             const prev = old.sites.find((x) => x.key === s.key);
             return { ...s, crawlId: old.launch ? prev?.crawlId || null : s.crawlId, pendingCrawlId: prev?.pendingCrawlId || null, lastError: prev?.lastError || null,
               liveCrawlId: prev?.liveCrawlId || null, pendingLiveCrawlId: prev?.pendingLiveCrawlId || null, liveError: prev?.liveError || null };
@@ -548,7 +668,7 @@ const server = http.createServer(async (req, res) => {
         // v0.11.0: after launch the file also has the live check (saved answers, no new requests while they are fresh).
         let verify = null;
         if (pe.launch) { try { verify = await projectVerify(pe); } catch (e) { if (e.code !== 409) throw e; } }
-        await exportCompareExcel(m.cmp, tmp, { map: m.map, todo: m.todo, launch: m.launch, verify, siteNames: { ...siteNames(pe), server: `${m.cmp.old.host} sunucusu` } });
+        await exportCompareExcel(m.cmp, tmp, { map: m.map, todo: m.todo, launch: m.launch, verify, urlList: m.urlList, siteNames: { ...siteNames(pe), server: `${m.cmp.old.host} sunucusu` } });
         res.writeHead(200, {
           'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'content-disposition': `attachment; filename="tasima-${m.cmp.old.host}.xlsx"`,
@@ -566,9 +686,9 @@ const server = http.createServer(async (req, res) => {
         const st = await projectStatus(p0);
         const need = p0.sites.filter((s) => s.role !== 'extra' && !['done', 'stale'].includes(st[s.key].state));
         if (need.length) return send(res, 409, { error: 'Eski site ve eski alan adına geçecek site taranmadı. Çıkıştan önce iki siteyi tarayın.', need: need.map((s) => s.key) });
-        if (p0.sites.some((s) => st[s.key].state === 'running')) return send(res, 409, { error: 'Bir tarama sürüyor. Tarama bitince çıkışı işaretleyin.' });
+        if (p0.sites.some((s) => st[s.key].state === 'running') || (await listState(p0)).state === 'running') return send(res, 409, { error: 'Bir tarama sürüyor. Tarama bitince çıkışı işaretleyin.' });
         const p = await projects.update(pid, (q) => ({ ...q, launch: { at, markedAt: new Date().toISOString(),
-          crawls: Object.fromEntries(q.sites.filter((s) => s.crawlId).map((s) => [s.key, s.crawlId])) } }));
+          crawls: { ...Object.fromEntries(q.sites.filter((s) => s.crawlId).map((s) => [s.key, s.crawlId])), ...(q.urlList?.crawlId ? { list: q.urlList.crawlId } : {}) } } }));
         verifyCache.delete(pid);
         return send(res, 200, { project: p, status: await projectStatus(p) });
       }
@@ -603,6 +723,30 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="301-haritasi-${m.cmp.old.host}.csv"` });
         return res.end(mapCsv(m.map));
       }
+      // v0.12.0: old address list. GET: sources, counts and rows. POST { text, name?, file?, columns?, preview? }: adds a
+      // source (preview: only reads). DELETE /urllist[/<source id>]: removes one source or all. POST /urllist/fetch
+      // { ignoreRobots }: asks the addresses that are not in the old crawl on the old site (409 after launch).
+      if (action === 'urllist') {
+        const sub = parts[4];
+        const send409 = (e) => { if (typeof e.code === 'number' && e.code < 500) return send(res, e.code, { error: e.message, ...(e.need ? { need: e.need } : {}), ...(e.columns ? { columns: e.columns } : {}) }); throw e; };
+        try {
+          if (req.method === 'GET' && !sub) return send(res, 200, await listView(await projects.get(pid)));
+          if (req.method === 'POST' && sub === 'fetch') {
+            const job = await startListFetch(pid, await readJson(req));
+            return send(res, 201, publicJob(job));
+          }
+          if (req.method === 'POST' && !sub) {
+            const out = await addListSource(pid, await readJson(req));
+            if (out.preview) return send(res, 200, out);
+            return send(res, 201, { ...out, view: await listView(await projects.get(pid)) });
+          }
+          if (req.method === 'DELETE') {
+            if (sub && !/^l[0-9a-z]{1,12}$/.test(sub)) return send(res, 400, { error: 'Geçersiz liste' });
+            await projects.updateList(pid, (L) => ({ ...L, sources: sub ? L.sources.filter((x) => x.id !== sub) : [] }));
+            return send(res, 200, await listView(await projects.get(pid)));
+          }
+        } catch (e) { return send409(e); }
+      }
       // v0.9.0: POST /ready { site, ok } accepts a thin site as ready (for its current crawl) or takes it back.
       if (action === 'ready' && req.method === 'POST') {
         const body = await readJson(req);
@@ -619,8 +763,11 @@ const server = http.createServer(async (req, res) => {
       if (action === 'export' && req.method === 'GET') {
         const p = await projects.get(pid);
         const { id, name, structure, sites, rules, createdAt, updatedAt } = p;
+        const L = await projects.getList(pid);
         const body = JSON.stringify({ format: 'seo-audit-proje', version: 1, id, name, structure, rules, map: p.map || {}, createdAt, updatedAt,
           ...(p.launch ? { launch: p.launch } : {}),
+          // v0.12.0: the old address list (addresses and traffic) and its crawl id. The page content stays on the server.
+          ...(L.sources.length || p.urlList?.crawlId ? { urlList: { ...(p.urlList?.crawlId ? { crawlId: p.urlList.crawlId } : {}), sources: L.sources } } : {}),
           sites: sites.map(({ key, role, name: n, url, live, crawlId, liveCrawlId }) => ({ key, role, name: n, url, live, crawlId, ...(liveCrawlId ? { liveCrawlId } : {}) })) }, null, 2);
         const tr = { ğ: 'g', ü: 'u', ş: 's', ı: 'i', ö: 'o', ç: 'c' };
         const file = name.toLocaleLowerCase('tr').replace(/[ğüşıöç]/g, (c) => tr[c]).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'proje';

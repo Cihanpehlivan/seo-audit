@@ -7,6 +7,7 @@
 //   approved the user approved a suggestion or wrote an address.      gone: the user chose 410.
 //   pending  a suggestion waits for approval.                          none: no suggestion (score too low).
 // Only user decisions are saved in the project (project.map). Suggestions are computed again on every match.
+import { trafficCompare, trafficOf } from './urllist.js';
 import { pathKey, langCode } from './compare.js';
 import { isOk, isNoindex } from './rules/helpers.js';
 
@@ -247,7 +248,8 @@ export function suggestTargets(olds, sites, cfg) {
 
 // Builds the map rows. cmp: the project comparison (after the requests). oldRes: old crawl.
 // sites: [{ key, host, origin, liveOrigin, pages }] (heir first). decisions: project.map.
-export function buildRedirectMap(cmp, oldRes, sites, decisions = {}, cfg) {
+// traffic (v0.12.0): path → { clicks, impressions, views, links } from the old address list. Rows show it and sort by it.
+export function buildRedirectMap(cmp, oldRes, sites, decisions = {}, cfg, traffic = null) {
   const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
   const siteOfHost = (h) => sites.find((s) => bare(s.host) === bare(h));
   const byKey = new Map(sites.map((s) => [s.key, s]));
@@ -296,8 +298,15 @@ export function buildRedirectMap(cmp, oldRes, sites, decisions = {}, cfg) {
     if (best) Object.assign(row, { status: 'pending', target: { site: best.site, path: best.path, url: best.url }, score: best.score, conf: best.conf, why: best.why });
     else Object.assign(row, { status: 'none', target: null, why: 'Benzer sayfa yok. En yakın sayfayı seçin veya 410 verin. Ana sayfaya toplu 301 vermeyin: Google bunu soft 404 sayar.' });
   }
+  // v0.12.0: inside every state, the page with more traffic comes first. A page from the old address list is marked.
+  for (const row of rows) {
+    const t = traffic?.get(row.path);
+    if (t) row.traffic = trafficOf(t);
+    if (oldPage.get(row.path)?.discoveredBy === 'list') row.fromList = true;
+  }
+  const tr = (r) => traffic?.get(r.path) || null;
   const order = { pending: 0, none: 1, approved: 2, gone: 3, rule: 4 };
-  rows.sort((a, b) => (order[a.status] - order[b.status]) || ((b.score || 0) - (a.score || 0)) || a.path.localeCompare(b.path));
+  rows.sort((a, b) => (order[a.status] - order[b.status]) || trafficCompare(tr(a), tr(b)) || ((b.score || 0) - (a.score || 0)) || a.path.localeCompare(b.path));
   const count = (st) => rows.filter((r) => r.status === st).length;
   const summary = {
     total: rows.length, rule: count('rule'), approved: count('approved'), gone: count('gone'), pending: count('pending'), none: count('none'),
