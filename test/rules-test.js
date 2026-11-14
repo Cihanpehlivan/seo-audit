@@ -1,10 +1,15 @@
 // Checks that every rule fires on its fixture page and that the clean page has no issues.
 import assert from 'node:assert/strict';
-import { startRuleFixture, VARIANTS } from './fixture-rules.js';
+import { startRuleFixture, VARIANTS, JS_PAGES } from './fixture-rules.js';
 import { startHttpsFixture } from './fixture-https.js';
 import { crawl } from '../src/crawler.js';
 import { runAudit, loadConfig, RULES } from '../src/rules/index.js';
 import { isNoindex } from '../src/rules/helpers.js';
+import { renderStatus } from '../src/render.js';
+import { exportExcel } from '../src/export.js';
+import ExcelJS from 'exceljs';
+import os from 'node:os';
+import path from 'node:path';
 
 const cfg = loadConfig();
 cfg.thresholds = { ...cfg.thresholds, maxLinksPerPage: 30 };
@@ -48,13 +53,20 @@ const EXPECT = {
 const SYNTHETIC = ['http-internal-link', 'mixed-content', 'site-not-https', 'schema-none'];
 // Rules that need an HTTPS server: tested on fixture-https.js below.
 const HTTPS_RULES = ['ssl-invalid', 'ssl-expiring', 'hsts-missing', 'hsts-short'];
+// v0.13.0: rules that need a render crawl (Chromium). Tested below on a render crawl that starts at /js.
+const RENDER_EXPECT = {
+  'js-title-only': '/js-title', 'js-h1-only': '/js-h1', 'js-content-only': '/js-icerik', 'js-links-only': '/js-link',
+  'js-meta-changed': '/js-meta', 'js-noindex-removed': '/js-noindex', 'render-failed': '/js-hata', 'render-resource-blocked': '/js-kaynak',
+};
+// v0.13.0: site-level rule of a raw crawl. Tested with synthetic data below.
+const SHELL_RULES = ['js-shell-suspect'];
 
 let ok = 0, fail = 0;
 const check = (name, fn) => { try { fn(); ok++; } catch (e) { fail++; console.log('  ✗', name, '\n    ', e.message.split('\n')[0]); } };
 
 console.log(`Kural testi: ${RULES.length} kural, ${result.pages.length} URL, tarama ${Date.now() - t0} ms (ek kontroller ${result.checks.ms} ms), denetim ${audit.ms} ms`);
 for (const r of RULES) {
-  if (SYNTHETIC.includes(r.id) || HTTPS_RULES.includes(r.id)) continue;
+  if (SYNTHETIC.includes(r.id) || HTTPS_RULES.includes(r.id) || RENDER_EXPECT[r.id] || SHELL_RULES.includes(r.id)) continue;
   check(r.id, () => {
     assert.ok(EXPECT[r.id], 'test beklentisi tanımlı değil');
     assert.ok(hits(r.id, EXPECT[r.id]), `${EXPECT[r.id]} sayfasında tetiklenmedi. Tetiklenen: ${fired(r.id).map((i) => i.url.replace(base, '')).join(', ') || '-'}`);
@@ -143,6 +155,77 @@ const syn = runAudit({
 }, cfg);
 const sh = (id) => syn.rules.find((r) => r.id === id)?.count > 0;
 for (const id of SYNTHETIC) check(id, () => assert.ok(sh(id), 'sentetik veride tetiklenmedi'));
+
+
+// v0.13.0: JavaScript rules.
+check('ham taramada JS kuralları tetiklenmez', () => {
+  const ids = [...Object.keys(RENDER_EXPECT), ...SHELL_RULES].filter((id) => fired(id).length);
+  assert.deepEqual(ids, []);
+  assert.ok(!result.pages.some((p) => p.url === base + '/js-link-hedef'), 'ham tarama JS linkini izledi');
+  assert.equal(result.pages.find((p) => p.url === base + '/js-title').title, '');
+});
+check('js-shell-suspect (sentetik: ham tarama, JS kabuğu)', () => {
+  const shell = (i) => P({ url: `http://ornek.com/s${i}`, title: '', h1: [], wordCount: 3, scripts: 2 });
+  const meta = { host: 'ornek.com', startUrl: 'http://ornek.com/', robots: { status: 404 }, sitemap: { urlCount: 0 }, options: {} };
+  const n = (pages, m = meta) => runAudit({ meta: m, pages }, cfg).rules.find((r) => r.id === 'js-shell-suspect').count;
+  assert.equal(n([shell(1), shell(2), shell(3), P({ url: 'http://ornek.com/', scripts: 1, wordCount: 400 })]), 1);
+  assert.equal(n([shell(1), shell(2), P({ url: 'http://ornek.com/', scripts: 1, wordCount: 400 })]), 0, 'en az 3 sayfa');
+  assert.equal(n([shell(1), shell(2), shell(3)], { ...meta, render: { enabled: true } }), 0, 'render taramasında çalışmaz');
+  assert.equal(n([1, 2, 3].map((i) => ({ ...shell(i), scripts: undefined }))), 0, 'eski tarama (scripts alanı yok)');
+  const home = (links) => P({ url: 'http://ornek.com/', title: '', h1: [], wordCount: 0, scripts: 3, links });
+  assert.equal(n([home([])]), 1, 'tek sayfa: linksiz JS ana sayfası');
+  assert.equal(n([home([{ url: 'http://ornek.com/a', internal: true }])]), 0, 'ana sayfa iç link veriyorsa tek sayfa kuralı çalışmaz');
+});
+
+const rs = await renderStatus();
+if (!rs.available) {
+  console.log(`  ↷ Render testleri atlandı (${Object.keys(RENDER_EXPECT).length + 4} kontrol): ${rs.reason}`);
+} else {
+  const rserver = await startRuleFixture();
+  const rbase = `http://127.0.0.1:${rserver.address().port}`;
+  const t1 = Date.now();
+  const rres = await crawl(rbase + '/js', { concurrency: 4, maxDepth: 2, timeoutMs: 3000, useSitemap: false, render: { limits: { timeoutMs: 2500, maxWaitMs: 1500, quietMs: 200 } } });
+  rserver.close();
+  const raudit = runAudit(rres, cfg);
+  const rfired = (id) => raudit.rules.find((r) => r.id === id)?.items || [];
+  const rurls = (id) => rfired(id).map((i) => i.url.replace(rbase, '')).sort();
+  console.log(`Render taraması: ${rres.pages.length} URL, ${rres.meta.render.pages} render, ${Date.now() - t1} ms`);
+  for (const [id, path] of Object.entries(RENDER_EXPECT)) check(id, () => assert.ok(rurls(id).includes(path), `${path} sayfasında tetiklenmedi. Tetiklenen: ${rurls(id).join(', ') || '-'}`));
+  check('render: temiz sayfada sorun yok', () => {
+    assert.ok(rres.pages.find((p) => p.url === rbase + '/temiz')?.rendered, '/temiz render edilmedi');
+    const on = raudit.rules.filter((r) => r.items.some((i) => i.url === rbase + '/temiz')).map((r) => r.id);
+    assert.deepEqual(on, []);
+  });
+  check('render: JS kuralları sadece kendi sayfasında', () => {
+    for (const id of ['js-title-only', 'js-h1-only', 'js-content-only', 'js-noindex-removed', 'render-failed', 'render-resource-blocked']) assert.deepEqual(rurls(id), [RENDER_EXPECT[id]], id);
+  });
+  check('render: alanlar render sonucundan, ham değerler raw içinde, JS linki izlenir', () => {
+    const pg = (u) => rres.pages.find((p) => p.url === rbase + u);
+    assert.match(pg('/js-title').title, /^JS ile gelen sayfa başlığı/);
+    assert.equal(pg('/js-title').raw.title, '');
+    assert.deepEqual(pg('/js-h1').h1, ['JS ile gelen ana başlık']);
+    assert.ok(pg('/js-icerik').contentWordCount > 250 && pg('/js-icerik').raw.contentWordCount < 20);
+    assert.ok(isNoindex(pg('/js-noindex')), 'ham noindex birleşimde kalmalı');
+    assert.equal(pg('/js-link-hedef')?.status, 200, 'JS linki izlenmedi');
+    assert.equal(pg('/js-link-hedef').discoveredBy, 'link');
+    assert.ok(pg('/js-link').links.some((l) => l.js && l.url === rbase + '/js-link-hedef'));
+    assert.equal(pg('/js-hata').rendered, false);
+    assert.equal(pg('/js-hata').title, `Test sayfası js hata başlığı | Örnek Marka`, 'render hatasında ham alanlar kalır');
+  });
+  const xfile = path.join(os.tmpdir(), `seo-render-${process.pid}.xlsx`);
+  await exportExcel(rres, xfile, raudit);
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(xfile);
+  check('render: Excel "JavaScript farkı" sayfası', () => {
+    const ws = wb.getWorksheet('JavaScript farkı');
+    assert.ok(ws, 'sayfa yok');
+    const rows = {}; ws.eachRow((row, i) => { if (i > 1) rows[String(row.getCell(1).value).replace(rbase, '')] = row.values.slice(1); });
+    assert.deepEqual([rows['/js-title'][1], rows['/js-title'][2]], ['Tamam', 'title']);
+    assert.equal(rows['/js-icerik'][2], 'içerik');
+    assert.equal(rows['/js-link'][2], 'link');
+    assert.equal(rows['/temiz'][2], '');
+    assert.deepEqual([rows['/js-hata'][1], rows['/js-hata'][16]], ['Hata (ham)', 'Zaman aşımı']);
+  });
+}
 
 console.log(`\n${ok} kontrol geçti, ${fail} başarısız.`);
 if (fail) process.exitCode = 1;

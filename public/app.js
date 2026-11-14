@@ -81,6 +81,7 @@ $('#form').addEventListener('submit', async (e) => {
           maxUrls: f.get('maxUrls'), concurrency: f.get('concurrency'), delayMs: f.get('delayMs'), timeoutMs: f.get('timeoutMs'),
           auth: f.get('auth') || null, ignoreRobots: f.get('ignoreRobots') === 'on', useSitemap: f.get('noSitemap') !== 'on',
           checks: { site: f.get('checkSite') === 'on', external: f.get('checkExternal') === 'on', images: f.get('checkImages') === 'on' },
+          render: f.get('render') === 'on' ? { allowHosts: String(f.get('renderAllow') || '') } : false,
         },
       }),
     });
@@ -198,8 +199,10 @@ async function openResult(id) {
   const m = data.meta;
   const secs = Math.round((new Date(m.finishedAt) - new Date(m.startedAt)) / 1000);
   $('#resHost').textContent = m.host;
-  $('#resMeta').textContent = `${fmtDate(m.startedAt)} · ${data.pages.length} URL · ${secs} sn · sitemap: ${m.sitemap.urlCount} URL · robots.txt: ${m.robots.status || 'yok'}`;
+  $('#resMeta').textContent = `${fmtDate(m.startedAt)} · ${data.pages.length} URL · ${secs} sn · sitemap: ${m.sitemap.urlCount} URL · robots.txt: ${m.robots.status || 'yok'}${m.render?.enabled ? ` · JavaScript render: ${m.render.pages} sayfa` : ''}`;
   const warns = [];
+  if (m.render && !m.render.enabled) warns.push(`JavaScript render açılmadı (${m.render.error}). Sayfalar ham okundu.`);
+  if (m.render?.limitReached) warns.push('Render sınırı doldu. Sonraki sayfalar ham okundu (rules.json → render.maxPages).');
   if (m.cancelled) warns.push('Tarama elle durduruldu. Sonuçlar eksik.');
   if (m.limitReached) warns.push(`URL limitine ulaşıldı. ${m.notCrawled} URL taranmadı. Limiti artırıp tekrar tarayın.`);
   if (m.robots.status !== 200) warns.push('robots.txt bulunamadı.');
@@ -361,6 +364,23 @@ function filtered() {
   return state.data.pages.filter((p) => fn(p) && (!ruleUrls || ruleUrls.has(p.url)) && (!q || p.url.toLowerCase().includes(q) || (p.title || '').toLowerCase().includes(q)));
 }
 
+// v0.13.0: raw HTML ↔ render table of one page (only in a render crawl).
+function renderDetail(p) {
+  const r = p.render;
+  if (!r) return '';
+  if (r.skipped === 'limit') return '<span class="small">Render sınırı doldu. Bu sayfa ham okundu.</span>';
+  const info = `<span class="small">${r.ms} ms · ${r.requests || 0} istek${r.blocked ? ` · ${r.blocked} dış istek engellendi${r.blockedHosts?.length ? ` (${r.blockedHosts.map((h) => esc(h.host)).join(', ')})` : ''}` : ''}${r.robotsBlocked?.length ? ` · ${r.robotsBlocked.length} kaynak robots.txt ile engelli` : ''}${r.jsUrl ? ` · JS adresi değiştirdi: ${esc(r.jsUrl)}` : ''}</span>`;
+  if (!p.rendered || !p.raw) return `<span class="flag">Render edilemedi: ${esc(r.error === 'timeout' ? 'zaman aşımı' : r.error)}.</span> Ham alanlar kullanıldı.<br>${info}`;
+  const jsLinks = p.jsLinkCount || 0;
+  const v = (x, k) => (x === '' || x == null ? (k === 'Title' || k === 'H1' ? '<span class="flag">yok</span>' : '<span class="small">—</span>') : esc(x));
+  const rows = [
+    ['Title', p.raw.title, p.title], ['H1', (p.raw.h1 || [])[0] || '', (p.h1 || [])[0] || ''], ['Description', p.raw.metaDescription, p.metaDescription || ''],
+    ['Canonical', p.raw.canonical, p.canonical || ''], ['Meta robots', p.raw.metaRobots, p.metaRobotsJs || ''],
+    ['Ana içerik', `${p.raw.contentWordCount} kelime`, `${p.contentWordCount} kelime`], ['İç link', `${p.raw.internalLinks}`, `${p.raw.internalLinks + jsLinks}${jsLinks ? ` (${jsLinks} sadece JS)` : ''}`],
+  ];
+  return `<div class="tbl-wrap"><table class="jsdiff"><thead><tr><th></th><th>Ham HTML</th><th>Render</th></tr></thead><tbody>${rows.map(([k, a, b]) => `<tr${String(a) !== String(b) ? ' class="jd-chg"' : ''}><th>${k}</th><td>${v(a, k)}</td><td>${v(b, k)}</td></tr>`).join('')}</tbody></table></div>${info}`;
+}
+
 function detailHtml(p) {
   const rows = [];
   const iss = state.issuesByUrl.get(p.url) || [];
@@ -381,6 +401,7 @@ function detailHtml(p) {
   }
   add('Canonical', p.canonical ? esc(p.canonical) + (p.canonical !== p.url ? ' <span class="small">(farklı URL)</span>' : '') : (p.title !== undefined ? '<span class="flag">yok</span>' : ''));
   add('Meta robots', esc(p.metaRobots));
+  add('JavaScript', renderDetail(p));
   add('X-Robots-Tag', esc(p.xRobotsTag));
   add('html lang', esc(p.htmlLang));
   add('Hreflang', p.hreflang?.length ? p.hreflang.map((h) => `${esc(h.lang)}: ${esc(h.url)}`).join('<br>') : '');
@@ -471,6 +492,9 @@ async function loadInfo() {
       $('#envNote').hidden = false;
     }
     window.__maxTargets = info.maxTargets;
+    window.__render = info.render || { available: false, reason: '' };
+    renderStateUi();
+    try { if (prj?.project && prj.step === 'tarama') renderCrawls(); } catch {}
     $('#crawlMax').max = info.maxUrls;
     if (+$('#crawlMax').value > info.maxUrls) $('#crawlMax').value = info.maxUrls;
     if (info.ephemeral) $('#prjDiskNote').textContent = 'Bu sunucu ücretsiz planda çalışır. Uyuyunca projeler ve taramalar silinir. Projeyi indirin. Sonra "Proje yükle" ile geri yükleyin ve siteleri tekrar tarayın.';
@@ -480,6 +504,20 @@ async function loadInfo() {
   } catch {}
 }
 loadInfo();
+
+// v0.13.0: JavaScript render. The box is off when the server cannot render (public mode, no package, no Chromium).
+function renderStateUi() {
+  const r = window.__render || { available: false };
+  const box = $('#renderBox');
+  box.disabled = !r.available;
+  if (!r.available) box.checked = false;
+  $('#renderAllowWrap').hidden = !box.checked;
+  $('#renderState').hidden = false;
+  $('#renderState').innerHTML = r.available
+    ? '<span class="ok">Chromium hazır.</span> Taranan site ve alt alan adları açılır. Analytics, reklam ve font istekleri gönderilmez.'
+    : `<span class="flag">Kapalı.</span> ${esc(r.reason || '')}`;
+}
+$('#renderBox').addEventListener('change', renderStateUi);
 
 // ---------- Migration project (v0.7.0) ----------
 // Steps: Proje → Tarama → Eşleştirme → 301 haritası → Yapılacaklar. One "next task" card on every step.
@@ -645,6 +683,11 @@ function nextTask() {
     if (x.state === 'stale') return { text: `${siteName(s)} adresi değişti. Tarama eski adrese ait. Tekrar tarayın.`, btn: 'Tekrar tara', act: { crawl: s.key } };
     if (x.pages && !x.ok) return { text: `${siteName(s)} taramasında açılan sayfa yok.${x.blocked ? ' robots.txt sayfaları engelledi.' : ''} Ayarları değiştirip tekrar tarayın.`, btn: 'Tarama ayarlarını aç', act: { step: 'tarama', settings: true } };
   }
+  // v0.13.0: a raw crawl that looks like a JS shell. Only on the Tarama step, so it never blocks the next steps.
+  if (prj.step === 'tarama' && !p.launch && window.__render?.available) {
+    const js = [old, heir, ...extras].find((s) => s.url && !s.render && st[s.key]?.state === 'done' && st[s.key].jsShell);
+    if (js) return { text: `${siteName(js)} JavaScript ile oluşuyor olabilir. Ham taramada title, H1 ve içerik boş görünür. JavaScript render ile tekrar tarayın.`, btn: 'Render ile tekrar tara', act: { renderCrawl: js.key } };
+  }
   // v0.12.0: the old address list changes the old page set. Its requests come before the matching.
   const ls = prj.listState;
   if (ls?.state === 'running') return { text: `Listedeki adresler eski sitede isteniyor: ${ls.done} / ${ls.total}.`, btn: 'Listeyi gösterin', act: { step: 'tarama', listFocus: true } };
@@ -716,6 +759,7 @@ $('#prjNext').addEventListener('click', async (e) => {
   const a = prj.nextAct || {};
   if (a.live) { location.hash = `#/live/${a.live}`; return; }
   if (a.crawl) { goStep('tarama'); await startSiteCrawl(a.crawl); return; }
+  if (a.renderCrawl) { siteByKey(a.renderCrawl).render = true; if (await saveProject('Kaydedildi. Site JavaScript render ile taranıyor.')) await startSiteCrawl(a.renderCrawl); return; }
   if (a.listFetch) { goStep('tarama'); await startListFetch(); return; }
   if (a.listFocus) setTimeout(() => $('#prjList').scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
   if (a.excel) { location.href = `/api/projects/${prj.id}/excel`; return; }
@@ -841,15 +885,27 @@ async function renderCrawls() {
       : !s.url ? `<button type="button" class="ghost small" data-goto-proje>Adresi yazın</button>`
       : x.state === 'running' ? `<a class="ghost small" href="#/live/${esc(x.jobId)}">İzle</a>`
       : `<button type="button" class="ghost small${x.state === 'done' ? '' : ' strong'}" data-crawl="${esc(s.key)}">${x.state === 'done' ? 'Tekrar tara' : 'Tara'}</button>`;
+    // v0.13.0: render setting of the site. The next crawl of the site uses it.
+    const ra = window.__render || {};
+    const jsBox = !locked && s.url ? `<label class="js-box"><input type="checkbox" data-render="${esc(s.key)}"${s.render ? ' checked' : ''}${!ra.available && !s.render ? ' disabled' : ''}> JavaScript ile oluştur</label>${s.render ? `<label class="js-allow"><span class="sr">İzinli dış alan adları</span><input type="text" data-renderallow="${esc(s.key)}" value="${esc((s.renderAllow || []).join(', '))}" placeholder="İzinli dış alan adı (cdn.ornek.com)" autocomplete="off"></label>` : ''}` : '';
+    const modeTag = x.state !== 'done' ? '' : x.render ? '<span class="tag-s ok">JS render</span>' : x.jsShell ? '<span class="tag-s warn" title="Ham taramada sayfaların çoğu boş title veya H1 ve az metin içeriyor">JS ile oluşuyor olabilir</span>' : '';
     return `<div class="crawl-row" data-site="${esc(s.key)}">
-      <div class="crawl-main"><b>${esc(host || 'Adres yok')}</b><span class="small">${esc(siteName(s))}</span></div>
-      <div class="crawl-state"><span class="tag-s ${cls}">${esc(tag)}</span>${warnTag}
+      <div class="crawl-main"><b>${esc(host || 'Adres yok')}</b><span class="small">${esc(siteName(s))}</span>${jsBox}</div>
+      <div class="crawl-state"><span class="tag-s ${cls}">${esc(tag)}</span>${warnTag}${modeTag}
         ${x.startedAt ? `<span class="small">${esc(fmtDate(x.startedAt))}</span>` : ''}${x.error ? `<span class="small flag">Son deneme: ${esc(x.error)}</span>` : ''}
         ${x.crawlId && x.state === 'done' ? `<a class="small" href="#/crawl/${esc(x.crawlId)}">Sorunları aç</a>` : ''}</div>
       <div class="crawl-act">${btn}${same.length && x.state !== 'running' && !locked ? `<label class="sr" for="link-${esc(s.key)}">Var olan taramayı bağla</label>
         <select id="link-${esc(s.key)}" data-link="${esc(s.key)}"><option value="">Var olan tarama…</option>${same.map((h) => `<option value="${esc(h.id)}">${esc(fmtDate(h.startedAt))} · ${h.summary.total} URL</option>`).join('')}</select>` : ''}</div>
     </div>`;
-  }).join('');
+  }).join('') + modeNoteHtml();
+}
+// v0.13.0: sites crawled in different modes. A raw crawl of a JS site has empty title, H1 and content.
+function modeNoteHtml() {
+  const done = prj.project.sites.filter((s) => prj.status[s.key]?.state === 'done');
+  const on = done.filter((s) => prj.status[s.key].render);
+  if (!on.length || on.length === done.length) return '';
+  const off = done.filter((s) => !prj.status[s.key].render);
+  return `<p class="note small mode-note">Siteler farklı modda tarandı. JavaScript render: ${on.map((s) => esc(siteName(s))).join(', ')}. Ham HTML: ${off.map((s) => esc(siteName(s))).join(', ')}. Ham taramada JS ile gelen title, H1 ve içerik görünmez. İçerik farkı ve 301 önerisi bundan etkilenebilir.</p>`;
 }
 async function startSiteCrawl(key) {
   $('#crawlErr').textContent = '';
@@ -869,6 +925,16 @@ $('#prjCrawls').addEventListener('click', (e) => {
   if (e.target.closest('[data-goto-proje]')) goStep('proje');
 });
 $('#prjCrawls').addEventListener('change', async (e) => {
+  const rb = e.target.closest('[data-render]');
+  if (rb) {
+    const s = siteByKey(rb.dataset.render);
+    s.render = rb.checked;
+    if (!rb.checked) delete s.renderAllow;
+    await saveProject(rb.checked ? 'Kaydedildi. Sonraki tarama JavaScript render kullanır.' : 'Kaydedildi. Sonraki tarama ham HTML okur.');
+    return;
+  }
+  const ra = e.target.closest('[data-renderallow]');
+  if (ra) { siteByKey(ra.dataset.renderallow).renderAllow = ra.value.split(/[\s,;]+/).filter(Boolean); await saveProject(); return; }
   const sel = e.target.closest('[data-link]');
   if (!sel?.value) return;
   siteByKey(sel.dataset.link).crawlId = sel.value;
@@ -1159,6 +1225,7 @@ function renderSections() {
   const m = prj.match;
   $('#matchErr').textContent = !busy && prj.matchErr ? prj.matchErr : '';
   renderLsImport();
+  $('#modeNote').innerHTML = modeNoteHtml();
   if (!m) {
     $('#prjSections').innerHTML = !busy && !prj.matchErr && (!isReady('old') || !isReady('heir'))
       ? '<div class="empty">Eşleştirme için eski site ve eski alan adına geçecek site taranmalı. Sıradaki iş kartındaki düğmeyi kullanın.</div>' : '';

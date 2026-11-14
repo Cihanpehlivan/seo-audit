@@ -52,6 +52,10 @@
             <label class="check"><input name="checkSite" type="checkbox" checked> Site ayarları</label>
             <label class="check"><input name="checkExternal" type="checkbox" checked> Dış linkler</label>
             <label class="check"><input name="checkImages" type="checkbox" checked> Görseller</label>
+            <p class="grid-h">JavaScript. Sayfayı Chromium ile açar. JS çalışınca oluşan title, H1, içerik ve linkleri okur. Ham HTML ile farkı raporlar. Tarama yavaşlar.</p>
+            <label class="check"><input name="render" id="renderBox" type="checkbox"> JavaScript ile oluştur</label>
+            <label class="wide" id="renderAllowWrap" hidden>İzinli dış alan adları (virgül ile)<input name="renderAllow" type="text" placeholder="cdn.ornek.com" autocomplete="off"></label>
+            <p class="grid-h render-st" id="renderState" hidden></p>
           </div>
           <p class="hint">Yavaş sunucularda paralel isteği 2'ye, beklemeyi 500 ms'ye çekin.</p>
         </details>
@@ -198,6 +202,7 @@
       <div id="stepEslestirme" class="step-pane" hidden>
         <p class="meta">Eski sitenin her bölümü için yeni yeri seçin. Araç her sayfa için iki şeyi kontrol eder: hedef sayfa var mı, eski adres hedefe 301 veriyor mu.</p>
         <div id="lsImport"></div>
+        <div id="modeNote"></div>
         <p class="muted" id="matchBusy" hidden>Eşleştiriliyor. Araç eski adresleri yeni sitelerde istiyor. Büyük sitelerde bu bir dakika sürebilir.</p>
         <p class="err" id="matchErr" role="alert"></p>
         <div id="matchWarn"></div>

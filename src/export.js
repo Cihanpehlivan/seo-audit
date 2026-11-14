@@ -39,6 +39,9 @@ export async function exportExcel(result, file, audit = null) {
     { k: 'Yetim sayfa (sadece sitemap)', v: count((p) => p.orphan) },
     { k: 'robots.txt durumu', v: meta.robots.status },
     { k: 'URL limitine ulaşıldı', v: meta.limitReached ? 'EVET' : 'Hayır' },
+    ...(meta.render ? [{ k: 'JavaScript render', v: meta.render.enabled
+      ? `${meta.render.pages} sayfa render edildi, ${meta.render.failed} hata${meta.render.limitReached ? ', render sınırı doldu (sonrası ham)' : ''}${meta.render.allowHosts?.length ? ` · izinli dış alan adı: ${meta.render.allowHosts.join(', ')}` : ''}`
+      : `Açılmadı: ${meta.render.error}. Sayfalar ham okundu.` }] : []),
     ...(audit ? [
       { k: 'Sağlık skoru', v: `${audit.score} / 100 (kritik sorunu olmayan URL oranı)` },
       { k: 'Kritik sorun türü', v: audit.counts.critical },
@@ -102,6 +105,41 @@ export async function exportExcel(result, file, audit = null) {
     hreflang: (p.hreflang || []).map((h) => `${h.lang}: ${h.url}`).join('\n'),
     kb: Math.round((p.sizeBytes || 0) / 102.4) / 10,
   })));
+
+  // v0.13.0: raw HTML ↔ render, only in a render crawl. One row per page that was opened in the browser.
+  if (meta.render) {
+    const rp = pages.filter((p) => p.render && !p.render.skipped);
+    const diff = (p) => {
+      if (!p.raw) return '';
+      const d = [];
+      if (p.raw.title !== (p.title || '')) d.push('title');
+      if ((p.raw.h1 || []).join('|') !== (p.h1 || []).join('|')) d.push('H1');
+      if (p.raw.metaDescription !== (p.metaDescription || '')) d.push('description');
+      if (p.raw.canonical !== (p.canonical || '')) d.push('canonical');
+      if ((p.raw.metaRobots || '') !== (p.metaRobotsJs || '')) d.push('robots');
+      const rw = p.raw.contentWordCount || 0, w = p.contentWordCount || 0;
+      if (Math.abs(w - rw) >= 10 && Math.abs(w - rw) >= Math.max(rw, w) * 0.1) d.push('içerik');
+      if (p.links?.some((l) => l.js && l.internal)) d.push('link');
+      return d.join(', ');
+    };
+    const jsLinks = (p) => new Set((p.links || []).filter((l) => l.js && l.internal).map((l) => l.url)).size;
+    sheet(wb, 'JavaScript farkı', [
+      { header: 'URL', key: 'url', width: 60 }, { header: 'Render', key: 'ok', width: 12 }, { header: 'Değişen alanlar', key: 'diff', width: 28 },
+      { header: 'Ham title', key: 'rt', width: 40 }, { header: 'Render title', key: 't', width: 40 },
+      { header: 'Ham H1', key: 'rh', width: 30 }, { header: 'Render H1', key: 'h', width: 30 },
+      { header: 'Ham kelime', key: 'rw', width: 11 }, { header: 'Render kelime', key: 'w', width: 13 },
+      { header: 'Sadece JS iç link', key: 'jl', width: 15 }, { header: 'Ham canonical', key: 'rc', width: 40 }, { header: 'Render canonical', key: 'c', width: 40 },
+      { header: 'Süre (ms)', key: 'ms', width: 10 }, { header: 'Engellenen dış istek', key: 'bl', width: 18 }, { header: 'Engellenen alan adları', key: 'bh', width: 40 },
+      { header: 'robots.txt ile engelli kaynak', key: 'rb', width: 40 }, { header: 'Hata', key: 'err', width: 24 },
+    ], rp.map((p) => ({
+      url: p.url, ok: p.rendered ? 'Tamam' : 'Hata (ham)', diff: diff(p),
+      rt: p.raw?.title ?? '', t: p.rendered ? p.title : '', rh: (p.raw?.h1 || [])[0] || '', h: p.rendered ? (p.h1 || [])[0] || '' : '',
+      rw: p.raw?.contentWordCount ?? '', w: p.rendered ? p.contentWordCount : '', jl: jsLinks(p),
+      rc: p.raw?.canonical ?? '', c: p.rendered ? p.canonical : '', ms: p.render.ms, bl: p.render.blocked || 0,
+      bh: (p.render.blockedHosts || []).map((h) => `${h.host} (${h.n})`).join(', '), rb: (p.render.robotsBlocked || []).map((x) => x.url).join('\n'),
+      err: p.render.error === 'timeout' ? 'Zaman aşımı' : p.render.error || '',
+    })));
+  }
 
   sheet(wb, 'Redirectler', [
     { header: 'Kaynak URL', key: 'url', width: 60 },

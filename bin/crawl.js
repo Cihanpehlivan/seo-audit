@@ -6,6 +6,7 @@ import path from 'node:path';
 import { crawl } from '../src/crawler.js';
 import { exportExcel } from '../src/export.js';
 import { runAudit } from '../src/rules/index.js';
+import { cleanAllowHosts } from '../src/render.js';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -22,6 +23,8 @@ const { values, positionals } = parseArgs({
     'no-external': { type: 'boolean', default: false },
     'no-images': { type: 'boolean', default: false },
     'user-agent': { type: 'string' },
+    render: { type: 'boolean', default: false },
+    'render-allow': { type: 'string' },
     label: { type: 'string' },
     out: { type: 'string', default: 'crawls' },
     help: { type: 'boolean', short: 'h' },
@@ -43,6 +46,8 @@ if (values.help || !positionals[0]) {
   --no-external       Dış linkleri kontrol etme
   --no-images         Görselleri kontrol etme
   --user-agent <ua>   Özel user-agent
+  --render            Sayfaları Chromium ile aç, JavaScript çalışsın (playwright-core ve Chromium gerekir)
+  --render-allow <h>  Render için izinli dış alan adları (virgül ile, örn: cdn.ornek.com)
   --label <ad>        Dosya adı etiketi (örn: eski, yeni)
   --out <klasör>      Çıktı klasörü (varsayılan crawls)`);
   process.exit(values.help ? 0 : 1);
@@ -56,6 +61,7 @@ const result = await crawl(url, {
   delayMs: +values.delay, timeoutMs: +values.timeout, auth: values.auth || null,
   ignoreRobots: values['ignore-robots'], useSitemap: !values['no-sitemap'],
   ...(values['user-agent'] ? { userAgent: values['user-agent'] } : {}),
+  render: values.render ? { allowHosts: cleanAllowHosts(values['render-allow']) } : false,
   checks: values['no-checks'] ? false : { external: !values['no-external'], images: !values['no-images'] },
   onChecks: ({ step, done, total }) => {
     if (Date.now() - last > 500) { last = Date.now(); process.stderr.write(`\r  Ek kontroller: ${step === 'site' ? 'site ayarları' : `${done} / ${total}`}            `); }
@@ -87,7 +93,7 @@ Tamamlandı (${((Date.now() - t0) / 1000).toFixed(1)} sn)
   Hata/timeout ..... ${c((x) => x.status === 0)}
   robots engelli ... ${c((x) => x.blockedByRobots)}
   Yetim (sitemap) .. ${c((x) => x.orphan)}
-${result.meta.limitReached ? '  UYARI: URL limitine ulaşıldı. --max değerini artırın.\n' : ''}
+${result.meta.render ? `  Render ........... ${result.meta.render.enabled ? `${result.meta.render.pages} sayfa, ${result.meta.render.failed} hata${result.meta.render.limitReached ? ' (render sınırı doldu)' : ''}` : `açılmadı: ${result.meta.render.error}`}\n` : ''}${result.meta.limitReached ? '  UYARI: URL limitine ulaşıldı. --max değerini artırın.\n' : ''}
   Sağlık skoru ..... ${audit.score} / 100
   Sorun türleri .... ${audit.counts.critical} kritik, ${audit.counts.warning} uyarı, ${audit.counts.notice} bilgi
 ${audit.rules.filter((r) => r.count && r.severity === 'critical').slice(0, 8).map((r) => `    ! ${r.title} (${r.count})`).join('\n')}

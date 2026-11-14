@@ -12,7 +12,7 @@ Kullanıcı: proje sahibi (Cihan). Sorunlar iş alanına göre gruplanır (Front
 
 ## Mimari
 
-- Node.js 20+, ES modules, framework yok. Bağımlılıklar: cheerio, robots-parser, exceljs, fast-xml-parser.
+- Node.js 20+, ES modules, framework yok. Bağımlılıklar: cheerio, robots-parser, exceljs, fast-xml-parser. İsteğe bağlı (v0.13.0): playwright-core 1.63.0 (kesin sürüm, `optionalDependencies`). Chromium ayrı kurulur (`npx playwright-core install chromium-headless-shell`) veya `CHROMIUM_PATH`.
 - Tarama sunucu tarafında yapılır. Tarayıcı içinde çalışamaz (CORS). Bu yüzden yayınlanmış bir web sayfası değil, yerel bilgisayarda veya kendi sunucusunda çalışan bir Node uygulamasıdır.
 - Veri: `crawls/` klasöründe her tarama için `<id>.json` (ham), `<id>.meta.json` (özet), `<id>.audit.json` (denetim). Veritabanı yok.
 - Ham veri: `{ meta, pages, checks }`. `checks` ek kontrol sonucudur (`ran`, `site`, `resources`, `limited`). v0.4 öncesi taramalarda `checks` yoktur; ilgili kurallar o taramalarda tetiklenmez.
@@ -20,7 +20,8 @@ Kullanıcı: proje sahibi (Cihan). Sorunlar iş alanına göre gruplanır (Front
 ```
 bin/crawl.js            CLI
 scripts/dogrula.js      Doğrulama komutu (v0.10.2): `npm run dogrula -- <tarama> <internal_all.csv>`. Mantık `src/validate.js` içinde (CSV okuyucu, referans sütunları, alan karşılaştırması)
-src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal. v0.12.0: liste modu (`seeds`): sadece verilen adresler, link ve sitemap yok, başka hosta yönlendirmede durur (`offHost`)
+src/crawler.js          Tarama motoru: kuyruk, redirect zinciri (manuel), robots, sitemap, iptal. v0.12.0: liste modu (`seeds`): sadece verilen adresler, link ve sitemap yok, başka hosta yönlendirmede durur (`offHost`). v0.13.0: `render` seçeneği (`{ allowHosts, limits }`), `request(url, init)` render kontrol noktası için, `guard` seçeneği (test), `meta.render`
+src/render.js           JavaScript render (v0.13.0): `renderStatus` (paket ve Chromium var mı, yayın modunda kapalı), `createRenderer` (tarama başına bir tarayıcı, sayfa başına yeni bağlam, ölü vekil, kontrol noktası `context.route`), `makeHostPolicy`, `cleanAllowHosts`, `mergeRender` (ham ↔ render birleşimi, `raw` özeti, `metaRobotsJs`, `link.js`)
 src/urllist.js          Eski adres listesi (v0.12.0): sütun tanıma (`rules.json` → `urlList.columns`), temizlik, kaynak birleştirme, istek listesi (taramada olmayanlar, trafik sırası), eski sayfa kümesine ekleme (`withListPages`), sonuç sınıfları. İstek atmaz. CSV okuyucu `validate.js` ile paylaşılır. v0.12.1: trafik sırası (`byTraffic`, `sortByTraffic`), geç adres (`latePaths`, `withLatePages`: içeriksiz eski sayfa, `late: true`), kanıt (`hasProof`, `urlList.lateProof`). v0.12.2: eski yönlendirmeler (`redirectInfo`, `oldRedirects`: eski tarama + liste taraması, istek yok)
 src/compare.js          Eski taramayı bir veya daha çok yeni tarama ile karşılaştırır. Yol kuralları, desen önerisi, satır açıklaması, bölüm tablosu (v0.7.1: her bölümün sayfa listesi). Bulunamayan eski yolları beklenen adreste yoklar. Taşınan sayfada hedefi ve geçecek sitedeki 301'i kontrol eder (v0.7.0). v0.12.1: geç sayfa (`late`) istek almaz, içerik farkı aranmaz, sayılara girmez (`summary.late`)
 src/projects.js         Taşıma projesi: tanım doğrulama, site anahtarı → alan adı çevirisi, dosya kaydı (crawls/projects/<id>.json, atomik yazma), 301 haritası kararlarının temizliği. v0.12.0: eski adres listesi ayrı dosya (crawls/projects/lists/<id>.json, `getList`, `updateList`)
@@ -34,7 +35,7 @@ src/parser.js           HTML → SEO alanları (başlık ağacı, JSON-LD, görs
 src/fingerprint.js      exactHash + 64-bit simhash (BigInt yok)
 src/normalize.js        URL normalizasyonu, iç/dış ayrımı (www = aynı site)
 src/sitemap.js          sitemap + sitemap index. v0.10.1: entity genişletmez (processEntities: false), standart entity'leri elle çözer
-src/rules/definitions.js  88 kural (tek kaynak)
+src/rules/definitions.js  97 kural (tek kaynak). v0.13.0: kategori `js` (9 kural)
 src/rules/helpers.js    isIndexable, titlePx, staging host tespiti, isBroken, TLS hata metinleri
 src/rules/index.js      Denetim motoru, sağlık skoru
 src/export.js           Excel çıktısı
@@ -54,7 +55,7 @@ render.yaml             Render Blueprint (ücretsiz plan, Docker)
 docs/                   Landing page (v0.8.3): docs/index.html + docs/img/. GitHub Pages (main, /docs) veya Netlify ile yayınlanır. Uygulamadan bağımsız, tarama yapmaz
 public/                 Arayüz (vanilla JS, build yok, koyu tema). Giriş ekranı = landing page (Site denetimi / Taşıma projesi). Proje ekranı: adım çubuğu + Sıradaki iş kartı
 config/rules.json       Bütün eşikler, kural ayarları ve ek kontrol limitleri (checks)
-test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi, fixture-migration.js: eski site + geçecek site (v0.12.0: linksiz eski sayfalar, v0.12.1: `/gec-sayfa`), server-test.js: yerel sunucu güvenliği, "Tekrar kontrol et" ve çıkış akışı, fixture-verify.js: bozuk ve temiz canlı site, urllist-test.js: eski adres listesi, redirects-test.js: eski yönlendirme (v0.12.2, test sitesi `startRedirectSites`))
+test/                   fixture sunucuları ve testler (fixture-https.js: self-signed HTTPS test sitesi, fixture-migration.js: eski site + geçecek site (v0.12.0: linksiz eski sayfalar, v0.12.1: `/gec-sayfa`), server-test.js: yerel sunucu güvenliği, "Tekrar kontrol et" ve çıkış akışı, fixture-verify.js: bozuk ve temiz canlı site, urllist-test.js: eski adres listesi, redirects-test.js: eski yönlendirme (v0.12.2, test sitesi `startRedirectSites`), render-test.js: JavaScript render (v0.13.0, A bölümü tarayıcısız, B bölümü Chromium ister); JS sayfaları `fixture-rules.js` içinde (`/js` ve `JS_PAGES`))
 ```
 
 ## Kurallar ve konvansiyonlar
@@ -86,9 +87,9 @@ test/                   fixture sunucuları ve testler (fixture-https.js: self-s
 | Belge | README baştan yazıldı: aracın ne yaptığı, ne yapmadığı ve güncel yol haritası | Tamam (v0.10.4) |
 | Sprint 4 | AI özellikleri. Ön görüşme yapıldı (v0.8.1): fiyat, maliyet hesabı, anahtar ve ücret sahipliği konuşuldu. Sprint 3 bitmeden başlamaz. Başlamadan önce tekrar konuşulur | Bekliyor (Claude API anahtarı gerekir) |
 | Sprint 5 | Entegrasyonlar | Bekliyor (PSI anahtarı, GSC OAuth, ClickUp token) |
-| Sprint 6 | JS render | Bekliyor |
+| Sprint 6 | JS render (v0.13.0): isteğe bağlı Playwright modu, ham ↔ render farkı, sadece JS ile gelen linkler, 9 JavaScript kuralı, Excel "JavaScript farkı", proje sitesi başına mod. v0.10.2 sırasında 4. iş idi | Kod tamam (v0.13.0), gerçek site denemesi bekliyor |
 
-Testler (v0.12.2, 13 dosya, 313 kontrol): crawler 22, kural 103, yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 20, canlıya çıkış 11, sunucu 8 (IPv6 varsa 9), doğrulama 8, canlı doğrulama 12, eski adres listesi 30, eski yönlendirme 13 kontrol (toplam yaklaşık 18 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
+Testler (v0.13.0, 14 dosya, 344 kontrol Chromium ile; Chromium yoksa 22 kontrol atlanır): crawler 22, kural 117 (Chromium yoksa 105), yayın modu 12, karşılaştırma 49, 301 haritası 17, yapılacaklar 8, proje 20, canlıya çıkış 11, sunucu 8 (IPv6 varsa 9), doğrulama 8, canlı doğrulama 12, eski adres listesi 30, eski yönlendirme 13, JavaScript render 17 (Chromium yoksa 7) kontrol (toplam yaklaşık 45 sn; render testleri yaklaşık 25 sn). 3.000 × 3.000 sayfa öneri hesabı yaklaşık 1,5 sn. 5.000 sayfa denetimi yaklaşık 1 sn.
 
 Gerçek site denemesi (v0.7.0, Şamil Şahin taşıması, 11 Ekim 2026). Eşleştirme ekranı: `/` 7 sayfa (3 bulundu), `/tr/` 46 sayfa, `/fr/` 19 sayfa, `/prosedur/` 13 sayfa. Bulgular:
 - Araç sadece yol ile arar. Slug değişince sayfayı bulamaz ve "Bölüm kaldırıldı" önerir. "Bulunamadı" ile "kaldırıldı" aynı şey değildir. Bu öneri yanlış güven verir. `/prosedur/` bu durumda.
@@ -113,6 +114,20 @@ Gerçek site denemesi (v0.8.0, 11 Ekim 2026, çok dilli taşıma: İngilizce kö
 - Excel onaylanan satırda güven, puan ve nedeni silmişti. Önerinin doğruluğu ölçülemedi.
 - Bölüm kuralı doğru olan eski İngilizce /prosedur/ sayfaları çoğunlukla doğru eşleşti. Dolgu sayfaları genel /procedures sayfasına gitti (daha özel sayfa vardı); kaynağı belli değil.
 v0.8.1 bu dört sorunu düzeltti. Tekrar test bekliyor.
+
+Açık noktalar (v0.13.0):
+- Gerçek sitede denenmedi. Claude'un ortamı internete çıkmaz: süre, bellek ve yanlış alarm sadece yerel test sitelerinde ölçüldü (sayfa 0,6–1,3 sn; 1 sayfa yaklaşık 160 MB, 4 sayfa yaklaşık 206 MB PSS, headless shell). İlk denemede bir React/Next sitesini ham ve render ile tarayın. Karşılaştırın: sayfa sayısı, süre, JavaScript kuralları, engellenen dış alan adları (Excel "JavaScript farkı").
+- Site JS paketini başka alan adından (CDN) yüklüyorsa render boş kalır ve "Sayfa render edilemedi" veya "İçerik sadece JS" çıkmaz: içerik hiç oluşmaz. Excel'de "Engellenen alan adları" sütununa bakın ve alan adını izin listesine yazın. İleride: render boş ve dış istek engellenmişse araç bunu ayrıca söyleyebilir.
+- `render.blockHosts` içinde `google.com` var (reCAPTCHA, harita). Google'ın kendi alt alan adını kullanan bir site (örnek: `sites.google.com`) taranırsa sorun olabilir: taranan site her zaman izinlidir, ama başka bir google.com alt alan adı engellenir.
+- Bekleme "ağ 500 ms sessiz" kuralıdır. JS içeriği 500 ms'den uzun bir zamanlayıcı ile isterse (setTimeout 1 sn) araç içeriği kaçırır. Test sırasında bu yarış görüldü (quietMs 300, zamanlayıcı 300). Yanlış boş sonuç görülürse `render.quietMs` artırın.
+- Kullanıcı etkileşimi yok (tıklama, kaydırma). Kaydırınca yüklenen içerik ve linkler görünmez. Google da kaydırmaz, ama yüksek bir pencere kullanır. Pencere boyutu varsayılan (1280 × 720), mobil değil.
+- JS ile değişen adres (`location.href`) sadece sayfa kaydına yazılır (`render.jsUrl`, ayrıntıda görünür). Kural yok.
+- POST istekleri aynı sitede izinli (GraphQL ve veri istekleri için). Staging'de sayfa açılınca POST atan JS çalışır.
+- Kurulu Chrome (`CHROMIUM_PATH`) denenmedi. Playwright sürümü ile uyumsuz olabilir. Önerilen yol `npx playwright-core install chromium-headless-shell`.
+- GitHub Actions'ta Chromium yok: 22 kontrol atlanır, kalan testler çalışır. Render kodundaki bir hata Actions'ı kırmızı yapmaz. Claude teslimden önce render testlerini kendi ortamında çalıştırır. İş akışına tarayıcı kurulumu eklemek kullanıcının kararıdır (elle).
+- `js-shell-suspect` ve render mod notu `meta.json` içindeki değerden okunur. Kayıt v0.13.0 öncesi ise not çıkmaz (tekrar tarayın). Kural `rules.json` değişince tekrar çalışsa da `meta.json` içindeki `jsShell` değeri tarama anındaki değerdir.
+- Ayrıştırıcı düzeltmesi: `absHosts.asset` artık `<script src>` hostlarını da okur (önceden okumuyordu). Canlıya çıkış listesi ve canlı doğrulama, script içindeki staging adresini yeni bulur. Bu yeni iş eski taramada görünmez: siteyi tekrar tarayın.
+- Proje dosyasında site `render` alanı sadece `true` iken saklanır. "Projeyi indir" bu ayarı ve izin listesini taşır.
 
 Açık noktalar (v0.12.2):
 - Gerçek sitede denenmedi. Eski sitede yönlendirmesi çok olan bir projede 301 haritasının "Eski yönlendirme" sekmesini açın. Satır sayısı büyükse (eski sitede çok sayıda yönlendirme) liste kalabalık olabilir: bu satırlar karar istemez, sadece CSV'ye girer.
@@ -234,7 +249,7 @@ Açık noktalar (Sprint 2'den):
 
 **Sprint 5 — Entegrasyon:** PageSpeed Insights API (Core Web Vitals), Google Search Console (trafik ile önceliklendirme, indeks durumu), sorun → ClickUp task (kuralın team alanına göre).
 
-**Sprint 6 — JS render:** Playwright modu. Ham HTML ile render edilmiş HTML farkı, sadece JS ile gelen linkler.
+**Sprint 6 — JS render:** Playwright modu. Ham HTML ile render edilmiş HTML farkı, sadece JS ile gelen linkler. (v0.13.0 ile yapıldı.)
 
 ## Doğrulama planı (v0.10.2, kullanıcı ile yapıldı)
 
@@ -262,6 +277,24 @@ Bilinen sınır: sütun adları Screaming Frog'un İngilizce arayüzüne göredi
 Sonuçlar: henüz ölçüm yok.
 
 ## Karar günlüğü
+
+- v0.13.0: JavaScript render (kullanıcı bağımlılığı ve D1–D12 tasarımını "onay" ile onayladı). Önce deney: bugünkü kod JS ile eklenen title, H1, canonical ve açıklamayı görmedi, JS linkini istemedi; JS sayfasında 5 yanlış alarm (`title-missing` kritik, `canonical-missing`, `desc-missing`, `h1-missing`, `thin-content`).
+- v0.13.0: Bağımlılık `playwright-core` 1.63.0 (14 MB, alt paket yok, kurulumda indirme yapmaz), `optionalDependencies`, kesin sürüm (Chromium revizyonu sürüme bağlı; Claude'un ortamındaki Chromium revizyon 1243 bu sürüm ile aynı). Reddedilen: `playwright` (gereksiz test aracı), `puppeteer` (kurulumda Chrome indirir: Actions ve Docker şişer), `jsdom` (gerçek tarayıcı değil, JS Node içinde çalışır). Paket `import()` ile sadece render istenince yüklenir. Paket veya Chromium yoksa araç normal çalışır, seçenek pasif olur ve nedeni yazar (`/api/info` → `render`).
+- v0.13.0: Ağ kuralı (deney ile). Düz Playwright iç ağ sunucusuna 13 yoldan istek attı (script, CSS, img, iframe, fetch, XHR, beacon, WebSocket, EventSource, prefetch, service worker, 302 ile script ve sayfa). Çözüm iki katman: (1) her istek `context.route` ile Node kontrol noktasına gelir ve crawler'ın `request()` fonksiyonu ile istenir (SSRF koruması, zaman aşımı, `maxBodyBytes`, şifre sadece taranan siteye); (2) tarayıcının kendi ağı ölü vekile gider (`proxy` + `<-loopback>`). Deney: Node'un verdiği 302 sonrası tarayıcı yönlendirmeyi kendisi izler ve kontrol noktasına uğramaz; bu yüzden yönlendirme Node'da adım adım izlenir ve tarayıcı sadece son cevabı alır (her adım host politikası, robots.txt ve korumadan geçer). WebSocket kapalı (`routeWebSocket`), service worker kapalı. Her sayfa yeni bağlam (çerez ve depolama yok).
+- v0.13.0: Şifre. Playwright `httpCredentials` şifreyi 401 cevabından sonra başka hosta gönderdi (deney). Kullanılmaz. Şifreyi `headersFor()` ekler (v0.10.1 kuralı).
+- v0.13.0: Host politikası. Taranan site (www aynı site) her zaman izinli. Sonra `render.blockHosts` (analytics, reklam, sosyal, font, consent) alt alan adlarında ve izin listesinde de kazanır. Sonra sitenin alt alan adları ve izin listesi (tarama ayarı, projede site başına `renderAllow`, en fazla 20). Diğer her şey engelli ve sayılır (`render.blockedHosts`). `render.blockTypes`: görsel, video, font hiç istenmez. Etiket kimliği DOM'daki script src'den okunur: GTM isteği gönderilmeden kimlik bulunur (test).
+- v0.13.0: Ana belge. Tarayıcıya ham okumanın HTML'i UTF-8 olarak verilir (deney: karakter kodu başlığı olmayan sayfada tarayıcı Türkçe harfi bozdu). Sayfa ikinci kez istenmez (test). Önbellek: kontrol noktası açıkken tarayıcı önbelleği kapanır (deney: 3 sayfa = 3 kez aynı JS); JS ve CSS tarama boyunca bellekte tutulur (`render.cacheMb`).
+- v0.13.0: Bekleme. `load` sonrası ağ `render.quietMs` (500) sessiz kalınca biter, en fazla `maxWaitMs` (8000), toplam `timeoutMs` (20000). Deney: `load` geç gelen fetch içeriğini kaçırdı. Sonsuz döngü JS: `goto` zaman aşımı, bağlam kapanır, tarayıcı sağlam kalır (deney).
+- v0.13.0: Alan kaynağı (D5). Render'dan: title, description, canonical, başlıklar, linkler, kelime, içerik izi, görsel, JSON-LD, hreflang, OG, viewport, favicon. Ham: HTTP alanları ve `blockingCss/Js`. Birleşim: `metaRobots` (ham noindex render'da kaldırılsa da kalır), `tracking`, `gscVerify`, `absHosts`. Linkler: render linkleri (`js: true` ham HTML'de yoksa) + JS'nin kaldırdığı ham linkler. Ham özet `raw` alanında; render robots değeri `metaRobotsJs`. Render hatasında ham alanlar kalır (`rendered: false`).
+- v0.13.0: Kurallar (D6), kategori `js`: `js-title-only`, `js-h1-only`, `js-content-only` (`rawContentRatio` 0.5, `contentMinWords` 50), `js-links-only` (`jsLinkRatio` 0.5, `jsLinkMin` 3), `js-meta-changed` (title iki tarafta doluysa; description, canonical, robots her farkta), `js-noindex-removed` (kritik), `render-failed` (sayfa ve tarayıcı açılmazsa site satırı), `render-resource-blocked` (aynı sitede robots.txt ile engelli JS/CSS/veri), `js-shell-suspect` (sadece ham tarama: sayfaların `shellRatio` oranı ve en az `shellMinPages` sayfa boş title/H1, en fazla `shellMaxWords` kelime ve script; veya başlangıç sayfası böyle ve ham HTML'de iç link yok). Son koşul ekran kontrolünde eklendi: JS sitesinin ham taraması tek sayfa buldu ve kural tetiklenmedi. Parser yeni alan `scripts` (çalışan script sayısı). `AUDIT_VERSION` 4.
+- v0.13.0: Taşıma projesi (D7). Site tanımında `render` ve `renderAllow`. Proje taraması siteyi tanımdaki mod ile tarar. Eşleştirme ve 301 önerisi taramanın alanlarını kullanır (kod değişmedi). Yoklama ham kalır. Siteler farklı modda tarandıysa Tarama ve Eşleştirme adımı not gösterir. Ham taramada `js-shell-suspect` varsa Sıradaki iş kartı "Render ile tekrar tara" der: sadece Tarama adımında (sonraki adımları engellemez) ve render kullanılabilirken. Bilgi `meta.json` → `render`, `jsShell` üzerinden gelir.
+- v0.13.0: Sınırlar (D8) `rules.json` → `render`. Taramada `render.limits` ile değişir (test). `maxPages` (1000) sonrası sayfa ham okunur ve `render.skipped: 'limit'` alır, `meta.render.limitReached`.
+- v0.13.0: Yayın modu (D9): render kapalı (`/api/info`, POST 400). Docker `npm ci --omit=dev --omit=optional`: imaj değişmez. Neden: alpine üzerinde Playwright Chromium çalışmaz, 512 MB dar, açık sunucuda tarayıcı riski.
+- v0.13.0: Çıkıştan sonra (D10): kilit render'dan önce kontrol edilir (409, eski siteye 0 istek, test). Liste taraması (`seeds`) ve canlı doğrulama render yapmaz. Canlı tarama sitenin mod ayarını kullanır.
+- v0.13.0: Testler (D11). `test/render-test.js` (17 kontrol): A bölümü her yerde (birleşim, host politikası, liste modu, `CHROMIUM_PATH=/yok` ile ham devam, yayın modu, tarayıcı yokken 400, proje ayarı ve kilit), B bölümü Chromium ile (10 kontrol). Kural testi JS sayfalarını ayrı render taramasında dener (`/js`, `maxDepth` 2; `/temiz` render modunda temiz; Excel sayfası). Chromium yoksa toplam 22 kontrol "atlandı" yazar ve geçer (deney: `PLAYWRIGHT_BROWSERS_PATH` boş klasör). "İç ağ" sunucusu ikinci host adıdır (`localhost`): macOS `127.0.0.2` açmaz. Test için crawler `guard` seçeneği aldı. Eski kodda (v0.12.2 + sadece `render.js`) kural testi render bölümünde çöktü, render testinde 14/17 başarısız. Render testi 5 kez üst üste geçti.
+- v0.13.0: Arayüz (D12): form kutusu, durum satırı, izin alanı; rapor başlığı ve uyarılar; sayfa ayrıntısında "Ham HTML ↔ Render" tablosu (değişen satır sarı); proje Tarama adımında site kutusu, etiketler, mod notu. Ekran kontrolünde bulundu: `chg` sınıfı mevcut stil ile çakıştı (`jd-chg` oldu); boş robots kırmızı görünüyordu. Ekran görüntüsü 1440 ve 390 px: form, Sorunlar, ayrıntı, proje Tarama (JS kabuğu ve render sonrası), Eşleştirme. Taşma ve konsol hatası yok.
+- v0.13.0: Excel "JavaScript farkı" sayfası (sadece render taramasında) ve Özet satırı. CLI `--render`, `--render-allow`.
+- v0.13.0: Bulunan eski hata (v0.10.0): parser `absHosts` listesini script'ler silindikten sonra okuyordu; `<script src="https://staging…">` hiç bulunmuyordu. Liste artık silmeden önce okunur. Canlıya çıkış testi aynen geçti.
 
 - v0.12.2: Eski sitede yönlenen adres için 301 (kullanıcı tasarımı "onay" ile onayladı). Önce deney: bugünkü kodda liste taramasındaki yönlenen adres (`/eski-indirim`) ve eski taramada link ile bulunan yönlenen adres (`/eski-link`, zincir, kırık, dış adres) 301 haritasında yoktu, canlı doğrulama onları istemedi. Yönlendirme verisi taramada vardı (`redirectChain`, `finalUrl`, `finalStatus`).
 - v0.12.2: Karar 5 (v0.12.0) değişti. Eski metin: "Eski sitede yönlenen adres haritaya girmez." Yeni: yönlenen adres haritaya girer, satır son hedefin yeni adresine tek adımda gider (zincir yok). v0.6.0 kuralı değişmez: yönlendirme eski sayfa sayılmaz. Eski sayfa sayısı, korunan oran ve karşılaştırma onu görmez ("Yönleniyor" satırı oluşmaz, çift satır yok).

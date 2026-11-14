@@ -103,6 +103,25 @@
       "the", "and", "of", "in", "for", "to", "with", "what", "is", "how", "on", "at", "by", "or",
       "le", "la", "les", "des", "du", "et", "pour", "html", "htm", "php", "aspx", "index", "www"]
   },
+  "render": {
+    "_aciklama": "JavaScript render (v0.13.0). Tarama ayarında açılır. Sayfa Chromium içinde açılır, JS çalışır, DOM okunur. Her istek Node kontrol noktasından geçer (SSRF koruması, robots.txt, zaman aşımı, gövde sınırı). concurrency: aynı anda en fazla kaç sayfa render edilir. timeoutMs: bir sayfanın bütün render süresi. quietMs: ağ bu kadar sessiz kalınca render biter. maxWaitMs: load olayından sonra en fazla bekleme. maxPages: bir taramada en fazla kaç sayfa render edilir (sonrası ham okunur, sayfa işaret alır). maxRequestsPerPage: bir sayfanın en fazla alt isteği. cacheMb: JS ve CSS önbelleği (tarama boyunca). blockTypes: bu tür istekler hiç gönderilmez. blockHosts: bu alan adları ve alt alan adları her zaman engelli (izin listesine yazılsa da). Taranan site ve alt alan adları izinlidir; başka alan adı tarama ayarındaki izin listesine yazılmalı. rawContentRatio: ham ana içerik render içeriğinin bu oranından azsa \"İçerik sadece JS ile\". contentMinWords: bu kuralın çalışması için render içeriğinin en az kelime sayısı. jsLinkRatio ve jsLinkMin: iç linklerin bu oranı (ve en az bu sayıda link) sadece JS ile geliyorsa kural tetiklenir. shellRatio, shellMinPages, shellMaxWords: ham taramada 200 veren HTML sayfaların en az bu oranı (en az bu sayıda sayfa) boş title veya H1, en fazla shellMaxWords kelime ve script içeriyorsa site JS kabuğu gibi görünür. Başlangıç sayfası böyleyse ve ham HTML'de hiç iç link yoksa da (JS sitesinin ham taraması çoğu zaman tek sayfa bulur).",
+    "concurrency": 2,
+    "timeoutMs": 20000,
+    "quietMs": 500,
+    "maxWaitMs": 8000,
+    "maxPages": 1000,
+    "maxRequestsPerPage": 200,
+    "cacheMb": 50,
+    "blockTypes": ["image", "media", "font"],
+    "blockHosts": ["google-analytics.com", "analytics.google.com", "googletagmanager.com", "doubleclick.net", "googlesyndication.com", "googleadservices.com", "google.com", "facebook.net", "facebook.com", "connect.facebook.net", "hotjar.com", "hotjar.io", "clarity.ms", "bing.com", "linkedin.com", "licdn.com", "tiktok.com", "yandex.ru", "mc.yandex.ru", "fonts.googleapis.com", "fonts.gstatic.com", "youtube.com", "vimeo.com", "intercom.io", "hubspot.com", "hs-scripts.com", "segment.io", "segment.com", "mixpanel.com", "sentry.io", "newrelic.com", "nr-data.net", "cookiebot.com", "onetrust.com", "cookielaw.org"],
+    "rawContentRatio": 0.5,
+    "contentMinWords": 50,
+    "jsLinkRatio": 0.5,
+    "jsLinkMin": 3,
+    "shellRatio": 0.5,
+    "shellMinPages": 3,
+    "shellMaxWords": 50
+  },
   "yayin": {
     "_aciklama": "PUBLIC_MODE=1 iken (internete açık sunucu) geçerli limitler.",
     "maxUrls": 2000,

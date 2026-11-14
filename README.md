@@ -28,7 +28,7 @@ Bu işlerin kodu ve testi tamamdır. Gerçek sitelerde ölçüm sürüyor (bkz. 
 | İş | Sonuç |
 |---|---|
 | Siteyi tarar | Linkleri ve sitemap dosyalarını izler. Her yönlendirme adımını kaydeder. robots.txt kurallarına uyar. Şifreli staging sitesini tarar. Eski Türkçe kodlamaları (windows-1254) okur. |
-| Teknik sorunları bulur | 88 kural, 15 kategori. Her sorunun açıklaması, çözümü, önemi (kritik, uyarı, bilgi) ve ekibi (Frontend, Backend, İçerik, SEO) vardır. |
+| Teknik sorunları bulur | 97 kural, 16 kategori. Her sorunun açıklaması, çözümü, önemi (kritik, uyarı, bilgi) ve ekibi (Frontend, Backend, İçerik, SEO) vardır. |
 | Site ayarlarını kontrol eder | http/https ve www sürümleri, SSL sertifikası, HSTS, sıkıştırma, llms.txt, kırık dış link, kırık ve büyük görsel. |
 | Eski ve yeni siteyi eşleştirir | Eski sitenin her bölümü için yeni yeri önerir. Birden çok yeni siteyi destekler (örnek: diller ayrı alan adlarına gider). Sayfanın dilini kullanır. |
 | 301 listesini üretir | Adresi değişen her sayfaya yeni sayfa önerir: slug, title, H1 ve içerik benzerliği, güven seviyesi ile. Siz onaylarsınız. Araç listeyi CSV olarak verir (301 ve 410). |
@@ -37,6 +37,7 @@ Bu işlerin kodu ve testi tamamdır. Gerçek sitelerde ölçüm sürüyor (bkz. 
 | İşleri yere ve ekibe göre ayırır | Eski alan adı sunucusu, her yeni site, içerik ve karar bekleyen işler ayrı kartlardır. |
 | Canlıya çıkışı kontrol eder | Staging adresi kalmış mı (canonical, hreflang, link, görsel, sitemap, 301 listesi), staging Google'a açık mı, noindex ve `Disallow: /` nerede, Analytics/GTM ve Search Console etiketi yeni sitede var mı. |
 | Taşımayı canlıda doğrular | Çıkıştan sonra her eski adresi canlı alan adında ister: 301 doğru mu, zincir, geçici yönlendirme, yanlış hedef, hedef hatalı, 410 geldi mi, kayıp sayfa. Canlı siteyi ayrıca tarar: noindex, X-Robots-Tag, `Disallow: /` ve staging adresi kalmış mı, etiketler var mı, sitemap canlı adresleri mi içeriyor ve adresler 200 mü. |
+| JavaScript sitesini okur (isteğe bağlı) | Sayfayı Chromium ile açar, JS çalışınca oluşan title, H1, içerik ve linkleri okur. Ham HTML ile farkı raporlar: sadece JS ile gelen title, H1, içerik ve link, JS ile değişen etiket, JS'nin kaldırdığı noindex. Bkz. JavaScript render. |
 | Rapor verir | Web arayüzü, Excel (site denetimi ve taşıma projesi), 301 listesi CSV, ham JSON. |
 
 ### Kısmen yaptığı işler
@@ -45,7 +46,8 @@ Bu işlerin kodu ve testi tamamdır. Gerçek sitelerde ölçüm sürüyor (bkz. 
 |---|---|
 | 301 önerisi | Aynı kelimeyi, ortak öneki ve yakın yazımı bulur. Farklı dildeki eş anlamı bulmaz (göz kapağı ↔ blepharoplasty). Bu sayfalarda adresi siz seçersiniz. |
 | 301 listesi biçimi | Sadece CSV. `.htaccess`, nginx veya Shopify biçimi yok. |
-| Etiket kontrolü | Analytics ve GTM kimliğini sadece HTML içindeki script'ten okur. Consent aracı ile yüklenen etiketi görmez. |
+| Etiket kontrolü | Analytics ve GTM kimliğini HTML içindeki script'ten okur. Consent aracı ile yüklenen etiketi sadece JavaScript render açıksa görür. |
+| JavaScript render | Chromium ayrı kurulur. Yayın modunda (Render) kapalı. Gerçek sitelerde henüz denenmedi: süre ve yanlış alarm ölçülmedi. Google'ın render davranışının tahminidir, kopyası değildir. |
 | Şifreli staging'de 301 kontrolü | Araç şifreyi saklamaz. Şifreli sitede bu kontrol "Kontrol edilemedi" sonucunu verir. |
 | Büyük site | Varsayılan sınır 5.000 URL, en fazla 50.000. Araç bütün taramayı bellekte tutar: çok büyük sitede yavaşlar. |
 | Title genişliği | Piksel değeri tahmindir. |
@@ -53,7 +55,7 @@ Bu işlerin kodu ve testi tamamdır. Gerçek sitelerde ölçüm sürüyor (bkz. 
 
 ### Yapmadığı işler
 
-- JavaScript çalıştırmaz. React, Next veya Vue ile oluşan içeriği ve linkleri görmez.
+- Varsayılan taramada JavaScript çalıştırmaz. JS ile oluşan içerik için "JavaScript ile oluştur" seçeneğini açın.
 - Search Console, Analytics veya backlink aracına bağlanmaz (API ve hesap bağlantısı yok). Trafik verisini sadece yüklenen dosyadan okur.
 - Site denetimindeki sorunları trafiğe göre sıralamaz. Sadece taşıma projesinin 301 haritası trafiğe göre sıralanır.
 - Hız ölçmez (Core Web Vitals).
@@ -68,7 +70,7 @@ Node.js 20 veya üstü gerekli.
 
 ```bash
 npm install
-npm test     # bütün testler, yaklaşık 20 saniye
+npm test     # bütün testler, yaklaşık 45 saniye
 npm start
 ```
 
@@ -82,8 +84,8 @@ Arayüz koyu temadır. Yazı tipi Google Fonts'tan (Archivo) gelir. İnternet yo
 2. Tarama sırasında her URL bir hücredir. Gri: 200. Turuncu: yönlendirme. Kırmızı: 4xx veya 5xx. Boş kırmızı çerçeve: bağlantı hatası. Boş gri çerçeve: robots engeli.
 3. Tarama bitince "Sorunlar" sekmesi açılır. Önem ve ekip filtrelerini kullanın. Soruna tıklayın: açıklama, çözüm ve etkilenen adresler görünür.
 4. Site kartı ek kontrollerin sonucunu gösterir. Renkli kutuya tıklayın, ilgili sorun açılır.
-5. "Sayfalar" sekmesinde tablo vardır. Satıra tıklayın, sayfanın bütün verisi açılır.
-6. "Excel indir" raporu verir. Sayfalar: Özet, Sorunlar, Sorun detayları, Sayfalar, Redirectler, Hatalar, Engelli (robots), Sitemap dosyaları, Site sürümleri, Dış kaynaklar.
+5. "Sayfalar" sekmesinde tablo vardır. Satıra tıklayın, sayfanın bütün verisi açılır. Render açıksa "JavaScript" satırı ham HTML ile render sonucunu yan yana gösterir.
+6. "Excel indir" raporu verir. Sayfalar: Özet, Sorunlar, Sorun detayları, Sayfalar, JavaScript farkı (sadece render taramasında), Redirectler, Hatalar, Engelli (robots), Sitemap dosyaları, Site sürümleri, Dış kaynaklar.
 
 ### Sağlık skoru
 
@@ -91,7 +93,7 @@ Skor = kritik sorunu olmayan URL oranı (robots ile engelli URL'ler hariç). Sit
 
 ### Denetim kuralları
 
-88 kural, 15 kategori: tarama ve indeks, redirect, canonical, title, meta description, başlık hiyerarşisi, içerik (kopya, benzer, dummy metin), linkler (kırık, staging linki), görseller, hreflang, yapısal veri, performans, HTTPS, mobil ve erişilebilirlik, URL yapısı.
+97 kural, 16 kategori: tarama ve indeks, redirect, canonical, title, meta description, başlık hiyerarşisi, içerik (kopya, benzer, dummy metin), linkler (kırık, staging linki), görseller, hreflang, yapısal veri, performans, HTTPS, mobil ve erişilebilirlik, URL yapısı, JavaScript.
 
 Kural tanımları `src/rules/definitions.js` dosyasındadır.
 
@@ -124,6 +126,49 @@ Kurallar:
 - 401, 403, 429, 999 kodları ve zaman aşımı "kırık" sayılmaz. Bunlar genelde bot korumasıdır.
 - Araç DNS kaydı olmayan bir alan adını bir kez sorgular.
 - Limitler `config/rules.json` → `checks` bölümündedir: paralel istek 8, zaman aşımı 8 sn, en fazla 1.000 dış link ve 2.000 görsel.
+
+### JavaScript render
+
+React, Vue veya Next.js (istemci tarafı) ile oluşan sitede ham HTML boştur. Araç title, H1 ve içeriği bulamaz ve JS ile gelen linkleri izlemez. Bu seçenek sayfayı gerçek bir tarayıcıda (Chromium) açar.
+
+Kurulum (bir kez, yaklaşık 260 MB disk):
+
+```bash
+npm install                                         # playwright-core (isteğe bağlı paket) gelir
+npx playwright-core install chromium-headless-shell # Chromium
+```
+
+Kurulu Chrome kullanmak için `CHROMIUM_PATH` ortam değişkenine yolunu yazın (denenmedi). Chromium yoksa seçenek kapalı görünür ve nedenini yazar. Araç normal taramaya devam eder.
+
+Kullanım: arayüzde "Gelişmiş ayarlar" → "JavaScript ile oluştur". Taşıma projesinde her sitenin kendi kutusu var (Tarama adımı): eski site ham, yeni site render olabilir. Komut satırında `--render`.
+
+```mermaid
+flowchart LR
+  A[Ham HTML isteği] --> B[Ham alanlar]
+  A --> C[Chromium: JS çalışır]
+  C --> D[Render alanları]
+  B --> E[Birleşim + fark]
+  D --> E
+  E --> F[JavaScript kuralları]
+```
+
+| Alan | Kaynak |
+|---|---|
+| Title, description, canonical, H1–H6, içerik, linkler, görseller, JSON-LD, hreflang, Open Graph | Render |
+| Durum kodu, yönlendirme, HTTP başlıkları, boyut, süre, render engelleyen kaynak | Ham |
+| noindex, Analytics/GTM kimliği, staging adresi | İkisinin birleşimi (ham HTML'deki noindex Google'da render'ı durdurabilir) |
+
+JavaScript kuralları: title sadece JS ile, H1 sadece JS ile, içerik çoğunlukla JS ile, iç linkler çoğunlukla JS ile, JS SEO etiketini değiştiriyor, ham noindex'i JS kaldırıyor (kritik), sayfa render edilemedi, JS veya CSS robots.txt ile engelli. Ham taramada site JS kabuğu gibi görünürse araç "Site JavaScript ile oluşuyor olabilir" der ve projede render ile tekrar taramayı önerir.
+
+Güvenlik ve veri:
+
+- Tarayıcı ağa kendisi çıkmaz. Her istek araçtaki tek bir kontrol noktasından geçer: host izni, robots.txt, iç ağ engeli (SSRF), zaman aşımı, 5 MB gövde sınırı. Yönlendirmenin her adımı kontrol edilir. WebSocket ve service worker kapalıdır.
+- Sadece taranan site ve alt alan adları açılır. Başka alan adı (CDN) için "İzinli dış alan adları" alanına yazın. Analytics, reklam, sosyal medya ve font servisleri her zaman engelli (`render.blockHosts`). Görsel, video ve font hiç istenmez. Engellenen istekler raporda sayılır.
+- Staging şifresi sadece taranan siteye gider.
+- Sayfanın kendisi tekrar istenmez: tarayıcı ham okumanın HTML'ini kullanır.
+- Her sayfa yeni ve boş bir tarayıcı bağlamında açılır (çerez yok).
+
+Hız: sayfa başına en az 0,6 sn (ağ 500 ms sessiz kalınca render biter). Aynı anda 2 sayfa. Gerçek sitede sayfa başına 1–5 sn bekleyin (ölçülmedi). Bir taramada en fazla 1.000 sayfa render edilir, sonrası ham okunur. Ayarlar `config/rules.json` → `render`.
 
 ## Taşıma projesi
 
@@ -255,6 +300,8 @@ node bin/crawl.js https://staging.ornek.com --label yeni --auth kullanici:sifre 
 | `--no-external` | Dış linkleri kontrol etme | açık |
 | `--no-images` | Görselleri kontrol etme | açık |
 | `--user-agent` | Özel user-agent | `SEO-Audit/<sürüm>` |
+| `--render` | Sayfaları Chromium ile aç (JavaScript render) | kapalı |
+| `--render-allow` | Render için izinli dış alan adları (virgül ile) | — |
 | `--label` | Dosya adı etiketi | — |
 | `--out` | Çıktı klasörü | crawls |
 
@@ -272,7 +319,7 @@ Sunucu yavaş ise `-c 2 --delay 500` kullanın.
 - robots.txt kontrolü aracın kendi user-agent değeri ile yapılır. Googlebot'a kapalı site ayrı bir kural ile raporlanır.
 - noindex okuması: araç yönergeleri tek tek okur. `max-image-preview:none` noindex değildir. Başka bir bota yazılan `X-Robots-Tag` sayılmaz.
 
-Her URL için toplanan veri: durum kodu, her yönlendirme adımı, son hedef, title, meta description, başlık ağacı (H1–H6), canonical, meta robots, X-Robots-Tag, html lang, hreflang, kelime sayısı, içerik parmak izi, görseller ve alt metinleri, iç ve dış linkler, iç link sayısı, derinlik, yanıt süresi, boyut, sıkıştırma, JSON-LD tipleri, Open Graph, Analytics/GTM kimlikleri, Search Console etiketi, sitemap ve yetim durumu.
+Her URL için toplanan veri: durum kodu, her yönlendirme adımı, son hedef, title, meta description, başlık ağacı (H1–H6), canonical, meta robots, X-Robots-Tag, html lang, hreflang, kelime sayısı, içerik parmak izi, görseller ve alt metinleri, iç ve dış linkler, iç link sayısı, derinlik, yanıt süresi, boyut, sıkıştırma, JSON-LD tipleri, Open Graph, Analytics/GTM kimlikleri, Search Console etiketi, sitemap ve yetim durumu. Render açıksa ayrıca: ham HTML değerleri (title, H1, description, canonical, robots, kelime, iç link), sadece JS ile gelen linkler, render süresi, engellenen istekler.
 
 ## Sunucuda çalıştırma
 
@@ -322,6 +369,7 @@ Yayın modu (`PUBLIC_MODE=1`):
 - Şifre isteğe bağlıdır. Şifresiz yayında herkes projeleri görür, indirir ve siler: **müşteri sitesi taramayın, müşteri işlerini yerelde yapın.** Şifre için Render → Environment bölümüne `APP_USER` ve en az 10 karakterli `APP_PASS` ekleyin.
 - Limitler: bir taramada en fazla 2.000 URL, aynı anda 1 tarama (`config/rules.json` → `yayin`).
 - `/healthz` adresi her zaman şifresizdir ve sadece "ok" döner.
+- JavaScript render kapalıdır. Docker imajı isteğe bağlı paketleri kurmaz (`npm ci --omit=optional`).
 
 Ücretsiz planın sınırları: sunucu 15 dakika istek gelmezse uyur. Sunucu uyuyunca veya yeniden başlayınca taramalar ve projeler silinir. Excel'i ve proje dosyasını hemen indirin.
 
@@ -352,12 +400,12 @@ Durum: komut hazır. Gerçek sitelerdeki ilk ölçüm bekliyor.
 
 ### Testler
 
-`npm test` on üç test dosyası çalıştırır. Testler internete çıkmaz: yerel test siteleri kullanır.
+`npm test` on dört test dosyası çalıştırır (yaklaşık 45 saniye). Testler internete çıkmaz: yerel test siteleri kullanır.
 
 | Test | Kontrol | Kapsam |
 |---|---|---|
 | Crawler | 22 | Tarama, şifrenin sadece taranan siteye gitmesi, gövde zaman aşımı ve boyut sınırı, sitemap entity koruması |
-| Kural | 103 | `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü). SSL ve HSTS kuralları self-signed bir HTTPS test sitesi ile denenir. |
+| Kural | 117 | `test/fixture-rules.js` her kuralı bilerek bozan sayfalardan oluşur. Her kural doğru sayfada tetiklenmeli. `/temiz` sayfasında hiç sorun çıkmamalı (yanlış alarm kontrolü). SSL ve HSTS kuralları self-signed bir HTTPS test sitesi ile denenir. JavaScript kuralları ayrı bir render taramasında denenir: `/temiz` render modunda da temiz kalmalı. Excel "JavaScript farkı" sayfası. |
 | Yayın modu | 12 | İç ağ adresleri, şifre kuralları, `/healthz`, limitler |
 | Karşılaştırma | 49 | Yol eşleşmesi, kaybolan, yönlenen, içerik kaybı, yol kuralları, çoklu hedef, 301 kontrolü, Excel |
 | 301 haritası | 17 | Öneri puanı, dil filtresi, ana sayfa, kararlar, CSV |
@@ -368,7 +416,10 @@ Durum: komut hazır. Gerçek sitelerdeki ilk ölçüm bekliyor.
 | Doğrulama | 8 | CSV okuyucu, referans sütunları, alan karşılaştırması |
 | Canlı doğrulama | 12 | Bozuk ve temiz canlı site. Her sonuç türü, SSRF, kontrol sınırı. Temiz canlı site hiçbir iş üretmemeli. |
 | Eski adres listesi | 30 | Search Console (TR, EN), Analytics, backlink ve düz liste okuma, temizlik, birleştirme, linksiz sayfanın eski sitede bulunması, sadece eski siteye istek, trafik sırası (301 haritası, Yapılacaklar, Canlıya çıkış, Canlı doğrulama), Excel, proje dosyası, karar korunur, çıkıştan sonra eski siteye ve staging'e istek yok, çıkıştan sonra gelen adres canlıda kontrol edilir (kanıtlı ve kanıtsız). Örnek CSV test içinde üretilir. |
+| JavaScript render | 17 | Ham ↔ render birleşimi, host politikası, liste modu, tarayıcı yokken ham devam, yayın modunda kapalı, proje ayarı ve çıkıştan sonra kilit. Chromium ile: 13 yolda SSRF (iç sunucuya 0 istek), izin listesindeki host da korumadan geçer, şifre sadece taranan siteye, engel listesi, geç gelen içerik, önbellek, robots.txt, gövde ve sayfa sınırı |
 | Eski yönlendirme | 13 | Yönlendirme verisi (aynı yol, dış adres, kırık hedef, zincir), tarama ve listeden gelen yönlendirme, hedefin kararını izleme (301, 410, bekler, kendi kararı ve geri alma), ana sayfa uyarısı, dış adres ve staging adresi, staging durumu, Yapılacaklar, CSV ve Excel, liste değişince karar kalır, canlı doğrulama beklentisi, staging'e ve çıkıştan sonra eski siteye istek yok |
+
+Chromium yoksa (örnek: GitHub Actions) tarayıcı gerektiren 22 kontrol "atlandı" yazar ve test geçer. Tarayıcısız kontroller her yerde çalışır. Actions'ta da çalışması için iş akışına `npm test` öncesi `npx playwright-core install --with-deps chromium-headless-shell` adımı eklenebilir (elle, denenmedi).
 
 Kurallar:
 
@@ -384,7 +435,7 @@ Güncelleme tek bir zip dosyası ile gelir (`seo-audit-vX.Y.Z.zip`). Zip dosyas�
 
 ## Sınırlar (bilinçli)
 
-- JavaScript ile oluşan içerik görünmez.
+- JavaScript ile oluşan içerik sadece "JavaScript ile oluştur" açıkken görünür. Yayın modunda (Render) bu seçenek kapalıdır. Render sonucu Google'ın render sonucunun tahminidir: kullanıcı etkileşimi (tıklama, kaydırma) yapılmaz.
 - `srcset` ve CSS arka plan görselleri kontrol edilmez. Sadece `<img src>` kontrol edilir.
 - `.xml.gz` sitemap okunmaz.
 - HTTP başlığındaki canonical okunmaz.
@@ -396,19 +447,19 @@ Güncelleme tek bir zip dosyası ile gelir (`seo-audit-vX.Y.Z.zip`). Zip dosyas�
 Tamamlanan:
 
 - Tarama, web arayüzü, Excel
-- Kural motoru (88 kural), sağlık skoru, ek kontroller
+- Kural motoru (97 kural), sağlık skoru, ek kontroller
 - Yayın modu (Render), SSRF koruması
 - Taşıma projesi: eşleştirme, 301 haritası, yapılacaklar, canlıya çıkış listesi, canlı doğrulama
 - Kod incelemesi ve güvenlik düzeltmeleri, doğrulama komutu
 - Eski adres listesi (dosya ile): linksiz eski sayfaları bulma, bütün listeler trafiğe göre sıralı, çıkıştan sonra gelen adresler canlı doğrulamada
 - Eski sitede yönlenen adres için 301: son hedefin yeni adresine tek adım
+- JavaScript render (Playwright, isteğe bağlı): ham HTML ile render farkı, sadece JS ile gelen linkler
 
 Sıradaki işler (sıra ile):
 
 1. Doğrulama: üç gerçek taramada Screaming Frog ile karşılaştırma
-2. JavaScript render (Playwright)
-3. Paylaşılabilir rapor ve ClickUp işi
-4. Canlıdan sonra izleme (1, 7 ve 30 gün)
+2. Paylaşılabilir rapor ve ClickUp işi
+3. Canlıdan sonra izleme (1, 7 ve 30 gün)
 
 Sonra konuşulacak: AI önerileri (title, meta, alt metin, anlam benzerliği ile 301 eşleştirme), Core Web Vitals.
 

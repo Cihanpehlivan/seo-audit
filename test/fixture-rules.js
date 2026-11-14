@@ -27,7 +27,8 @@ function page(path, o = {}) {
     o.head || '',
   ].join('');
   const lang = o.lang === false ? '' : ` lang="${o.lang || 'tr'}"`;
-  return `<!doctype html><html${lang}><head><meta charset="utf-8">${head}</head><body><header><svg width="24" height="24" role="img"><title>Logo</title><circle cx="12" cy="12" r="10"/></svg><nav><a href="/">Ana sayfa</a></nav></header><main>${h1 === null ? '' : `<h1>${h1}</h1>`}<h2>Alt başlık</h2>${body}</main><footer>© ${BRAND}</footer></body></html>`;
+  const nav = o.nav === false ? '' : '<nav><a href="/">Ana sayfa</a></nav>';
+  return `<!doctype html><html${lang}><head><meta charset="utf-8">${head}</head><body><header><svg width="24" height="24" role="img"><title>Logo</title><circle cx="12" cy="12" r="10"/></svg>${nav}</header><main>${h1 === null ? '' : `<h1>${h1}</h1>`}<h2>Alt başlık</h2>${body}</main><footer>© ${BRAND}</footer>${o.script ? `<script>${o.script}</script>` : ''}</body></html>`;
 }
 
 const dupText = `<p>${words('kopya', 300)}</p>`;
@@ -39,7 +40,11 @@ const LINKED = ['/temiz', '/yok', '/hata', '/yavas', '/noindex', '/d1', '/soft40
   '/thin', '/kopya-a', '/kopya-b', '/benzer-a', '/benzer-b', '/lorem', '/nofollow', '/generic', '/manylinks', '/staging-link', '/gorsel',
   '/hl-tr', '/hl-en', '/hl-noreturn', '/hl-noself', '/hl-badtarget', '/hl-bad', '/schema-bad', '/schema-eksik', '/noog', '/slow', '/big',
   '/blocking', '/noviewport', '/nolang', '/unnamed', '/Buyuk_Harf', '/%C5%9Fehir-rehberi', '/uzun?a=1&b=2&c=3&d=4',
-  '/sikistirmasiz', '/dis-link', '/buyuk-gorsel', '/Bozuk%E9_Sayfa', '/bitisik'];
+  '/sikistirmasiz', '/dis-link', '/buyuk-gorsel', '/Bozuk%E9_Sayfa', '/bitisik', '/js'];
+// v0.13.0: pages that change with JavaScript. The render test starts at /js (maxDepth 2). The pages have no nav link to /,
+// so the render crawl stays small. /js-link-hedef is linked only by JS: only the render crawl finds it.
+export const JS_PAGES = ['/js-title', '/js-h1', '/js-icerik', '/js-link', '/js-meta', '/js-noindex', '/js-hata', '/js-kaynak'];
+const main = 'document.querySelector("main")';
 // Sprint 2: these are not linked. The test passes them as host variants of the site.
 export const VARIANTS = ['/varyant-ayni', '/varyant-302', '/varyant-ok', '/varyant-zincir'];
 const BIG_IMAGE = Buffer.alloc(250 * 1024, 7);
@@ -132,7 +137,23 @@ const R = {
   '/varyant-302': () => [302, '', { location: '/' }],
   '/varyant-ok': () => [301, '', { location: '/' }],
   '/varyant-zincir': () => [301, '', { location: '/varyant-ok' }],
-  '/robots.txt': () => [200, 'User-agent: *\nDisallow: /private/\n\nUser-agent: GPTBot\nDisallow: /\n\nUser-agent: Googlebot\nDisallow: /\n\nSitemap: http://HOST/sitemap.xml\n', { 'content-type': 'text/plain' }],
+  // v0.13.0: JavaScript pages.
+  '/js': () => page('/js', { nav: false, body: `<p>${words('js-hub', 300)}</p>` + [...JS_PAGES, '/temiz'].map((u) => `<a href="${u}">${u}</a>`).join(' ') }),
+  '/js-title': () => page('/js-title', { nav: false, title: null, script: `document.title = 'JS ile gelen sayfa başlığı burada | ${BRAND}';` }),
+  '/js-h1': () => page('/js-h1', { nav: false, h1: null, script: `${main}.insertAdjacentHTML('afterbegin', '<h1>JS ile gelen ana başlık</h1>');` }),
+  '/js-icerik': () => page('/js-icerik', { nav: false, body: '<div id="app"><p>Yükleniyor</p></div>', script: `document.getElementById('app').innerHTML = '<p>${words('js-icerik', 300)}</p>';` }),
+  '/js-link': () => page('/js-link', { nav: false, script: `${main}.insertAdjacentHTML('beforeend', ['/js-link-hedef', '/js-link-hedef2', '/js-link-hedef3', '/js-link-hedef4'].map((u, i) => '<a href="' + u + '">JS link ' + i + '</a>').join(' '));` }),
+  '/js-link-hedef': () => page('/js-link-hedef', { nav: false }),
+  '/js-link-hedef2': () => page('/js-link-hedef2', { nav: false }),
+  '/js-link-hedef3': () => page('/js-link-hedef3', { nav: false }),
+  '/js-link-hedef4': () => page('/js-link-hedef4', { nav: false }),
+  '/js-meta': () => page('/js-meta', { nav: false, title: `Ham HTML başlığı burada yazıyor | ${BRAND}`,
+    script: `document.title = 'JS ile değişen başlık burada yazıyor | ${BRAND}'; document.querySelector('meta[name=description]').content = 'JavaScript ile değişen açıklama metni. Ham HTML başka bir açıklama veriyor ve bu bir çelişki.';` }),
+  '/js-noindex': () => page('/js-noindex', { nav: false, head: '<meta name="robots" content="noindex">', script: `document.querySelector('meta[name=robots]').remove();` }),
+  '/js-hata': () => page('/js-hata', { nav: false, script: 'while (true) {}' }),
+  '/js-kaynak': () => page('/js-kaynak', { nav: false, head: '<script src="/js-gizli/app.js" defer></script>' }),
+  '/js-gizli/app.js': () => [200, 'window.x = 1;', { 'content-type': 'text/javascript' }],
+  '/robots.txt': () => [200, 'User-agent: *\nDisallow: /private/\nDisallow: /js-gizli/\n\nUser-agent: GPTBot\nDisallow: /\n\nUser-agent: Googlebot\nDisallow: /\n\nSitemap: http://HOST/sitemap.xml\n', { 'content-type': 'text/plain' }],
   '/sitemap.xml': () => [200, `<?xml version="1.0"?><urlset>${['/', '/temiz', '/noindex', '/private/x', '/eski', '/yetim'].map((u) => `<url><loc>http://HOST${u}</loc></url>`).join('')}</urlset>`, { 'content-type': 'application/xml' }],
 };
 

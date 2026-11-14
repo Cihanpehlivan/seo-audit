@@ -1,7 +1,7 @@
 // All audit rules. Each rule returns a list of { url, detail }.
 // severity: critical | warning | notice    team: SEO | İçerik | Frontend | Backend
 import robotsParser from 'robots-parser';
-import { isOk, isHtml, isNoindex, isCanonicalized, isIndexable, titlePx, isStagingHost, hostOf, sameSite, groupBy, short, isBroken, resLabel, tlsErrorText, isTlsError, safeDecode } from './helpers.js';
+import { blocksIndex, isOk, isHtml, isNoindex, isCanonicalized, isIndexable, titlePx, isStagingHost, hostOf, sameSite, groupBy, short, isBroken, resLabel, tlsErrorText, isTlsError, safeDecode } from './helpers.js';
 import { hamming } from '../fingerprint.js';
 
 export const CATEGORIES = [
@@ -9,7 +9,7 @@ export const CATEGORIES = [
   ['title', 'Title'], ['description', 'Meta description'], ['headings', 'Başlık hiyerarşisi'],
   ['content', 'İçerik'], ['links', 'Linkler'], ['images', 'Görseller'], ['hreflang', 'Hreflang'],
   ['schema', 'Yapısal veri'], ['performance', 'Performans'], ['https', 'HTTPS'],
-  ['a11y', 'Mobil ve erişilebilirlik'], ['url', 'URL yapısı'],
+  ['a11y', 'Mobil ve erişilebilirlik'], ['url', 'URL yapısı'], ['js', 'JavaScript'],
 ];
 
 const R = [];
@@ -528,6 +528,70 @@ rule({ id: 'url-long', category: 'url', severity: 'notice', team: 'Backend',
   title: 'URL çok uzun veya çok parametreli', description: 'Uzun ve parametreli URL\'ler kötü görünür ve kopya sayfa üretebilir.',
   fix: 'Kısa, anlamlı slug kullanın. Filtre parametrelerini canonical ile yönetin.',
   run: (c) => each(c.indexable, (p) => { const u = new URL(p.url); const n = [...u.searchParams.keys()].length; return (p.url.length > c.T.maxUrlLength || n > c.T.maxUrlParams) && `${p.url.length} karakter, ${n} parametre`; }) });
+
+// ---------- JavaScript (v0.13.0) ----------
+// Page rules work only on rendered pages (p.rendered and p.raw). js-shell-suspect works only on a raw crawl.
+const renderedOk = (c) => c.pages.filter((p) => p.rendered && p.raw && isOk(p));
+const normRobots = (v) => [...new Set(String(v || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean))].sort().join(', ');
+rule({ id: 'js-title-only', category: 'js', severity: 'warning', team: 'Frontend',
+  title: 'Title sadece JavaScript ile geliyor', description: 'Ham HTML\'de title yok. Title sadece JS çalışınca oluşuyor. Google render etmeden önce sayfayı title olmadan görür, başka araçlar (sosyal medya, bazı arama motorları) hiç görmez.',
+  fix: 'Title etiketini sunucu tarafında (SSR veya statik HTML) üretin.',
+  run: (c) => each(renderedOk(c), (p) => !p.raw.title && p.title && `Render: ${short(p.title)}`) });
+rule({ id: 'js-h1-only', category: 'js', severity: 'warning', team: 'Frontend',
+  title: 'H1 sadece JavaScript ile geliyor', description: 'Ham HTML\'de H1 yok. H1 sadece JS çalışınca oluşuyor.',
+  fix: 'Ana başlığı sunucu tarafında üretin.',
+  run: (c) => each(renderedOk(c), (p) => !p.raw.h1?.length && p.h1?.length && `Render: ${short(p.h1[0])}`) });
+rule({ id: 'js-content-only', category: 'js', severity: 'warning', team: 'Frontend',
+  title: 'İçerik çoğunlukla JavaScript ile geliyor', description: 'Ham HTML\'deki ana içerik render sonrası içeriğin küçük bir parçası. Google içeriği render kuyruğundan sonra görür. Render başarısız olursa sayfa boş görünür.',
+  fix: 'Ana içeriği sunucu tarafında üretin (SSR, statik üretim veya ön render).',
+  run: (c) => { const R = c.cfg.render; return each(renderedOk(c), (p) => p.contentWordCount >= R.contentMinWords && p.raw.contentWordCount < p.contentWordCount * R.rawContentRatio
+    && `Ham: ${p.raw.contentWordCount} kelime · Render: ${p.contentWordCount} kelime`); } });
+rule({ id: 'js-links-only', category: 'js', severity: 'notice', team: 'Frontend',
+  title: 'İç linkler çoğunlukla JavaScript ile geliyor', description: 'Sayfanın iç linklerinin çoğu ham HTML\'de yok. Google bu linkleri sadece render sonrası bulur. Link onclick ile çalışıyorsa hiç bulmaz.',
+  fix: 'Menü ve içerik linklerini ham HTML\'de <a href> olarak verin.',
+  run: (c) => { const R = c.cfg.render; return each(renderedOk(c), (p) => {
+    const all = new Map(); for (const l of p.links || []) if (l.internal) all.set(l.url, all.get(l.url) === false ? false : !!l.js);
+    const js = [...all.values()].filter(Boolean).length;
+    return js >= R.jsLinkMin && js >= all.size * R.jsLinkRatio && `${js} / ${all.size} iç link sadece JS ile`; }); } });
+rule({ id: 'js-meta-changed', category: 'js', severity: 'warning', team: 'SEO',
+  title: 'JavaScript SEO etiketini değiştiriyor', description: 'Title, meta description, canonical veya meta robots ham HTML\'de bir değer, render sonrası başka değer. Google iki değerden birini kullanabilir. Canonical ve robots için Google ham değeri önerir.',
+  fix: 'Etiketi sunucu tarafında doğru üretin. JS ile değiştirmeyin.',
+  run: (c) => each(renderedOk(c), (p) => {
+    const d = [];
+    if (p.raw.title && p.title && p.raw.title !== p.title) d.push(`title: "${short(p.raw.title, 50)}" → "${short(p.title, 50)}"`);
+    if ((p.raw.metaDescription || '') !== (p.metaDescription || '')) d.push(`description: "${short(p.raw.metaDescription, 40) || '-'}" → "${short(p.metaDescription, 40) || '-'}"`);
+    if ((p.raw.canonical || '') !== (p.canonical || '')) d.push(`canonical: ${p.raw.canonical || '-'} → ${p.canonical || '-'}`);
+    const rr = normRobots(p.raw.metaRobots); const jr = normRobots(p.metaRobotsJs);
+    if (rr !== jr && !(blocksIndex(rr) && !blocksIndex(jr))) d.push(`robots: ${rr || '-'} → ${jr || '-'}`);
+    return d.length && d.join('\n'); }) });
+rule({ id: 'js-noindex-removed', category: 'js', severity: 'critical', team: 'SEO',
+  title: 'Ham HTML noindex, JavaScript kaldırıyor', description: 'Ham HTML\'de noindex var. JS etiketi kaldırıyor veya değiştiriyor. Google noindex gördüğü sayfayı render etmeyebilir: sayfa indeks dışı kalır.',
+  fix: 'Sayfa indekslenecekse noindex etiketini ham HTML\'den kaldırın.',
+  run: (c) => each(renderedOk(c), (p) => blocksIndex(p.raw.metaRobots) && !blocksIndex(p.metaRobotsJs) && `Ham: ${p.raw.metaRobots} · Render: ${p.metaRobotsJs || '-'}`) });
+rule({ id: 'render-failed', category: 'js', severity: 'warning', team: 'Frontend',
+  title: 'Sayfa render edilemedi', description: 'Tarayıcı sayfayı süre içinde açamadı veya JS hata verdi. Bu sayfada ham HTML alanları kullanıldı. Google da bu sayfayı render edemeyebilir.',
+  fix: 'Sayfayı tarayıcıda açın, konsol hatalarını düzeltin. Sayfa çok yavaşsa JS paketini küçültün.',
+  run: (c) => {
+    const site = c.meta.render?.error ? [{ url: c.meta.startUrl, detail: `Tarayıcı açılmadı: ${c.meta.render.error}` }] : [];
+    return site.concat(each(c.pages, (p) => p.render?.error && `${p.render.error === 'timeout' ? 'Zaman aşımı' : p.render.error}${p.render.blocked ? ` · ${p.render.blocked} dış istek engellendi` : ''}`)); } });
+rule({ id: 'render-resource-blocked', category: 'js', severity: 'warning', team: 'SEO',
+  title: 'JS veya CSS robots.txt ile engelli', description: 'Sayfanın JS, CSS veya veri isteği robots.txt ile engelli. Google bu dosyaları alamaz ve sayfayı eksik render eder.',
+  fix: 'robots.txt dosyasında bu dosyaların yolunu açın (Allow).',
+  run: (c) => each(c.pages, (p) => { const l = (p.render?.robotsBlocked || []).filter((x) => /script|stylesheet|fetch|xhr|other/.test(x.type)); return l.length && list5(l, (x) => `${x.type}: ${x.url}`); }) });
+rule({ id: 'js-shell-suspect', category: 'js', severity: 'notice', team: 'SEO', scope: 'site',
+  title: 'Site JavaScript ile oluşuyor olabilir', description: 'Ham taramada sayfaların çoğu boş title veya H1, çok az metin ve script içeriyor. İçerik büyük olasılıkla JS ile geliyor. Bu taramadaki title, H1 ve içerik bulguları yanlış olabilir.',
+  fix: 'Siteyi "JavaScript ile oluştur" seçeneği ile tekrar tarayın.',
+  run: (c) => {
+    if (c.meta.render?.enabled || c.meta.options?.render) return [];
+    const R = c.cfg.render;
+    const ok = c.okPages.filter((p) => p.scripts !== undefined);
+    const isShell = (p) => (!p.title || !p.h1?.length) && (p.wordCount || 0) <= R.shellMaxWords && p.scripts > 0;
+    const shells = ok.filter(isShell);
+    if (shells.length >= R.shellMinPages && shells.length >= ok.length * R.shellRatio) return [{ url: c.meta.startUrl, detail: `${shells.length} / ${ok.length} sayfa: boş title veya H1, az metin, script var` }];
+    // A JS site often gives one page in a raw crawl: the start page has no link in its raw HTML.
+    const home = c.byUrl.get(c.meta.startUrl);
+    return home && home.scripts !== undefined && isOk(home) && isShell(home) && !(home.links || []).some((l) => l.internal && l.url !== home.url)
+      ? [{ url: home.url, detail: 'Ana sayfa: boş title veya H1, az metin, script var, ham HTML\'de iç link yok' }] : []; } });
 
 export const RULES = R;
 export { robotsParser };

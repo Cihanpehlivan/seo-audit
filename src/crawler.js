@@ -5,6 +5,7 @@ import { parsePage } from './parser.js';
 import { readSitemaps } from './sitemap.js';
 import { runChecks } from './checks.js';
 import { makeGuard } from './netguard.js';
+import { createRenderer, mergeRender } from './render.js';
 import { loadConfig } from './rules/index.js';
 import { readFileSync } from 'node:fs';
 
@@ -27,7 +28,9 @@ const DEFAULTS = {
   checks: false,         // true or { site, external, images, variants }: extra checks after the crawl
   onChecks: null,        // progress of the extra checks: { done, total }
   blockPrivate: false,   // public server: never request private or internal addresses (SSRF guard)
+  guard: null,           // v0.13.0: custom check(url) → reason or null (tests). Default: makeGuard() when blockPrivate
   seeds: null,           // v0.12.0: only these URLs (old address list). No links, no sitemap, no hop to another host
+  render: false,         // v0.13.0: true or { allowHosts: [], limits: {} }: open HTML pages in Chromium (src/render.js). Not in list mode
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -60,7 +63,8 @@ export async function crawl(startUrl, opts = {}) {
   const headers = { 'user-agent': o.userAgent, accept: 'text/html,application/xhtml+xml,*/*;q=0.8' };
   if (o.auth) headers.authorization = 'Basic ' + Buffer.from(o.auth).toString('base64');
 
-  const guard = o.blockPrivate ? makeGuard() : null;
+  // v0.13.0: o.guard replaces the SSRF guard (test: block one loopback address and allow the test site).
+  const guard = o.guard || (o.blockPrivate ? makeGuard() : null);
 
   // v0.10.1: the staging password goes only to the crawled site. A redirect or a sitemap on another host never gets it.
   const rootBare = bareHost(root.hostname);
@@ -74,7 +78,8 @@ export async function crawl(startUrl, opts = {}) {
   };
 
   // v0.10.1: the timer stays active until the caller calls done(). So the timeout also covers the body.
-  async function request(url) {
+  // v0.13.0: init { method, headers, body } for the render checkpoint. headersFor() still decides the password.
+  async function request(url, init = {}) {
     if (guard) {
       const why = await guard(url);
       if (why) throw Object.assign(new Error(why), { cause: { code: why } });
@@ -84,7 +89,7 @@ export async function crawl(startUrl, opts = {}) {
     const timer = setTimeout(() => ctrl.abort(), o.timeoutMs);
     const done = () => clearTimeout(timer);
     try {
-      const res = await fetch(url, { headers: headersFor(url), redirect: 'manual', signal: ctrl.signal });
+      const res = await fetch(url, { method: init.method || 'GET', body: init.body, headers: { ...headersFor(url), ...(init.headers || {}) }, redirect: 'manual', signal: ctrl.signal });
       return { res, ms: Date.now() - t0, done, ctrl };
     } catch (e) { done(); throw e; }
   }
@@ -174,6 +179,19 @@ export async function crawl(startUrl, opts = {}) {
   }
   const sitemapSet = new Set(sitemap.urls);
 
+  // v0.13.0: JavaScript render. If the browser does not open, the crawl goes on raw and meta.render.error says why.
+  const renderCfg = { ...loadConfig().render, ...(o.render?.limits || {}) };
+  const renderInfo = o.render && !listMode ? { enabled: true, pages: 0, failed: 0, ms: 0, limitReached: false, allowHosts: [...(o.render.allowHosts || [])] } : null;
+  let renderer = null;
+  if (renderInfo) {
+    try {
+      renderer = await createRenderer({
+        rootHost: root.hostname, request, readBody, isBlocked, ignoreRobots: o.ignoreRobots, allowHosts: renderInfo.allowHosts,
+        cfg: renderCfg, maxRedirects: o.maxRedirects, userAgent: o.userAgent, signal: o.signal,
+      });
+    } catch (e) { renderInfo.enabled = false; renderInfo.error = String(e.message || e).split('\n')[0].slice(0, 200); }
+  }
+
   // Crawl state
   const pages = new Map();       // url -> record
   const queued = new Set();
@@ -239,10 +257,22 @@ export async function crawl(startUrl, opts = {}) {
     } else if (r.body && /html/i.test(r.contentType) && r.status < 400) {
       const p = parsePage(r.body, item.url, root.hostname);
       Object.assign(rec, p);
+      if (renderer && r.status === 200) {
+        if (renderInfo.pages >= renderCfg.maxPages) { renderInfo.limitReached = true; rec.render = { skipped: 'limit' }; }
+        else {
+          renderInfo.pages++;
+          const { html, ...info } = await renderer.render(item.url, r.body);
+          renderInfo.ms += info.ms;
+          rec.render = info;
+          if (html && !info.error) { Object.assign(rec, mergeRender(p, html, item.url, root.hostname)); rec.rendered = true; }
+          else { renderInfo.failed++; rec.rendered = false; }
+        }
+      }
       const nd = item.depth == null ? null : item.depth + 1;
-      for (const l of p.links) if (l.internal) enqueue(l.url, nd, item.url, 'link');
-      if (p.canonical) enqueue(p.canonical, nd, item.url, 'canonical');
-      for (const h of p.hreflang) if (h.url) enqueue(h.url, nd, item.url, 'hreflang');
+      for (const l of rec.links) if (l.internal) enqueue(l.url, nd, item.url, 'link');
+      if (rec.canonical) enqueue(rec.canonical, nd, item.url, 'canonical');
+      if (p.canonical && p.canonical !== rec.canonical) enqueue(p.canonical, nd, item.url, 'canonical');
+      for (const h of rec.hreflang) if (h.url) enqueue(h.url, nd, item.url, 'hreflang');
     }
     pages.set(item.url, rec);
   }
@@ -270,7 +300,8 @@ export async function crawl(startUrl, opts = {}) {
   const inFlight = new Set();
   let linkInFlight = 0;
   const startedAt = new Date().toISOString();
-  await Promise.all(Array.from({ length: o.concurrency }, worker));
+  try { await Promise.all(Array.from({ length: o.concurrency }, worker)); }
+  finally { if (renderer) await renderer.close(); }
 
   // Inlink counts (internal links only, unique per source page).
   const inlinks = new Map();
@@ -302,13 +333,14 @@ export async function crawl(startUrl, opts = {}) {
       tool: 'seo-audit', version: VERSION,
       startUrl: start, host: root.hostname,
       startedAt, crawlFinishedAt: finishedCrawl, finishedAt: new Date().toISOString(),
-      options: { ...o, auth: o.auth ? '***' : null, onProgress: undefined, onChecks: undefined, signal: undefined, checks: o.checks ? { ...(o.checks === true ? {} : o.checks), variants: undefined } : false },
+      options: { ...o, guard: undefined, auth: o.auth ? '***' : null, render: o.render ? { allowHosts: [...(o.render.allowHosts || [])] } : false, onProgress: undefined, onChecks: undefined, signal: undefined, checks: o.checks ? { ...(o.checks === true ? {} : o.checks), variants: undefined } : false },
       robots: { url: robotsUrl, status: robotsRes.status, sitemaps: robots.getSitemaps(), body: robotsTxt.slice(0, 20000) },
       // v0.10.0: hosts of the sitemap URLs (also hosts that are not crawled). The launch list finds staging addresses here.
       sitemap: { files: sitemap.files, urlCount: sitemap.urls.length, hosts: sitemapHosts(sitemap.urls) },
       limitReached: list.length >= o.maxUrls,
       cancelled: !!o.signal?.aborted,
       notCrawled: [...linkQueue, ...sitemapQueue].length,
+      ...(renderInfo ? { render: renderInfo } : {}),
     },
     pages: list,
     checks,

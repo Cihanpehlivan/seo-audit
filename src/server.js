@@ -19,6 +19,7 @@ import { readList, cleanList, makeSource, mergeSources, validateList, rowCount, 
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import net from 'node:net';
+import { renderStatus, cleanAllowHosts } from './render.js';
 import { makeGuard } from './netguard.js';
 import { readFileSync } from 'node:fs';
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -189,6 +190,7 @@ async function crawlState(site) {
     state: urlHost && bareHost(m.host) !== urlHost ? 'stale' : 'done',
     crawlId: m.id, host: m.host, startedAt: m.startedAt, pages: m.summary.total, ok: m.summary.ok,
     blocked: m.summary.blocked, limitReached: !!m.limitReached, cancelled: !!m.cancelled, error: site.lastError || null,
+    render: !!m.render?.enabled, jsShell: !!m.jsShell,
   };
 }
 // Live crawl of a target site. stale: the crawl is on another domain than the live domain of the project now.
@@ -321,7 +323,8 @@ async function startProjectCrawl(id, key, options, { live = false } = {}) {
     if (!site.url) throw Object.assign(new Error('Önce sitenin adresini yazın.'), { code: 400 });
   }
   const F = live ? { pend: 'pendingLiveCrawlId', id: 'liveCrawlId', err: 'liveError' } : { pend: 'pendingCrawlId', id: 'crawlId', err: 'lastError' };
-  const job = await startJob({ url, label, options });
+  // v0.13.0: the site definition decides render (the old site and a JS site can use different modes).
+  const job = await startJob({ url, label, options: { ...(options || {}), render: site.render ? { allowHosts: site.renderAllow || [] } : false } });
   await projects.update(id, (q) => { const s = q.sites.find((x) => x.key === key); if (s) { s[F.pend] = job.id; s[F.err] = null; } });
   job.finished.then((r) => projects.update(id, (q) => {
     const s = q.sites.find((x) => x.key === key);
@@ -497,6 +500,13 @@ async function startJob(body, extra = {}) {
   for (let n = 2; jobs.has(id) || store.has(id); n++) id = [safeHost, label, stamp, n].filter(Boolean).join('_');
   const o = body.options || {};
   const num = (v, d, min, max) => Math.min(max, Math.max(min, Number.isFinite(+v) && v !== '' ? +v : d));
+  // v0.13.0: JavaScript render. Closed in public mode. The list crawl (seeds) never renders.
+  let render = false;
+  if (o.render && !extra.seeds) {
+    const st = await renderStatus({ publicMode: PUBLIC_MODE });
+    if (!st.available) throw Object.assign(new Error(st.reason), { code: 400, need: ['render'] });
+    render = { allowHosts: cleanAllowHosts(o.render.allowHosts ?? o.renderAllow) };
+  }
 
   const controller = new AbortController();
   const job = {
@@ -527,6 +537,7 @@ async function startJob(body, extra = {}) {
     auth: o.auth ? String(o.auth) : null,
     ignoreRobots: !!o.ignoreRobots,
     useSitemap: o.useSitemap !== false,
+    render,
     checks: o.checks === false ? false : { site: o.checks?.site !== false, external: o.checks?.external !== false, images: o.checks?.images !== false },
     onChecks: (c) => {
       job.progress = { ...job.progress, phase: 'checks', step: c.step, checksDone: c.done, checksTotal: c.total, current: c.url || job.progress.current };
@@ -565,6 +576,7 @@ function slimPages(pages) {
     ...p,
     linkCount: links?.length ?? 0,
     externalLinkCount: links?.filter((l) => !l.internal).length ?? 0,
+    ...(p.raw ? { jsLinkCount: new Set((links || []).filter((l) => l.js && l.internal).map((l) => l.url)).size } : {}),
   }));
 }
 
@@ -789,7 +801,9 @@ const server = http.createServer(async (req, res) => {
 
     // /api/info: server mode for the interface
     if (parts[1] === 'info' && req.method === 'GET') {
-      return send(res, 200, { publicMode: PUBLIC_MODE, ephemeral: EPHEMERAL, maxUrls: URL_LIMIT, maxJobs: JOB_LIMIT, maxTargets: loadConfig().compare.maxTargets });
+      const rs = await renderStatus({ publicMode: PUBLIC_MODE });
+      return send(res, 200, { publicMode: PUBLIC_MODE, ephemeral: EPHEMERAL, maxUrls: URL_LIMIT, maxJobs: JOB_LIMIT, maxTargets: loadConfig().compare.maxTargets,
+        render: { available: !!rs.available, reason: rs.reason || '', code: rs.code || '' } });
     }
 
     // /api/rules: rule counts per category for the start page

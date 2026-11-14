@@ -48,6 +48,8 @@ export function parsePage(html, pageUrl, rootHost) {
   // Read before scripts are removed for the text.
   const scriptText = $('script').map((_, el) => `${$(el).attr('src') || ''} ${$(el).html() || ''}`).get().join(' ') + ' ' + $('noscript').map((_, el) => $(el).html() || '').get().join(' ');
   const tracking = [...new Set(scriptText.match(TRACKING) || [])].slice(0, MAX_ABS_HOSTS);
+  // v0.13.0: scripts that run (not JSON-LD or templates). The JS shell check of a raw crawl uses it.
+  const scripts = $('script').filter((_, el) => { const t = ($(el).attr('type') || '').toLowerCase(); return !t || /javascript|module|ecmascript/.test(t); }).length;
 
   // v0.10.1: a <title> inside an inline SVG is the name of an icon, not the page title.
   const titles = $('title').filter((_, el) => !$(el).closest('svg').length).map((_, el) => clean($(el).text())).get();
@@ -126,6 +128,15 @@ export function parsePage(html, pageUrl, rootHost) {
   const favicon = $('link[rel~="icon" i], link[rel="shortcut icon" i], link[rel="apple-touch-icon" i]').length > 0;
   const viewport = meta('meta[name="viewport" i]');
 
+  // v0.13.0: read before the scripts are removed (the old order lost <script src> hosts).
+  // v0.10.0 (launch list): hosts written in full in the HTML. A relative address is not here: it works on any domain.
+  // canonical and hreflang are read raw, because the parsed value always has a host.
+  const absHosts = {
+    canonical: absHost($('link[rel="canonical" i]').first().attr('href')),
+    hreflang: uniq($('link[rel="alternate" i][hreflang]').map((_, el) => absHost($(el).attr('href'))).get()),
+    link: uniq($('a[href]').map((_, el) => absHost($(el).attr('href'))).get()),
+    asset: uniq($('img[src], script[src], link[rel="stylesheet" i][href], source[src], video[src], iframe[src]').map((_, el) => absHost($(el).attr('src') || $(el).attr('href'))).get()),
+  };
   // Text: full body and main content (without header/nav/footer/aside).
   $('script, style, noscript, svg, template').remove();
   // v0.10.1: block elements get a space after them. Without it "<li>bir</li><li>iki</li>" reads as one word.
@@ -137,14 +148,6 @@ export function parsePage(html, pageUrl, rootHost) {
   const mainText = clean($main.text());
   const contentWordCount = mainText ? mainText.split(' ').length : 0;
 
-  // v0.10.0 (launch list): hosts written in full in the HTML. A relative address is not here: it works on any domain.
-  // canonical and hreflang are read raw, because the parsed value always has a host.
-  const absHosts = {
-    canonical: absHost($('link[rel="canonical" i]').first().attr('href')),
-    hreflang: uniq($('link[rel="alternate" i][hreflang]').map((_, el) => absHost($(el).attr('href'))).get()),
-    link: uniq($('a[href]').map((_, el) => absHost($(el).attr('href'))).get()),
-    asset: uniq($('img[src], script[src], link[rel="stylesheet" i][href], source[src], video[src], iframe[src]').map((_, el) => absHost($(el).attr('src') || $(el).attr('href'))).get()),
-  };
   const gscVerify = uniq($('meta[name="google-site-verification" i]').map((_, el) => clean($(el).attr('content'))).get());
 
   return {
@@ -177,6 +180,6 @@ export function parsePage(html, pageUrl, rootHost) {
     textSample: text.slice(0, 600),
     placeholder: (PLACEHOLDER.exec(titles[0] || '') || PLACEHOLDER.exec(text) || [null])[0],
     links,
-    absHosts, tracking, gscVerify,
+    absHosts, tracking, gscVerify, scripts,
   };
 }

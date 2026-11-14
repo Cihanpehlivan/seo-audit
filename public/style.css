@@ -639,3 +639,17 @@ details.q p { position: absolute; z-index: 5; top: 24px; left: -8px; width: 280p
   .ul-table td { display: block; border: 0; padding: 0; }
   .ulist { padding: 12px; }
 }
+
+/* v0.13.0: JavaScript render */
+.render-st .ok { color: #8FD3A8; }
+.tbl-wrap { overflow-x: auto; max-width: 100%; }
+.jsdiff { border-collapse: collapse; font-size: 13px; min-width: 420px; }
+.jsdiff th, .jsdiff td { text-align: left; padding: 4px 10px 4px 0; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; max-width: 340px; }
+.jsdiff thead th { color: var(--stone); font-weight: 500; }
+.jsdiff tbody th { color: var(--stone); font-weight: 400; white-space: nowrap; }
+.jsdiff tr.jd-chg td:last-child { color: #F2C77A; }
+.js-box { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--graphite); margin-top: 6px; }
+.js-box input { accent-color: var(--red); }
+.js-allow input { margin-top: 6px; width: 100%; max-width: 280px; font-size: 13px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.js-allow input:focus { outline: none; border-color: var(--graphite); }
+.mode-note { margin-top: 12px; }

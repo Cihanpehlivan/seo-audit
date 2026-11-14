@@ -43,6 +43,9 @@ export class Store {
       cancelled: result.meta.cancelled, limitReached: result.meta.limitReached,
       summary: Store.summary(result),
       score: audit?.score ?? null, issueCounts: audit?.counts ?? null,
+      // v0.13.0: render mode of the crawl and the JS shell hint of a raw crawl (the project screen shows them).
+      ...(result.meta.render ? { render: { enabled: !!result.meta.render.enabled, pages: result.meta.render.pages, failed: result.meta.render.failed } } : {}),
+      ...(audit?.rules?.some((r) => r.id === 'js-shell-suspect' && r.count) ? { jsShell: true } : {}),
     };
     if (audit) await this.saveAudit(id, audit);
     await writeFile(this.file(id, 'meta.json'), JSON.stringify(entry));

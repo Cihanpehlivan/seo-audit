@@ -1,5 +1,6 @@
 // Migration projects (v0.7.0). A project holds a definition, not results: sites, roles, crawl ids and path rules.
 // Files live next to the crawls (crawls/projects/<id>.json). No database.
+import { cleanAllowHosts } from './render.js';
 import { mkdir, readFile, writeFile, readdir, unlink, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -46,7 +47,10 @@ export function validateProject(input, { maxExtras = 3, maxRules = 50, maxDecisi
     const crawlId = s.crawlId && ID_RE.test(String(s.crawlId)) ? String(s.crawlId) : null;
     // v0.11.0: the live crawl (after launch). Read from a project file; the server keeps it on PUT.
     const liveCrawlId = role !== 'old' && s.liveCrawlId && ID_RE.test(String(s.liveCrawlId)) ? String(s.liveCrawlId) : null;
-    return { key, role, name: str(s.name, 40) || (role === 'extra' ? `Ek site ${i - 1}` : ''), url, live: role === 'extra' ? live : '', crawlId, liveCrawlId };
+    // v0.13.0: JavaScript render setting of the site (the crawls of this site use it) and allowed third-party hosts.
+    const render = s.render === true;
+    return { key, role, name: str(s.name, 40) || (role === 'extra' ? `Ek site ${i - 1}` : ''), url, live: role === 'extra' ? live : '', crawlId, liveCrawlId,
+      ...(render ? { render, renderAllow: cleanAllowHosts(s.renderAllow) } : {}) };
   });
   if (sites.filter((s) => s.role === 'old').length !== 1) throw bad('Projede bir eski site olmalı.');
   if (sites.filter((s) => s.role === 'heir').length !== 1) throw bad('Projede bir "eski alan adına geçecek site" olmalı.');
