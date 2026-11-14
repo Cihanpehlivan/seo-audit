@@ -22,6 +22,10 @@ import net from 'node:net';
 import { renderStatus, cleanAllowHosts } from './render.js';
 import { makeGuard } from './netguard.js';
 import { readFileSync } from 'node:fs';
+import { loadEnv } from './env.js';
+import { siteReport, projectReport, renderReport, reportFileName, REPORT_HEADERS } from './report.js';
+// v0.14.0: the .env file of the project root. Read before any process.env value below. Shell values stay.
+loadEnv();
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -482,6 +486,31 @@ async function projectVerify(p, { fresh = false } = {}) {
   return { ...V, checkedAt: new Date(at).toISOString(), launch: p.launch, status };
 }
 
+// ---------- Shareable report (v0.14.0) ----------
+// The server makes the report on each request and does not save it. No script runs in it (REPORT_HEADERS: CSP).
+function sendReport(res, model, name) {
+  const html = renderReport(model, { version: VERSION });
+  res.writeHead(200, { ...REPORT_HEADERS, 'content-disposition': `attachment; filename="${reportFileName(name)}"` });
+  return res.end(html);
+}
+// Health score of the heir for the project report: the live crawl after launch, else the crawl before launch.
+async function heirScore(p, m) {
+  const heir = p.sites.find((s) => s.role === 'heir');
+  const st = m.status[heir.key] || {};
+  const staging = !!m.launch.sites.find((x) => x.key === heir.key)?.staging;
+  const load = async (id) => { try { return await getAudit(id, await store.load(id)); } catch { return null; } };
+  if (p.launch && st.live?.state === 'done') { const audit = await load(st.live.crawlId); if (audit) return { audit, staging: false, live: true }; }
+  if (!st.crawlId || !['done', 'stale'].includes(st.state)) return null;
+  const audit = await load(st.crawlId);
+  return audit ? { audit, staging, live: false } : null;
+}
+// Short site names for the report (the screens use longer role names).
+function reportNames(p) {
+  const out = { old: 'Eski site' };
+  for (const s of p.sites) if (s.role !== 'old') out[s.key] = s.role === 'heir' ? 'Yeni site' : s.name || 'Ek site';
+  return out;
+}
+
 // extra.seeds (v0.12.0): list mode. The crawler asks only these addresses (old address list). No audit.
 async function startJob(body, extra = {}) {
   const url = normalizeUrl(String(body.url || '').trim());
@@ -700,6 +729,19 @@ const server = http.createServer(async (req, res) => {
         unlink(tmp).catch(() => {});
         return res.end(buf);
       }
+      // v0.14.0: shareable report (HTML download). ?kitle=musteri|ekip&musteri=&hazirlayan= (empty: the project values).
+      if (action === 'report' && req.method === 'GET') {
+        const pr = await projects.get(pid);
+        let m;
+        try { m = await projectMatch(pr); }
+        catch (e) { if (e.code === 409) return send(res, 409, { error: e.message, need: e.need }); throw e; }
+        let verify = null;
+        if (pr.launch) { try { verify = await projectVerify(pr); } catch (e) { if (e.code !== 409) throw e; } }
+        const cfg = loadConfig(), q = u.searchParams;
+        const info = { client: q.get('musteri') ?? pr.report?.client, by: q.get('hazirlayan') ?? pr.report?.by };
+        const model = projectReport({ project: pr, m, verify, score: await heirScore(pr, m), names: reportNames(pr), cfg, audience: q.get('kitle'), info });
+        return sendReport(res, model, pr.name);
+      }
       // v0.11.0: POST /launch { at } marks the launch day and locks the crawls before launch. DELETE takes the mark back.
       if (action === 'launch' && req.method === 'POST') {
         const body = await readJson(req);
@@ -786,8 +828,9 @@ const server = http.createServer(async (req, res) => {
       if (action === 'export' && req.method === 'GET') {
         const p = await projects.get(pid);
         const { id, name, structure, sites, rules, createdAt, updatedAt } = p;
+        const rep = p.report?.client || p.report?.by ? { report: p.report } : {}; // v0.14.0
         const L = await projects.getList(pid);
-        const body = JSON.stringify({ format: 'seo-audit-proje', version: 1, id, name, structure, rules, map: p.map || {}, createdAt, updatedAt,
+        const body = JSON.stringify({ format: 'seo-audit-proje', version: 1, id, name, structure, rules, map: p.map || {}, createdAt, updatedAt, ...rep,
           ...(p.launch ? { launch: p.launch } : {}),
           // v0.12.0: the old address list (addresses and traffic) and its crawl id. The page content stays on the server.
           ...(L.sources.length || p.urlList?.crawlId ? { urlList: { ...(p.urlList?.crawlId ? { crawlId: p.urlList.crawlId } : {}), sources: L.sources } } : {}),
@@ -844,6 +887,14 @@ const server = http.createServer(async (req, res) => {
         if (!job || job.status !== 'running') return send(res, 404, { error: 'Aktif tarama yok' });
         job.controller.abort();
         return send(res, 200, { ok: true });
+      }
+      // v0.14.0: shareable report of one crawl. ?kitle=musteri|ekip&musteri=&hazirlayan=
+      if (action === 'report' && req.method === 'GET') {
+        const result = await store.load(id);
+        const audit = await getAudit(id, result);
+        const q = u.searchParams;
+        const model = siteReport({ meta: result.meta, audit, cfg: loadConfig(), audience: q.get('kitle'), info: { client: q.get('musteri'), by: q.get('hazirlayan') } });
+        return sendReport(res, model, result.meta.host);
       }
       if (action === 'excel' && req.method === 'GET') {
         const result = await store.load(id);

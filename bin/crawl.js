@@ -7,6 +7,9 @@ import { crawl } from '../src/crawler.js';
 import { exportExcel } from '../src/export.js';
 import { runAudit } from '../src/rules/index.js';
 import { cleanAllowHosts } from '../src/render.js';
+import { loadEnv } from '../src/env.js';
+
+loadEnv(); // v0.14.0: .env (CHROMIUM_PATH)
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,

@@ -33,6 +33,8 @@ async function api(path, opts = {}) {
 
 function show(view) {
   for (const v of ['startView', 'liveView', 'resultView', 'projectView']) $('#' + v).hidden = v !== view;
+  // v0.14.0: a report panel never stays open for another crawl or project.
+  for (const [box, btn] of [['#resReport', '#reportBtn'], ['#prjReport', '#prjReportBtn']]) { $(box).hidden = true; $(btn).setAttribute('aria-expanded', 'false'); }
 }
 
 // ---------- History ----------
@@ -461,6 +463,56 @@ $('#deleteBtn').addEventListener('click', async () => {
   await api(`/api/crawls/${encodeURIComponent(currentId)}`, { method: 'DELETE' });
   location.hash = '#/';
 });
+
+// ---------- Shareable report (v0.14.0) ----------
+// One panel for a crawl and a project: audience, client name, author. The file comes with fetch: an error (project not
+// crawled) shows in the panel, not as a JSON page. The project keeps the two names (project definition, PUT).
+function reportPanel(box, btn, { url, project = null }) {
+  const open = box.hidden;
+  box.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  const r = project?.report || {};
+  box.innerHTML = `<form class="rp-box" novalidate>
+    <fieldset class="rp-aud"><legend>Kim okuyacak?</legend>
+      <label><input type="radio" name="kitle" value="musteri" checked><span><b>Müşteri</b>Kural kimliği yok. Listeler kısa.</span></label>
+      <label><input type="radio" name="kitle" value="ekip"><span><b>Ekip</b>Kural kimliği var. Listeler uzun.</span></label>
+    </fieldset>
+    <div class="rp-names">
+      <label>Müşteri adı<input type="text" name="client" maxlength="80" value="${esc(r.client || '')}" placeholder="Örnek: Kavrulmuş Kahve" autocomplete="off"></label>
+      <label>Hazırlayan<input type="text" name="by" maxlength="80" value="${esc(r.by || '')}" placeholder="Adınız" autocomplete="off"></label>
+    </div>
+    <p class="hint">Rapor tek HTML dosyasıdır. Sunucuda kalmaz. PDF için dosyayı tarayıcıda açın ve yazdırın.${project ? ' İki ad projeye kaydedilir.' : ''}</p>
+    <p class="err" role="alert"></p>
+    <div class="actions"><button type="submit" class="ghost strong">İndir</button><button type="button" class="ghost" data-x>Vazgeç</button></div>
+  </form>`;
+  const form = box.querySelector('form');
+  form.querySelector('[data-x]').addEventListener('click', () => reportPanel(box, btn, { url, project }));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const go = form.querySelector('[type=submit]'), err = form.querySelector('.err');
+    const v = { kitle: form.kitle.value, client: form.client.value.trim(), by: form.by.value.trim() };
+    err.textContent = ''; go.disabled = true; go.textContent = 'Hazırlanıyor…';
+    try {
+      if (project && (v.client !== (r.client || '') || v.by !== (r.by || ''))) {
+        project.report = { client: v.client, by: v.by };
+        if (!await saveProject('Rapor adları kaydedildi.')) throw new Error('Adlar kaydedilemedi.');
+      }
+      const q = new URLSearchParams({ kitle: v.kitle, musteri: v.client, hazirlayan: v.by });
+      const res = await fetch(`${url}?${q}`);
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Rapor hazırlanamadı (${res.status}).`); }
+      const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || 'rapor.html';
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await res.blob()), download: name });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+      reportPanel(box, btn, { url, project });
+    } catch (e2) { err.textContent = e2.message; }
+    finally { go.disabled = false; go.textContent = 'İndir'; }
+  });
+  form.client.focus();
+}
+$('#reportBtn').addEventListener('click', () => reportPanel($('#resReport'), $('#reportBtn'), { url: `/api/crawls/${encodeURIComponent(currentId)}/report` }));
+$('#prjReportBtn').addEventListener('click', () => reportPanel($('#prjReport'), $('#prjReportBtn'), { url: `/api/projects/${encodeURIComponent(prj.id)}/report`, project: prj.project }));
 
 // ---------- Landing ----------
 // The strip under the URL field fills once, like a real crawl. Fixed pattern, no random.

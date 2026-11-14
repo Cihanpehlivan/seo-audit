@@ -114,10 +114,12 @@
           <a class="back" id="resProject" href="#" hidden></a>
         </div>
         <div class="actions">
+          <button class="ghost" id="reportBtn" type="button" aria-expanded="false" aria-controls="resReport">Rapor indir</button>
           <a class="primary" id="excelBtn" href="#">Excel indir</a>
           <button class="ghost danger" id="deleteBtn" type="button">Sil</button>
         </div>
       </div>
+      <div class="rp" id="resReport" hidden></div>
       <p class="warn" id="resWarn" hidden></p>
       <div class="strip" id="resStrip" aria-label="Taranan URL'lerin durumu"></div>
       <div class="tabs" role="tablist">
@@ -157,7 +159,11 @@
           <h1 class="title" id="prjName"></h1>
           <p class="meta" id="prjSummary"></p>
         </div>
+        <div class="actions">
+          <button class="ghost" id="prjReportBtn" type="button" aria-expanded="false" aria-controls="prjReport">Rapor indir</button>
+        </div>
       </div>
+      <div class="rp" id="prjReport" hidden></div>
       <nav class="steps" aria-label="Taşıma adımları"><ol id="prjSteps"></ol></nav>
       <div class="next" id="prjNext" role="status"></div>
       <div class="recheck" id="prjRecheck" hidden></div>

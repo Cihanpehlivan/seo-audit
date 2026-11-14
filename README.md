@@ -37,8 +37,9 @@ Bu işlerin kodu ve testi tamamdır. Gerçek sitelerde ölçüm sürüyor (bkz. 
 | İşleri yere ve ekibe göre ayırır | Eski alan adı sunucusu, her yeni site, içerik ve karar bekleyen işler ayrı kartlardır. |
 | Canlıya çıkışı kontrol eder | Staging adresi kalmış mı (canonical, hreflang, link, görsel, sitemap, 301 listesi), staging Google'a açık mı, noindex ve `Disallow: /` nerede, Analytics/GTM ve Search Console etiketi yeni sitede var mı. |
 | Taşımayı canlıda doğrular | Çıkıştan sonra her eski adresi canlı alan adında ister: 301 doğru mu, zincir, geçici yönlendirme, yanlış hedef, hedef hatalı, 410 geldi mi, kayıp sayfa. Canlı siteyi ayrıca tarar: noindex, X-Robots-Tag, `Disallow: /` ve staging adresi kalmış mı, etiketler var mı, sitemap canlı adresleri mi içeriyor ve adresler 200 mü. |
-| JavaScript sitesini okur (isteğe bağlı) | Sayfayı Chromium ile açar, JS çalışınca oluşan title, H1, içerik ve linkleri okur. Ham HTML ile farkı raporlar: sadece JS ile gelen title, H1, içerik ve link, JS ile değişen etiket, JS'nin kaldırdığı noindex. Bkz. JavaScript render. |
+| JavaScript sitesini okur (isteğe bağlı, sadece yerel) | Sayfayı Chromium ile açar, JS çalışınca oluşan title, H1, içerik ve linkleri okur. Ham HTML ile farkı raporlar: sadece JS ile gelen title, H1, içerik ve link, JS ile değişen etiket, JS'nin kaldırdığı noindex. Bkz. JavaScript render. |
 | Rapor verir | Web arayüzü, Excel (site denetimi ve taşıma projesi), 301 listesi CSV, ham JSON. |
+| Paylaşılabilir rapor verir | Müşteri veya ekip için tek HTML dosyası: özet, sağlık skoru, kritik işler, ekip başına işler (Backend, Frontend, İçerik, SEO), taşıma durumu, adres listeleri. Sunucuda kalmaz. PDF için tarayıcıda yazdırın. Bkz. Paylaşılabilir rapor. |
 
 ### Kısmen yaptığı işler
 
@@ -61,7 +62,8 @@ Bu işlerin kodu ve testi tamamdır. Gerçek sitelerde ölçüm sürüyor (bkz. 
 - Hız ölçmez (Core Web Vitals).
 - Anahtar kelime ve sıralama takibi yapmaz.
 - Zamanlanmış tarama ve izleme yapmaz.
-- Paylaşılabilir web raporu vermez. Çıktı Excel ve CSV dosyasıdır.
+- Raporu bir link ile paylaşmaz. Rapor indirilen bir dosyadır.
+- Sorunları ClickUp'a görev olarak açmaz (sıradaki sürüm).
 - Metin veya etiket önerisi yazmaz (AI yok).
 
 ## Kurulum
@@ -73,6 +75,8 @@ npm install
 npm test     # bütün testler, yaklaşık 45 saniye
 npm start
 ```
+
+Ayarlar (port, şifre, Chromium yolu, sonra API anahtarları) kök klasördeki `.env` dosyasında durur: `cp .env.example .env`. Araç bu dosyayı açılışta okur. Kabukta yazılan değer `.env` değerinden önce gelir. `.env` depoya girmez.
 
 Tarayıcıda `http://localhost:3300` adresini açın. Giriş ekranında iki seçenek var: "Site denetimi" ve "Taşıma projesi".
 
@@ -128,6 +132,8 @@ Kurallar:
 - Limitler `config/rules.json` → `checks` bölümündedir: paralel istek 8, zaman aşımı 8 sn, en fazla 1.000 dış link ve 2.000 görsel.
 
 ### JavaScript render
+
+Sadece yerel modda çalışır (`npm start`). Yayın adresinde (Render) kapalıdır.
 
 React, Vue veya Next.js (istemci tarafı) ile oluşan sitede ham HTML boştur. Araç title, H1 ve içeriği bulamaz ve JS ile gelen linkleri izlemez. Bu seçenek sayfayı gerçek bir tarayıcıda (Chromium) açar.
 
@@ -264,9 +270,39 @@ Canlı alan adı yazılmamış ek site kontrol edilemez. Ekran nedeni ve sırada
 
 ### Proje dosyası ve Excel
 
-Proje sunucuda `crawls/projects/` klasöründe durur. Projede sonuç yoktur, sadece tanım vardır: siteler, roller, tarama kimlikleri (staging ve canlı ayrı), kurallar, 301 kararları ve çıkış günü. Eski adres listesi ayrı dosyadadır (`crawls/projects/lists/`). "Projeyi indir" JSON dosyasını verir (liste dahil), "Proje yükle" geri yükler.
+Proje sunucuda `crawls/projects/` klasöründe durur. Projede sonuç yoktur, sadece tanım vardır: siteler, roller, tarama kimlikleri (staging ve canlı ayrı), kurallar, 301 kararları, çıkış günü ve rapor adları (müşteri, hazırlayan). Eski adres listesi ayrı dosyadadır (`crawls/projects/lists/`). "Projeyi indir" JSON dosyasını verir (liste dahil), "Proje yükle" geri yükler.
 
 Proje Excel'inin sayfaları: Özet, Yapılacaklar, Canlıya çıkış, Canlı doğrulama (çıkıştan sonra), Kaybolan, Yönlenen, İçerik değişimi, Taşınan, Linksiz, Bölüm kaldırıldı, Kontrol edilemedi, Yeni sayfalar, Kurallar, 301 haritası, Eski adres listesi, Öneriler. Boş gruplar için sayfa oluşmaz. Liste varsa "301 haritası", "Yapılacaklar", "Canlıya çıkış" ve "Canlı doğrulama" sayfalarında trafik sütunları vardır. "301 haritası" sayfasında "Eski sayfa nereden" sütunu da vardır (Tarama, Eski adres listesi veya Liste (çıkıştan sonra, içerik yok)).
+
+### Paylaşılabilir rapor
+
+Excel teknik kişi içindir. Rapor müşteri veya ekip içindir: kısa ve okunur. Site denetimi ve taşıma projesi ekranında "Rapor indir" düğmesine basın. Panelde üç seçim var:
+
+| Seçim | Anlamı |
+|---|---|
+| Kim okuyacak? | "Müşteri": kural kimliği yok, listede en fazla 20 satır. "Ekip": kural kimliği var, en fazla 50 satır (`rules.json` → `report.listLimit`). |
+| Müşteri adı | Raporun en üst satırı. İsteğe bağlı. |
+| Hazırlayan | Rapor tarihinin yanında görünür. İsteğe bağlı. |
+
+Taşıma projesinde iki ad projeye kaydedilir ve "Projeyi indir" dosyası onları taşır.
+
+Raporun bölümleri:
+
+| Bölüm | Site denetimi | Taşıma projesi |
+|---|---|---|
+| Özet cümle ve 4 sayı | Sağlık skoru, taranan adres, kritik sorun, uyarı | Korunan sayfa, sağlık skoru (yeni site), kritik iş, açık iş |
+| Kritik işler | Kritik kurallar | Çıkıştan önce: Canlıya çıkış listesinin kritik işleri. Çıkıştan sonra: Canlı doğrulamanın kritik işleri. |
+| Ekip başına işler | Kritik ve uyarı kuralları (bilgi notları Excel'de) | Çıkıştan önce: Yapılacaklar ve Canlıya çıkış. Çıkıştan sonra: Canlı doğrulama. |
+| Taşıma durumu | — | Altı adımın durumu |
+| Adres listeleri | Kapalı gelir, başlığa tıklayın | Kapalı gelir, başlığa tıklayın |
+
+Ekip adları: ekranda "CMS" olan iş raporda Backend, "Siz" olan iş (karar) raporda SEO olur (`rules.json` → `report.teams`).
+
+Sağlık skoru (taşıma projesi): çıkıştan önce yeni sitenin staging taramasından gelir. Staging robots.txt Google'ı kapatıyorsa bu kural skoru 40 ile sınırlamaz (`report.stagingRules`): ayar çıkışta değişir. Rapor bunu not olarak yazar. Çıkıştan sonra canlı tarama varsa skor ondan gelir.
+
+Güvenlik: rapor tek HTML dosyasıdır ve script içermez. Taranan siteden gelen her metin kaçış ile basılır. Dosyadaki `Content-Security-Policy` etiketi script, dış istek ve form çalıştırmaz. Sunucu raporu her istekte üretir ve diske yazmaz. Yayın modunda da çalışır (rapor gizli bilgi içermez).
+
+PDF: dosyayı tarayıcıda açın, listeleri açın, sonra yazdırın ("PDF olarak kaydet"). Kapalı liste bazı tarayıcılarda kapalı yazdırılır.
 
 ## Komut satırı
 
@@ -346,6 +382,7 @@ docker run -d -p 3300:3300 -v $(pwd)/crawls:/app/crawls -e APP_USER=admin -e APP
 | `CRAWL_DIR` | Kayıt klasörü | ./crawls |
 | `PUBLIC_MODE` | `1` = yayın modu (aşağıda) | — |
 | `EPHEMERAL_STORAGE` | `1` = arayüz "disk kalıcı değil" uyarısı gösterir | — |
+| `ENV_FILE` | Başka bir `.env` dosyası (testler kullanır) | ./.env |
 
 Güvenlik:
 
@@ -400,7 +437,7 @@ Durum: komut hazır. Gerçek sitelerdeki ilk ölçüm bekliyor.
 
 ### Testler
 
-`npm test` on dört test dosyası çalıştırır (yaklaşık 45 saniye). Testler internete çıkmaz: yerel test siteleri kullanır.
+`npm test` on beş test dosyası çalıştırır (yaklaşık 50 saniye). Testler internete çıkmaz: yerel test siteleri kullanır.
 
 | Test | Kontrol | Kapsam |
 |---|---|---|
@@ -417,6 +454,7 @@ Durum: komut hazır. Gerçek sitelerdeki ilk ölçüm bekliyor.
 | Canlı doğrulama | 12 | Bozuk ve temiz canlı site. Her sonuç türü, SSRF, kontrol sınırı. Temiz canlı site hiçbir iş üretmemeli. |
 | Eski adres listesi | 30 | Search Console (TR, EN), Analytics, backlink ve düz liste okuma, temizlik, birleştirme, linksiz sayfanın eski sitede bulunması, sadece eski siteye istek, trafik sırası (301 haritası, Yapılacaklar, Canlıya çıkış, Canlı doğrulama), Excel, proje dosyası, karar korunur, çıkıştan sonra eski siteye ve staging'e istek yok, çıkıştan sonra gelen adres canlıda kontrol edilir (kanıtlı ve kanıtsız). Örnek CSV test içinde üretilir. |
 | JavaScript render | 17 | Ham ↔ render birleşimi, host politikası, liste modu, tarayıcı yokken ham devam, yayın modunda kapalı, proje ayarı ve çıkıştan sonra kilit. Chromium ile: 13 yolda SSRF (iç sunucuya 0 istek), izin listesindeki host da korumadan geçer, şifre sadece taranan siteye, engel listesi, geç gelen içerik, önbellek, robots.txt, gövde ve sayfa sınırı |
+| Paylaşılabilir rapor | 14 | Ekip çevirisi, başlık alanları, kural seçimi (bilgi girmez), XSS (taranan siteden zararlı title, adres ve proje adı: script, olay özniteliği ve `javascript:` linki yok), CSP başlığı ve etiketi, kitle farkı ve liste sınırı, boş sütun, staging skoru, dosya adı, `.env` okuma (kabuk değeri önce gelir), taranmamış projede 409, adların kaydı ve proje dosyası, çıkıştan önce ve sonra proje raporu |
 | Eski yönlendirme | 13 | Yönlendirme verisi (aynı yol, dış adres, kırık hedef, zincir), tarama ve listeden gelen yönlendirme, hedefin kararını izleme (301, 410, bekler, kendi kararı ve geri alma), ana sayfa uyarısı, dış adres ve staging adresi, staging durumu, Yapılacaklar, CSV ve Excel, liste değişince karar kalır, canlı doğrulama beklentisi, staging'e ve çıkıştan sonra eski siteye istek yok |
 
 Chromium yoksa (örnek: GitHub Actions) tarayıcı gerektiren 22 kontrol "atlandı" yazar ve test geçer. Tarayıcısız kontroller her yerde çalışır. Actions'ta da çalışması için iş akışına `npm test` öncesi `npx playwright-core install --with-deps chromium-headless-shell` adımı eklenebilir (elle, denenmedi).
@@ -441,6 +479,7 @@ Güncelleme tek bir zip dosyası ile gelir (`seo-audit-vX.Y.Z.zip`). Zip dosyas�
 - HTTP başlığındaki canonical okunmaz.
 - SSRF koruması adresi istekten önce DNS ile kontrol eder. DNS cevabı istek anında değişirse (DNS rebinding) koruma bunu yakalamaz.
 - Veritabanı yoktur. Her tarama bir JSON dosyasıdır.
+- Paylaşılabilir rapor bir link değildir. Dosyayı siz gönderirsiniz. Logo alanı yok.
 
 ## Yol haritası
 
@@ -453,12 +492,13 @@ Tamamlanan:
 - Kod incelemesi ve güvenlik düzeltmeleri, doğrulama komutu
 - Eski adres listesi (dosya ile): linksiz eski sayfaları bulma, bütün listeler trafiğe göre sıralı, çıkıştan sonra gelen adresler canlı doğrulamada
 - Eski sitede yönlenen adres için 301: son hedefin yeni adresine tek adım
-- JavaScript render (Playwright, isteğe bağlı): ham HTML ile render farkı, sadece JS ile gelen linkler
+- JavaScript render (Playwright, isteğe bağlı, sadece yerel): ham HTML ile render farkı, sadece JS ile gelen linkler
+- Paylaşılabilir rapor (tek HTML dosyası, müşteri ve ekip için)
 
 Sıradaki işler (sıra ile):
 
 1. Doğrulama: üç gerçek taramada Screaming Frog ile karşılaştırma
-2. Paylaşılabilir rapor ve ClickUp işi
+2. ClickUp işi: sorunları ve taşıma işlerini görev olarak açma (Free plan sınırı: dakikada 100 istek)
 3. Canlıdan sonra izleme (1, 7 ve 30 gün)
 
 Sonra konuşulacak: AI önerileri (title, meta, alt metin, anlam benzerliği ile 301 eşleştirme), Core Web Vitals.

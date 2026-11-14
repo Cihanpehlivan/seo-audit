@@ -103,6 +103,15 @@
       "the", "and", "of", "in", "for", "to", "with", "what", "is", "how", "on", "at", "by", "or",
       "le", "la", "les", "des", "du", "et", "pour", "html", "htm", "php", "aspx", "index", "www"]
   },
+  "report": {
+    "_aciklama": "v0.14.0: paylaşılabilir rapor. teams: ekranda kullanılan ekip adının rapordaki adı (rapor ve ClickUp dört ekip kullanır). minSeverity: rapora giren en düşük önem (critical, warning, notice). listLimit: bir adres listesinde en fazla satır (kitle başına). stagingRules: staging sitesinde sağlık skoruna girmeyen site kuralları (çıkışta değişir).",
+    "teams": { "CMS": "Backend", "Siz": "SEO" },
+    "teamOrder": ["Backend", "Frontend", "İçerik", "SEO"],
+    "minSeverity": "warning",
+    "listLimit": { "musteri": 20, "ekip": 50 },
+    "stagingRules": ["robots-blocks-site"],
+    "maxNameLength": 80
+  },
   "render": {
     "_aciklama": "JavaScript render (v0.13.0). Tarama ayarında açılır. Sayfa Chromium içinde açılır, JS çalışır, DOM okunur. Her istek Node kontrol noktasından geçer (SSRF koruması, robots.txt, zaman aşımı, gövde sınırı). concurrency: aynı anda en fazla kaç sayfa render edilir. timeoutMs: bir sayfanın bütün render süresi. quietMs: ağ bu kadar sessiz kalınca render biter. maxWaitMs: load olayından sonra en fazla bekleme. maxPages: bir taramada en fazla kaç sayfa render edilir (sonrası ham okunur, sayfa işaret alır). maxRequestsPerPage: bir sayfanın en fazla alt isteği. cacheMb: JS ve CSS önbelleği (tarama boyunca). blockTypes: bu tür istekler hiç gönderilmez. blockHosts: bu alan adları ve alt alan adları her zaman engelli (izin listesine yazılsa da). Taranan site ve alt alan adları izinlidir; başka alan adı tarama ayarındaki izin listesine yazılmalı. rawContentRatio: ham ana içerik render içeriğinin bu oranından azsa \"İçerik sadece JS ile\". contentMinWords: bu kuralın çalışması için render içeriğinin en az kelime sayısı. jsLinkRatio ve jsLinkMin: iç linklerin bu oranı (ve en az bu sayıda link) sadece JS ile geliyorsa kural tetiklenir. shellRatio, shellMinPages, shellMaxWords: ham taramada 200 veren HTML sayfaların en az bu oranı (en az bu sayıda sayfa) boş title veya H1, en fazla shellMaxWords kelime ve script içeriyorsa site JS kabuğu gibi görünür. Başlangıç sayfası böyleyse ve ham HTML'de hiç iç link yoksa da (JS sitesinin ham taraması çoğu zaman tek sayfa bulur).",
     "concurrency": 2,

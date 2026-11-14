@@ -8,6 +8,7 @@ import { normalizeUrl } from './normalize.js';
 import { parseRule } from './compare.js';
 import { ID_RE } from './store.js';
 import { cleanDecision } from './redirectmap.js';
+import { cleanReportInfo } from './report.js';
 
 export const PID_RE = /^p-[a-z0-9]{8,24}$/;
 // v0.10.0: 'paths' (same domain, new paths) merged into 'same' (one domain). Both did the same work: the tool finds path changes.
@@ -73,6 +74,8 @@ export function validateProject(input, { maxExtras = 3, maxRules = 50, maxDecisi
     rules.push(p.drop ? { from: p.from, drop: true } : { from: p.from, site, to: p.to });
   });
   const out = { name, structure, sites, rules };
+  // v0.14.0: head of the shareable report (client name, author). Sent: it replaces the saved value (also when empty).
+  if (input.report && typeof input.report === 'object' && !Array.isArray(input.report)) out.report = cleanReportInfo(input.report);
   // 301 map decisions (v0.8.0). Only read from a project file (import). The browser changes them with POST /map.
   if (input.map && typeof input.map === 'object' && !Array.isArray(input.map)) out.map = cleanMap(input.map, sites, maxDecisions);
   // v0.11.0: the launch mark (day and crawl ids before launch). Only read from a project file; POST /launch sets it.
